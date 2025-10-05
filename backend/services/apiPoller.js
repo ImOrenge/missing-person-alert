@@ -7,10 +7,6 @@ class APIPoller {
   constructor(wsManager) {
     this.wsManager = wsManager;
     this.lastFetchTime = new Date();
-    this.notifiedIds = new Set();
-
-    // 최대 10,000개의 ID만 메모리에 유지 (메모리 누수 방지)
-    this.maxIdCacheSize = 10000;
 
     // Geocoder 설정 (Google Maps API 또는 무료 대안 사용)
     this.geocoder = NodeGeocoder({
@@ -21,33 +17,28 @@ class APIPoller {
     // 주소-좌표 캐시 (반복 조회 방지)
     this.locationCache = new Map();
 
-    // 중복 필터링을 위한 상세 정보 저장 (ID 외에 이름+나이도 체크)
-    this.personFingerprints = new Map(); // 지문: { id, name, age, timestamp }
-
-    // 최근 데이터 캐시 (새 연결 시 전송용)
-    this.recentDataCache = [];
-
-    // 새 클라이언트 연결 시 초기 데이터 전송
-    this.wsManager.setOnNewConnection((client) => {
-      if (this.recentDataCache.length > 0) {
-        console.log(`🔄 새 클라이언트에게 최근 ${this.recentDataCache.length}건 전송`);
-        this.wsManager.sendToClient(client, 'NEW_MISSING_PERSON', this.recentDataCache);
+    // 새 클라이언트 연결 시 Firebase에서 데이터 전송
+    this.wsManager.setOnNewConnection(async (client) => {
+      const recentData = await firebaseService.getMissingPersons(10);
+      if (recentData.length > 0) {
+        console.log(`🔄 새 클라이언트에게 Firebase에서 ${recentData.length}건 전송`);
+        this.wsManager.sendToClient(client, 'NEW_MISSING_PERSON', recentData);
       }
     });
   }
 
   /**
-   * 안전드림 실종아동 데이터 폴링
+   * 안전드림 실종아동 데이터 폴링 (전체 페이지, 역순)
    * 웹사이트: https://www.safe182.go.kr/home/lcm/lcmMssList.do
    */
   async pollMissingPersonsAPI() {
     try {
       console.log('🔍 안전드림 실종아동 데이터 조회 시도...');
 
-      // 안전드림 웹사이트에서 직접 데이터 조회
-      const response = await axios.get('https://www.safe182.go.kr/home/lcm/lcmMssList.do', {
+      // 1단계: 첫 페이지 조회하여 총 페이지 수 확인
+      const firstPageResponse = await axios.get('https://www.safe182.go.kr/home/lcm/lcmMssList.do', {
         params: {
-          rptDscd: '2',  // 실종아동등
+          rptDscd: '2',
           pageIndex: '1',
           pageUnit: '20'
         },
@@ -57,49 +48,114 @@ class APIPoller {
         timeout: 15000
       });
 
-      if (!response.data) {
+      if (!firstPageResponse.data) {
         console.warn('⚠️  안전드림 응답 없음. 샘플 데이터를 사용합니다.');
         return this.generateSampleMissingPersons();
       }
 
-      // HTML 응답 파싱
-      if (typeof response.data === 'string' && response.data.includes('<!DOCTYPE')) {
-        console.log('📄 HTML 응답 수신 - 데이터 파싱 시작...');
-        const items = await this.parseHTMLResponse(response.data);
+      // HTML에서 총 페이지 수 파싱
+      const totalPages = this.extractTotalPages(firstPageResponse.data);
+      console.log(`📊 총 ${totalPages}개 페이지 발견`);
 
-        if (!items || items.length === 0) {
-          console.log('📭 파싱된 실종자 정보 없음');
-          return;
+      // 2단계: 1페이지부터 3페이지까지 파싱
+      let allItems = [];
+      let totalNewCount = 0;
+      let totalDuplicateCount = 0;
+
+      const startPage = 1;
+      const endPage = Math.min(3, totalPages);
+
+      for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
+        console.log(`\n📄 페이지 ${pageNum}/${totalPages} 파싱 중...`);
+
+        const response = await axios.get('https://www.safe182.go.kr/home/lcm/lcmMssList.do', {
+          params: {
+            rptDscd: '2',
+            pageIndex: pageNum.toString(),
+            pageUnit: '20'
+          },
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          },
+          timeout: 15000
+        });
+
+        if (typeof response.data === 'string' && response.data.includes('<!DOCTYPE')) {
+          const items = await this.parseHTMLResponse(response.data);
+
+          if (items && items.length > 0) {
+            console.log(`  ✅ ${items.length}건 파싱 완료`);
+            allItems = allItems.concat(items);
+          }
         }
 
-        console.log(`✅ ${items.length}건의 실종자 데이터 파싱 완료`);
-
-        // 중복 필터링 (향상된 메커니즘)
-        const newItems = this.filterDuplicates(items);
-
-        // 최근 데이터 캐시 업데이트 (새 연결 시 전송용)
-        this.recentDataCache = items.slice(0, Math.min(10, items.length));
-
-        if (newItems.length > 0) {
-          console.log(`🚨 새로운 실종자 ${newItems.length}건 발견`);
-
-          // Firebase에 저장
-          await firebaseService.saveMissingPersons(newItems);
-
-          // WebSocket으로 전송
-          this.wsManager.broadcast('NEW_MISSING_PERSON', newItems);
-
-          // 중복 방지 캐시에 추가
-          this.addToCache(newItems);
-
-          // 캐시 크기 제한
-          this.limitCacheSize();
-          this.lastFetchTime = new Date();
-        } else {
-          console.log('📭 새로운 실종자 정보 없음 (모두 1시간 이내 알림됨)');
-        }
-        return;
+        // API 부하 방지 (페이지 간 0.5초 대기)
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
+
+      // 3단계: 3달 이상 지난 데이터 필터링
+      const threeMonthsAgo = Date.now() - (90 * 24 * 60 * 60 * 1000);
+      const filteredItems = allItems.filter(item => {
+        try {
+          const missingDate = new Date(item.missingDate).getTime();
+          if (missingDate < threeMonthsAgo) {
+            console.log(`  🗑️  3달 지난 데이터 폐기: ${item.name} (${item.missingDate})`);
+            return false;
+          }
+          return true;
+        } catch (error) {
+          // 날짜 파싱 실패 시 유지
+          return true;
+        }
+      });
+
+      console.log(`\n📊 필터링 결과: ${allItems.length}건 → ${filteredItems.length}건 (${allItems.length - filteredItems.length}건 폐기)`);
+
+      // 4단계: 실종일 기준으로 정렬 (최신순)
+      filteredItems.sort((a, b) => {
+        try {
+          const dateA = new Date(a.missingDate).getTime();
+          const dateB = new Date(b.missingDate).getTime();
+          return dateB - dateA; // 내림차순 (최신순)
+        } catch (error) {
+          return 0;
+        }
+      });
+
+      console.log(`📅 데이터 정렬 완료 (최신순)`);
+
+      // 5단계: Firebase에 저장 (중복 체크 포함)
+      if (filteredItems.length > 0) {
+        const saveResult = await firebaseService.saveMissingPersons(filteredItems);
+        totalNewCount = saveResult.saved;
+        totalDuplicateCount = saveResult.duplicates;
+
+        if (saveResult.saved > 0) {
+          console.log(`💾 ${saveResult.saved}건 저장 (중복 ${saveResult.duplicates}건 제외)`);
+        } else {
+          console.log(`⏭️  모두 중복 (${saveResult.duplicates}건)`);
+        }
+      }
+
+      // 6단계: 결과 요약 및 WebSocket 전송
+      console.log(`\n📊 전체 파싱 완료: 신규 ${totalNewCount}건, 중복 ${totalDuplicateCount}건`);
+
+      if (totalNewCount > 0) {
+        // Firebase에서 최근 저장된 데이터 조회
+        const recentlySaved = await firebaseService.getMissingPersons(totalNewCount);
+
+        // WebSocket으로 신규 실종자만 전송
+        if (recentlySaved.length > 0) {
+          this.wsManager.broadcast('NEW_MISSING_PERSON', recentlySaved);
+          console.log(`📡 ${recentlySaved.length}건 WebSocket 전송 완료`);
+        }
+
+        this.lastFetchTime = new Date();
+      } else {
+        console.log('📭 새로운 실종자 정보 없음');
+      }
+
+      return;
 
       // JSON 응답인 경우 처리
       const items = this.extractItems(response.data);
@@ -147,6 +203,53 @@ class APIPoller {
   }
 
   /**
+   * HTML에서 총 페이지 수 추출
+   */
+  extractTotalPages(html) {
+    try {
+      const $ = cheerio.load(html);
+
+      // 페이지네이션에서 마지막 페이지 번호 찾기
+      // 일반적인 패턴: <a>1</a> <a>2</a> ... <a>마지막</a>
+      const pageLinks = $('a[href*="pageIndex"]');
+
+      let maxPage = 1;
+
+      pageLinks.each((index, element) => {
+        const href = $(element).attr('href') || '';
+        const text = $(element).text().trim();
+
+        // href에서 pageIndex 파라미터 추출
+        const pageMatch = href.match(/pageIndex[=:](\d+)/);
+        if (pageMatch) {
+          const pageNum = parseInt(pageMatch[1]);
+          if (pageNum > maxPage) {
+            maxPage = pageNum;
+          }
+        }
+
+        // 텍스트가 숫자인 경우도 체크
+        const textNum = parseInt(text);
+        if (!isNaN(textNum) && textNum > maxPage) {
+          maxPage = textNum;
+        }
+      });
+
+      // 페이지 정보가 없으면 기본값 1
+      if (maxPage === 0) {
+        maxPage = 1;
+      }
+
+      console.log(`  📄 페이지네이션 분석: 최대 페이지 = ${maxPage}`);
+      return maxPage;
+
+    } catch (error) {
+      console.error('⚠️ 총 페이지 수 추출 실패:', error.message);
+      return 1; // 실패 시 기본값
+    }
+  }
+
+  /**
    * 안전드림 HTML 응답 파싱
    */
   async parseHTMLResponse(html) {
@@ -167,8 +270,8 @@ class APIPoller {
         return [];
       }
 
-      // 중복 방지를 위한 ID Set
-      const processedIds = new Set();
+      // 중복 방지를 위한 fingerprint Set (이름+나이+성별)
+      const processedFingerprints = new Set();
 
       // 각 링크의 부모 li 요소에서 데이터 추출
       links.each((index, element) => {
@@ -178,44 +281,40 @@ class APIPoller {
 
           // 링크에서 ID 추출
           const link = $link.attr('href') || '';
-
           const idMatch = link.match(/msspsnIdntfccd=(\d+)/);
-          const id = idMatch ? idMatch[1] : `safe182_${Date.now()}_${index}`;
 
-          // 이미 처리한 ID면 건너뛰기
-          if (processedIds.has(id)) {
+          // 먼저 이름과 나이를 추출하여 fingerprint 생성
+          const fullText = $item.text().trim();
+          const nameAgeMatch = fullText.match(/([가-힣]{2,})\s*\((\d+)세\)/);
+
+          if (!nameAgeMatch) {
+            return; // 이름 정보 없으면 건너뛰기
+          }
+
+          const name = nameAgeMatch[1];
+          const age = parseInt(nameAgeMatch[2]);
+
+          // 성별 추출
+          const genderMatch = fullText.match(/(남자|여자|남|여)/);
+          const gender = genderMatch ? (genderMatch[1] === '남자' || genderMatch[1] === '남' ? 'M' : 'F') : 'U';
+
+          // Fingerprint 생성 (이름+나이+성별)
+          const fingerprint = `${name}_${age}_${gender}`;
+
+          // 이미 처리한 동일인이면 건너뛰기
+          if (processedFingerprints.has(fingerprint)) {
+            console.log(`  ⏭️  중복 건너뜀: ${name} (${age}세, ${gender})`);
             return;
           }
-          processedIds.add(id);
+          processedFingerprints.add(fingerprint);
+
+          // ID는 URL에서 추출하거나, fingerprint를 해시하여 생성
+          const id = idMatch ? idMatch[1] : `safe182_${Buffer.from(fingerprint).toString('base64').replace(/=/g, '')}`;
 
           console.log(`\n--- 항목 ${items.length + 1} ---`);
           console.log('링크:', link);
           console.log('ID:', id);
-
-          // 전체 텍스트 가져오기
-          const fullText = $item.text().trim();
-          console.log('텍스트 샘플:', fullText.substring(0, 300));
-
-          // 이름과 나이 추출 (예: "유영복(69세)")
-          const nameAgeMatch = fullText.match(/([가-힣]{2,})\s*\((\d+)세\)/);
-          const name = nameAgeMatch ? nameAgeMatch[1] : '미상';
-          const age = nameAgeMatch ? parseInt(nameAgeMatch[2]) : 0;
-
-          // 이름이 미상이면 건너뛰기
-          if (name === '미상') {
-            console.log('  ⚠️ 이름 정보 없음 - 건너뜀');
-            return;
-          }
-
-          console.log('이름:', name, '나이:', age);
-
-          // 성별 추출 (예: "남자", "여자", "남", "여")
-          const genderMatch = fullText.match(/(남자|여자|남|여)/);
-          let gender = 'U';
-          if (genderMatch) {
-            const g = genderMatch[1];
-            gender = (g === '남자' || g === '남') ? 'M' : 'F';
-          }
+          console.log('이름:', name, '나이:', age, '성별:', gender);
 
           // 대상구분 추출 (예: "치매", "아동", "장애")
           const targetMatch = fullText.match(/(치매|아동|장애|지적장애)/);
@@ -234,7 +333,7 @@ class APIPoller {
           if ($img.length > 0) {
             const imgSrc = $img.attr('src');
 
-            if (imgSrc) {
+            if (imgSrc && !imgSrc.includes('no_image') && !imgSrc.includes('noimage')) {
               // 절대 경로인 경우 그대로 사용
               if (imgSrc.startsWith('http')) {
                 photo = imgSrc;
@@ -249,7 +348,11 @@ class APIPoller {
               }
 
               console.log('이미지 URL:', photo);
+            } else {
+              console.log('이미지 없음 또는 no_image 플레이스홀더');
             }
+          } else {
+            console.log('img 태그 없음');
           }
 
           // 현재나이 추출
@@ -583,120 +686,6 @@ class APIPoller {
   }
 
 
-  /**
-   * 중복 필터링 (향상된 메커니즘)
-   * ID, 이름+나이+성별 조합으로 중복 체크
-   */
-  filterDuplicates(items) {
-    const newItems = [];
-
-    for (const item of items) {
-      const isDuplicate = this.isDuplicate(item);
-
-      if (!isDuplicate) {
-        newItems.push(item);
-      } else {
-        console.log(`  ⚠️ 중복 항목 제외: ${item.name} (${item.age}세, ID: ${item.id})`);
-      }
-    }
-
-    return newItems;
-  }
-
-  /**
-   * 중복 여부 확인
-   */
-  isDuplicate(item) {
-    // 1. ID로 중복 체크
-    if (this.notifiedIds.has(item.id)) {
-      return true;
-    }
-
-    // 2. 지문(이름+나이+성별)으로 중복 체크 (1시간 이내만)
-    const fingerprint = this.createFingerprint(item);
-    if (this.personFingerprints.has(fingerprint)) {
-      const cached = this.personFingerprints.get(fingerprint);
-      // 1시간 이내 데이터만 중복으로 간주
-      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-      if (cached.timestamp < oneHourAgo) {
-        // 오래된 데이터는 중복으로 간주하지 않음
-        console.log(`  🔄 캐시 만료로 재전송: ${item.name}`);
-        this.personFingerprints.delete(fingerprint);
-        this.notifiedIds.delete(item.id);
-        return false;
-      }
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * 실종자 지문 생성 (이름+나이+성별 조합)
-   */
-  createFingerprint(item) {
-    return `${item.name}_${item.age}_${item.gender}`;
-  }
-
-  /**
-   * 캐시에 항목 추가
-   */
-  addToCache(items) {
-    items.forEach(item => {
-      // ID 캐시에 추가
-      this.notifiedIds.add(item.id);
-
-      // 지문 캐시에 추가
-      const fingerprint = this.createFingerprint(item);
-      this.personFingerprints.set(fingerprint, {
-        id: item.id,
-        name: item.name,
-        age: item.age,
-        gender: item.gender,
-        timestamp: new Date()
-      });
-    });
-
-    console.log(`📝 캐시 업데이트: ID ${this.notifiedIds.size}개, 지문 ${this.personFingerprints.size}개`);
-  }
-
-  /**
-   * 캐시 크기 제한 (메모리 관리)
-   */
-  limitCacheSize() {
-    // ID 캐시 크기 제한
-    if (this.notifiedIds.size > this.maxIdCacheSize) {
-      const idsArray = Array.from(this.notifiedIds);
-      const toRemove = idsArray.slice(0, this.notifiedIds.size - this.maxIdCacheSize);
-      toRemove.forEach(id => this.notifiedIds.delete(id));
-      console.log(`🗑️  ${toRemove.length}개의 오래된 ID 캐시 정리`);
-    }
-
-    // 지문 캐시 크기 제한 (오래된 항목 제거)
-    if (this.personFingerprints.size > this.maxIdCacheSize) {
-      const fingerprintsArray = Array.from(this.personFingerprints.entries());
-
-      // 타임스탬프 기준으로 정렬 (오래된 것부터)
-      fingerprintsArray.sort((a, b) => a[1].timestamp - b[1].timestamp);
-
-      const toRemoveCount = this.personFingerprints.size - this.maxIdCacheSize;
-      for (let i = 0; i < toRemoveCount; i++) {
-        this.personFingerprints.delete(fingerprintsArray[i][0]);
-      }
-
-      console.log(`🗑️  ${toRemoveCount}개의 오래된 지문 캐시 정리`);
-    }
-  }
-
-  /**
-   * 캐시 초기화 (디버깅용)
-   */
-  clearCache() {
-    this.notifiedIds.clear();
-    this.personFingerprints.clear();
-    this.locationCache.clear();
-    console.log('🗑️  모든 캐시가 초기화되었습니다');
-  }
 
   /**
    * 샘플 데이터 생성 (테스트용 - 안전드림 API 형식)

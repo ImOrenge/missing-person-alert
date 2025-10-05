@@ -1,6 +1,84 @@
 {
   "rules": {
     ".read": true,
-    ".write": true
+    ".write": true,
+
+    "missingPersons": {
+      ".indexOn": ["updatedAt", "type", "status"],
+
+      "$personId": {
+        ".validate": "newData.hasChildren(['id', 'name', 'age', 'gender', 'location', 'missingDate', 'type', 'status', 'updatedAt'])",
+
+        "id": {
+          ".validate": "newData.isString() && newData.val() == $personId"
+        },
+        "name": {
+          ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 50"
+        },
+        "age": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 150"
+        },
+        "gender": {
+          ".validate": "newData.isString() && (newData.val() == 'M' || newData.val() == 'F' || newData.val() == 'U')"
+        },
+        "location": {
+          ".validate": "newData.hasChildren(['lat', 'lng', 'address'])",
+          "lat": {
+            ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90"
+          },
+          "lng": {
+            ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180"
+          },
+          "address": {
+            ".validate": "newData.isString()"
+          }
+        },
+        "photo": {
+          ".validate": "newData.isString() || newData.val() == null"
+        },
+        "description": {
+          ".validate": "newData.isString()"
+        },
+        "missingDate": {
+          ".validate": "newData.isString()"
+        },
+        "type": {
+          ".validate": "newData.isString() && (newData.val() == 'missing_child' || newData.val() == 'disabled' || newData.val() == 'dementia')"
+        },
+        "status": {
+          ".validate": "newData.isString() && (newData.val() == 'active' || newData.val() == 'found' || newData.val() == 'archived')"
+        },
+        "height": {
+          ".validate": "newData.isNumber() || newData.val() == null"
+        },
+        "weight": {
+          ".validate": "newData.isNumber() || newData.val() == null"
+        },
+        "clothes": {
+          ".validate": "newData.isString() || newData.val() == null"
+        },
+        "updatedAt": {
+          ".validate": "newData.isNumber()"
+        }
+      }
+    },
+
+    "archives": {
+      ".indexOn": [".key"],
+
+      "$dateKey": {
+        ".validate": "newData.hasChildren(['timestamp', 'data', 'count'])",
+
+        "timestamp": {
+          ".validate": "newData.isNumber()"
+        },
+        "data": {
+          ".validate": "newData.exists()"
+        },
+        "count": {
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        }
+      }
+    }
   }
 }
