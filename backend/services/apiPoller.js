@@ -22,6 +22,17 @@ class APIPoller {
 
     // 중복 필터링을 위한 상세 정보 저장 (ID 외에 이름+나이도 체크)
     this.personFingerprints = new Map(); // 지문: { id, name, age, timestamp }
+
+    // 최근 데이터 캐시 (새 연결 시 전송용)
+    this.recentDataCache = [];
+
+    // 새 클라이언트 연결 시 초기 데이터 전송
+    this.wsManager.setOnNewConnection((client) => {
+      if (this.recentDataCache.length > 0) {
+        console.log(`🔄 새 클라이언트에게 최근 ${this.recentDataCache.length}건 전송`);
+        this.wsManager.sendToClient(client, 'NEW_MISSING_PERSON', this.recentDataCache);
+      }
+    });
   }
 
   /**
@@ -65,6 +76,9 @@ class APIPoller {
         // 중복 필터링 (향상된 메커니즘)
         const newItems = this.filterDuplicates(items);
 
+        // 최근 데이터 캐시 업데이트 (새 연결 시 전송용)
+        this.recentDataCache = items.slice(0, Math.min(10, items.length));
+
         if (newItems.length > 0) {
           console.log(`🚨 새로운 실종자 ${newItems.length}건 발견`);
 
@@ -79,14 +93,6 @@ class APIPoller {
           this.lastFetchTime = new Date();
         } else {
           console.log('📭 새로운 실종자 정보 없음 (모두 1시간 이내 알림됨)');
-
-          // 연결된 클라이언트가 있지만 캐시된 데이터만 있는 경우
-          // 최근 1시간 이내 데이터를 다시 전송 (새로고침 대응)
-          if (this.wsManager.getClientCount() > 0 && items.length > 0) {
-            const recentItems = items.slice(0, Math.min(10, items.length));
-            console.log(`🔄 최근 ${recentItems.length}건 재전송 (새로고침 대응)`);
-            this.wsManager.broadcast('NEW_MISSING_PERSON', recentItems);
-          }
         }
         return;
       }
