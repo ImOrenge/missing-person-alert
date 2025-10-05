@@ -1,0 +1,178 @@
+import React from 'react';
+import {
+  AdvancedMarker,
+  Pin,
+  InfoWindow,
+  useAdvancedMarkerRef
+} from '@vis.gl/react-google-maps';
+import { MissingPerson } from '../types';
+import { toast } from 'react-toastify';
+
+interface Props {
+  person: MissingPerson;
+  isSelected: boolean;
+  isHighlighted?: boolean;
+  onClick: () => void;
+  onClose: () => void;
+}
+
+// 유형별 색상
+function getColorByType(type: string): string {
+  switch (type) {
+    case 'missing_child':
+      return '#e74c3c'; // 빨강 (아동)
+    case 'disabled':
+      return '#f39c12'; // 주황 (장애인)
+    case 'dementia':
+      return '#9b59b6'; // 보라 (치매)
+    default:
+      return '#95a5a6';
+  }
+}
+
+// 유형 레이블
+function getTypeLabel(type: string): string {
+  switch (type) {
+    case 'missing_child':
+      return '실종 아동';
+    case 'disabled':
+      return '지적장애인';
+    case 'dementia':
+      return '치매환자';
+    default:
+      return '기타';
+  }
+}
+
+// 공유 기능
+function shareInfo(person: MissingPerson) {
+  if (navigator.share) {
+    navigator
+      .share({
+        title: `실종자 정보: ${person.name}`,
+        text: `${person.name} (${person.age}세)님이 ${person.location.address}에서 실종되었습니다.`,
+        url: window.location.href
+      })
+      .catch((error) => console.log('공유 실패:', error));
+  } else {
+    // 폴백: 클립보드 복사
+    const text = `실종자 정보\n이름: ${person.name}\n나이: ${person.age}세\n장소: ${person.location.address}`;
+    navigator.clipboard.writeText(text).then(() => {
+      toast.info('정보가 클립보드에 복사되었습니다');
+    });
+  }
+}
+
+const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, onClick, onClose }: Props) => {
+  const [markerRef, marker] = useAdvancedMarkerRef();
+
+  // 강조 상태에 따라 스케일과 테두리 조정
+  const scale = isHighlighted || isSelected ? 1.5 : 1.2;
+  const borderColor = isHighlighted ? '#FFD700' : '#000'; // 호버 시 금색 테두리
+
+  return (
+    <>
+      <AdvancedMarker
+        ref={markerRef}
+        position={person.location}
+        onClick={onClick}
+        title={person.name}
+        zIndex={isHighlighted || isSelected ? 1000 : 1}
+      >
+        <Pin
+          background={getColorByType(person.type)}
+          glyphColor="#fff"
+          borderColor={borderColor}
+          scale={scale}
+        />
+      </AdvancedMarker>
+
+      {isSelected && marker && (
+        <InfoWindow anchor={marker} onCloseClick={onClose}>
+          <div className="info-window-content" style={{ minWidth: '250px', maxWidth: '350px' }}>
+            {person.photo && (
+              <img
+                src={person.photo}
+                alt={person.name}
+                style={{
+                  width: '100%',
+                  maxHeight: '200px',
+                  objectFit: 'cover',
+                  borderRadius: '8px',
+                  marginBottom: '10px'
+                }}
+                onError={(e) => {
+                  // 이미지 로드 실패 시 숨기기
+                  (e.target as HTMLImageElement).style.display = 'none';
+                }}
+              />
+            )}
+
+            <h3 style={{ margin: '10px 0', fontSize: '18px', fontWeight: 'bold' }}>
+              {person.name}
+            </h3>
+
+            <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
+              <p style={{ margin: '5px 0' }}>
+                <strong>나이:</strong> {person.age}세
+              </p>
+              <p style={{ margin: '5px 0' }}>
+                <strong>성별:</strong> {person.gender === 'M' ? '남성' : '여성'}
+              </p>
+              <p style={{ margin: '5px 0' }}>
+                <strong>실종 장소:</strong> {person.location.address}
+              </p>
+              <p style={{ margin: '5px 0' }}>
+                <strong>실종 일시:</strong>{' '}
+                {new Date(person.missingDate).toLocaleString('ko-KR')}
+              </p>
+              <p style={{ margin: '5px 0' }}>
+                <strong>유형:</strong> {getTypeLabel(person.type)}
+              </p>
+              <p style={{ margin: '5px 0' }}>
+                <strong>특징:</strong> {person.description}
+              </p>
+            </div>
+
+            <div style={{ marginTop: '15px', display: 'flex', gap: '10px' }}>
+              <button
+                onClick={() => window.open('tel:112')}
+                style={{
+                  flex: 1,
+                  padding: '10px',
+                  backgroundColor: '#e74c3c',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '5px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '14px'
+                }}
+              >
+                112 신고
+              </button>
+              <button
+                onClick={() => shareInfo(person)}
+                style={{
+                  flex: 1,
+                  padding: '10px',
+                  backgroundColor: '#3498db',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '5px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                  fontSize: '14px'
+                }}
+              >
+                공유하기
+              </button>
+            </div>
+          </div>
+        </InfoWindow>
+      )}
+    </>
+  );
+});
+
+export default MarkerWithInfo;

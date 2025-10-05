@@ -1,0 +1,26 @@
+/* Tailwind CSS로 대체되어 대부분 제거 */
+
+/* Google Maps 관련 스타일만 유지 */
+.gm-style .gm-style-iw-c {
+  padding: 0 !important;
+  border-radius: 12px !important;
+  overflow: hidden !important;
+}
+
+.gm-style .gm-style-iw-d {
+  overflow: auto !important;
+  max-height: 400px !important;
+}
+
+/* 토스트 알림 커스텀 */
+.Toastify__toast--error {
+  background-color: #ef4444 !important;
+}
+
+.Toastify__toast--success {
+  background-color: #10b981 !important;
+}
+
+.Toastify__toast--warning {
+  background-color: #f59e0b !important;
+}
