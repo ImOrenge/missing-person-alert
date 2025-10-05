@@ -9,7 +9,9 @@ import AnnouncementBanner from './components/AnnouncementBanner';
 import { useEmergencyStore } from './stores/emergencyStore';
 import { useEmergencyWebSocket } from './hooks/useEmergencyWebSocket';
 import { useFirebaseSync } from './hooks/useFirebaseSync';
-import { ToastContainer } from 'react-toastify';
+import { ToastContainer, toast } from 'react-toastify';
+import { onAuthChange, logout as firebaseLogout } from './services/firebase';
+import type { User } from 'firebase/auth';
 import 'react-toastify/dist/ReactToastify.css';
 
 const ANNOUNCEMENTS = [
@@ -25,8 +27,7 @@ function App() {
   const [showFilters, setShowFilters] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [userName, setUserName] = useState('');
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [notifications, setNotifications] = useState(true);
   const [currentAnnouncementIndex, setCurrentAnnouncementIndex] = useState(0);
 
@@ -36,6 +37,18 @@ function App() {
   // Firebase 실시간 동기화
   useFirebaseSync();
 
+  // Firebase 인증 상태 감지
+  useEffect(() => {
+    const unsubscribe = onAuthChange((user) => {
+      setCurrentUser(user);
+      if (user) {
+        toast.success(`환영합니다, ${user.displayName || user.email}님!`);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   // 공지사항 자동 슬라이드
   useEffect(() => {
     const interval = setInterval(() => {
@@ -44,15 +57,14 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleLogin = (name: string, email: string) => {
-    setIsLoggedIn(true);
-    setUserName(name);
-    setShowLoginModal(false);
-  };
-
-  const handleLogout = () => {
-    setIsLoggedIn(false);
-    setUserName('');
+  const handleLogout = async () => {
+    const result = await firebaseLogout();
+    if (result.success) {
+      setCurrentUser(null);
+      toast.info('로그아웃되었습니다');
+    } else {
+      toast.error('로그아웃 실패');
+    }
   };
 
   return (
@@ -90,11 +102,11 @@ function App() {
             </div>
 
             {/* 로그인/로그아웃 */}
-            {isLoggedIn ? (
+            {currentUser ? (
               <div className="flex items-center gap-2">
                 <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-red-800 rounded-full">
                   <UserCircle size={18} />
-                  <span className="text-sm">{userName}</span>
+                  <span className="text-sm">{currentUser.displayName || currentUser.email}</span>
                 </div>
                 <button
                   onClick={handleLogout}
@@ -158,7 +170,6 @@ function App() {
       <LoginModal
         isOpen={showLoginModal}
         onClose={() => setShowLoginModal(false)}
-        onLogin={handleLogin}
       />
 
       {/* 토스트 알림 */}

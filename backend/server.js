@@ -14,6 +14,10 @@ const WS_PORT = process.env.WS_PORT || 8080;
 app.use(cors());
 app.use(express.json());
 
+// 라우터
+const authRouter = require('./routes/auth');
+app.use('/api/auth', authRouter);
+
 // WebSocket 서버 초기화
 const wsManager = new WebSocketManager(WS_PORT);
 console.log(`🔌 WebSocket 서버가 포트 ${WS_PORT}에서 실행 중`);

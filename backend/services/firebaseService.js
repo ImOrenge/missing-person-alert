@@ -1,5 +1,6 @@
 const { initializeApp } = require('firebase/app');
 const { getDatabase, ref, update, get, query, orderByChild, limitToLast, remove } = require('firebase/database');
+const { getAuth } = require('firebase/auth');
 const { validateMissingPerson, normalizeMissingPerson, validateArchive } = require('../schemas/firebaseSchema');
 
 class FirebaseService {
@@ -18,6 +19,7 @@ class FirebaseService {
 
       const app = initializeApp(firebaseConfig);
       this.db = getDatabase(app);
+      this.auth = getAuth(app);
       console.log('✅ Firebase 초기화 완료');
     } catch (error) {
       console.error('❌ Firebase 초기화 실패:', error.message);
