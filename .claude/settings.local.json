@@ -3,7 +3,9 @@
     "allow": [
       "Bash(mkdir:*)",
       "Bash(npm install:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(cat:*)",
+      "Bash(firebase deploy:*)"
     ],
     "deny": [],
     "ask": []

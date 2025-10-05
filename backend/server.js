@@ -4,6 +4,7 @@ const cors = require('cors');
 const cron = require('node-cron');
 const WebSocketManager = require('./services/websocketManager');
 const APIPoller = require('./services/apiPoller');
+const firebaseService = require('./services/firebaseService');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -90,6 +91,24 @@ app.get('/api/test/cache-status', (req, res) => {
   });
 });
 
+// Firebase에서 실종자 데이터 조회
+app.get('/api/missing-persons', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 100;
+    const persons = await firebaseService.getMissingPersons(limit);
+    res.json({
+      success: true,
+      data: persons,
+      count: persons.length
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Express 서버 시작
 app.listen(PORT, () => {
   console.log(`\n🚀 서버 시작 완료!`);
@@ -101,7 +120,15 @@ app.listen(PORT, () => {
 
   // 초기 데이터 로드
   console.log('🔄 초기 데이터 로딩...');
-  setTimeout(() => {
+  setTimeout(async () => {
+    // Firebase에서 기존 데이터 로드
+    const existingData = await firebaseService.getMissingPersons(50);
+    if (existingData.length > 0) {
+      console.log(`📦 Firebase에서 ${existingData.length}건의 기존 데이터 로드됨`);
+      apiPoller.recentDataCache = existingData;
+    }
+
+    // 새 데이터 폴링 시작
     apiPoller.pollMissingPersonsAPI();
     apiPoller.pollEmergencyMessagesAPI();
   }, 2000);

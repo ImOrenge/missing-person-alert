@@ -31,7 +31,7 @@ export function useEmergencyWebSocket() {
   const handleNewMissingPersons = useCallback((persons: MissingPerson[]) => {
     if (!Array.isArray(persons) || persons.length === 0) return;
 
-    console.log(`🚨 새로운 실종자 ${persons.length}건 수신`);
+    console.log(`🚨 새로운 실종자 ${persons.length}건 수신 (백엔드에서 Firebase에 이미 저장됨)`);
 
     // 스토어에 추가
     addMissingPersons(persons);

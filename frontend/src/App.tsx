@@ -8,6 +8,7 @@ import LoginModal from './components/LoginModal';
 import AnnouncementBanner from './components/AnnouncementBanner';
 import { useEmergencyStore } from './stores/emergencyStore';
 import { useEmergencyWebSocket } from './hooks/useEmergencyWebSocket';
+import { useFirebaseSync } from './hooks/useFirebaseSync';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
@@ -31,6 +32,9 @@ function App() {
 
   const { isConnected } = useEmergencyWebSocket();
   const missingPersons = useEmergencyStore(state => state.missingPersons);
+
+  // Firebase 실시간 동기화
+  useFirebaseSync();
 
   // 공지사항 자동 슬라이드
   useEffect(() => {

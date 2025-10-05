@@ -1,6 +1,7 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const NodeGeocoder = require('node-geocoder');
+const firebaseService = require('./firebaseService');
 
 class APIPoller {
   constructor(wsManager) {
@@ -81,6 +82,9 @@ class APIPoller {
 
         if (newItems.length > 0) {
           console.log(`🚨 새로운 실종자 ${newItems.length}건 발견`);
+
+          // Firebase에 저장
+          await firebaseService.saveMissingPersons(newItems);
 
           // WebSocket으로 전송
           this.wsManager.broadcast('NEW_MISSING_PERSON', newItems);
