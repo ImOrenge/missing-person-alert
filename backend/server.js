@@ -25,12 +25,12 @@ console.log(`🔌 WebSocket 서버가 포트 ${WS_PORT}에서 실행 중`);
 // API 폴러 초기화
 const apiPoller = new APIPoller(wsManager);
 
-// 실종자 API 폴링 (5분마다)
-const emergencyInterval = parseInt(process.env.POLL_INTERVAL_EMERGENCY) || 300000;
-cron.schedule('*/5 * * * *', () => {
+// 실종자 API 폴링 (10분마다 - 3개월 데이터 수집)
+const emergencyInterval = parseInt(process.env.POLL_INTERVAL_EMERGENCY) || 600000;
+cron.schedule('*/10 * * * *', () => {
   apiPoller.pollMissingPersonsAPI();
 });
-console.log(`⏰ 실종자 API 폴링 시작 (5분마다)`);
+console.log(`⏰ 실종자 API 폴링 시작 (10분마다, 최근 3개월 데이터 수집)`);
 
 // 재난문자 API 폴링 (30초마다)
 const generalInterval = parseInt(process.env.POLL_INTERVAL_GENERAL) || 30000;
@@ -88,14 +88,21 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-// 수동으로 샘플 데이터 전송 (테스트용)
-app.post('/api/test/send-sample', (req, res) => {
-  apiPoller.generateSampleMissingPersons();
-  res.json({
-    success: true,
-    message: '샘플 데이터가 전송되었습니다',
-    clientCount: wsManager.getClientCount()
-  });
+// 수동으로 API 폴링 실행 (테스트용)
+app.post('/api/test/poll', async (req, res) => {
+  try {
+    await apiPoller.pollMissingPersonsAPI();
+    res.json({
+      success: true,
+      message: 'API 폴링이 실행되었습니다',
+      clientCount: wsManager.getClientCount()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
 });
 
 // Firebase 데이터 동기화 상태 조회

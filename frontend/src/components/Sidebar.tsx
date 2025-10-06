@@ -26,12 +26,32 @@ const getTypeColor = (type: string): string => {
 };
 
 const getTimeSince = (date: string): string => {
-  const seconds = Math.floor((new Date().getTime() - new Date(date).getTime()) / 1000);
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
+  const missingDate = new Date(date);
 
-  if (hours > 0) return `${hours}시간 ${minutes}분 전`;
-  return `${minutes}분 전`;
+  // 날짜 파싱 실패 시 원본 문자열 반환
+  if (isNaN(missingDate.getTime())) {
+    return date;
+  }
+
+  const now = new Date();
+  const diffTime = Math.abs(now.getTime() - missingDate.getTime());
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  const diffHours = Math.floor((diffTime % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+
+  // 실종 당시 날짜 표시
+  const formattedDate = missingDate.toLocaleDateString('ko-KR', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+
+  // 경과 시간 계산
+  if (diffDays > 0) {
+    return `${formattedDate} (${diffDays}일 경과)`;
+  } else if (diffHours > 0) {
+    return `${formattedDate} (${diffHours}시간 경과)`;
+  }
+  return formattedDate;
 };
 
 export default function Sidebar({ onShowFilters, showFilters }: Props) {
@@ -132,8 +152,19 @@ export default function Sidebar({ onShowFilters, showFilters }: Props) {
                     <div className="space-y-1 text-sm text-gray-600">
                       <div className="flex items-center gap-1">
                         <User size={14} />
-                        <span>{person.age}세 · {person.gender === 'M' ? '남성' : '여성'}</span>
+                        <span>
+                          {person.age}세 · {person.gender === 'M' ? '남성' : person.gender === 'F' ? '여성' : '미상'}
+                          {person.height && ` · ${person.height}cm`}
+                          {person.weight && ` · ${person.weight}kg`}
+                        </span>
                       </div>
+
+                      {person.clothes && (
+                        <div className="flex items-start gap-1">
+                          <span className="text-xs">👕</span>
+                          <span className="truncate text-xs">{person.clothes}</span>
+                        </div>
+                      )}
 
                       <div className="flex items-center gap-1">
                         <MapPin size={14} />

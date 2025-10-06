@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { database, ref, onValue, query, orderByChild, limitToLast } from '../services/firebase';
+import { database, ref, onValue } from '../services/firebase';
 import { useEmergencyStore } from '../stores/emergencyStore';
 import { MissingPerson } from '../types';
 
@@ -14,13 +14,8 @@ export function useFirebaseSync() {
 
     // Firebase에서 실종자 데이터 실시간 구독
     const missingPersonsRef = ref(database, 'missingPersons');
-    const missingPersonsQuery = query(
-      missingPersonsRef,
-      orderByChild('updatedAt'),
-      limitToLast(100)
-    );
 
-    const unsubscribe = onValue(missingPersonsQuery, (snapshot) => {
+    const unsubscribe = onValue(missingPersonsRef, (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.val();
         const persons: MissingPerson[] = Object.values(data);

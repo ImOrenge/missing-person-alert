@@ -5,7 +5,14 @@
       "Bash(npm install:*)",
       "Bash(curl:*)",
       "Bash(cat:*)",
-      "Bash(firebase deploy:*)"
+      "Bash(firebase deploy:*)",
+      "Bash(npm start)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "Bash(awk:*)",
+      "Bash(node:*)",
+      "Bash(npm uninstall:*)"
     ],
     "deny": [],
     "ask": []

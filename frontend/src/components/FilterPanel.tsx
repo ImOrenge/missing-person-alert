@@ -206,6 +206,9 @@ export default function FilterPanel({ onClose }: Props) {
             <option value="24h">최근 24시간</option>
             <option value="7d">최근 7일</option>
             <option value="30d">최근 30일</option>
+            <option value="60d">최근 60일</option>
+            <option value="90d">최근 90일</option>
+            <option value="1y">최근 1년</option>
             <option value="all">전체</option>
           </select>
         </div>

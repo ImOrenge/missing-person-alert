@@ -5,7 +5,7 @@ export type MissingPersonType = 'missing_child' | 'disabled' | 'dementia';
 export type MissingPersonStatus = 'active' | 'found' | 'investigating';
 
 // 시간 범위
-export type TimeRange = '24h' | '7d' | '30d' | 'all';
+export type TimeRange = '24h' | '7d' | '30d' | '60d' | '90d' | '1y' | 'all';
 
 // 실종자 정보
 export interface MissingPerson {
@@ -23,6 +23,14 @@ export interface MissingPerson {
   missingDate: string;
   type: MissingPersonType;
   status: MissingPersonStatus;
+  // 안전드림 API 추가 필드
+  height?: number;
+  weight?: number;
+  clothes?: string;
+  bodyType?: string;
+  faceShape?: string;
+  hairShape?: string;
+  hairColor?: string;
 }
 
 // 긴급재난문자

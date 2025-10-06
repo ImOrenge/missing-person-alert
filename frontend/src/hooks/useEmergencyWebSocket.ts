@@ -1,8 +1,9 @@
-import { useEffect, useCallback, useRef } from 'react';
+import React, { useEffect, useCallback, useRef } from 'react';
 import useWebSocket, { ReadyState } from 'react-use-websocket';
 import { toast } from 'react-toastify';
 import { useEmergencyStore } from '../stores/emergencyStore';
 import { MissingPerson, EmergencyMessage, WebSocketMessage } from '../types';
+import MissingPersonToast from '../components/MissingPersonToast';
 
 const WS_URL = process.env.REACT_APP_WS_URL || 'ws://localhost:8080';
 
@@ -13,6 +14,7 @@ export function useEmergencyWebSocket() {
 
   // 토스트 알림을 보낸 ID 추적
   const notifiedIdsRef = useRef<Set<string>>(new Set());
+
 
   // 알림음 재생
   const playAlertSound = useCallback(() => {
@@ -36,49 +38,54 @@ export function useEmergencyWebSocket() {
     // 스토어에 추가
     addMissingPersons(persons);
 
-    // 각 실종자에 대해 알림 표시 (중복 방지)
-    let newNotificationCount = 0;
-
-    persons.forEach((person) => {
-      // 이미 알림을 보낸 경우 건너뛰기
+    // 중복되지 않은 새로운 실종자만 필터링
+    const newPersons = persons.filter(person => {
       if (notifiedIdsRef.current.has(person.id)) {
         console.log(`⏭️  이미 알림 전송됨: ${person.name} (${person.id})`);
-        return;
+        return false;
       }
-
-      // 알림 ID 추적에 추가
       notifiedIdsRef.current.add(person.id);
-      newNotificationCount++;
-
-      // 긴급 토스트 알림 (10초 후 자동 사라짐)
-      toast.error(
-        `🚨 새로운 실종자 정보: ${person.name} (${person.age}세) - ${person.location.address}`,
-        {
-          autoClose: 10000,
-          position: 'top-center',
-          closeOnClick: true,
-          hideProgressBar: false,
-          pauseOnHover: true,
-          draggable: true,
-          toastId: person.id // 같은 ID로 중복 토스트 방지
-        }
-      );
-
-      // 브라우저 알림
-      if (Notification.permission === 'granted') {
-        new Notification('실종자 긴급 알림', {
-          body: `${person.name} (${person.age}세)님이 ${person.location.address}에서 실종되었습니다.`,
-          icon: '/icons/emergency.png',
-          requireInteraction: false,
-          tag: person.id
-        });
-      }
+      return true;
     });
 
-    // 새 알림이 있을 때만 알림음 재생
-    if (newNotificationCount > 0) {
-      console.log(`📢 ${newNotificationCount}건의 새로운 알림 전송됨`);
-      playAlertSound();
+    if (newPersons.length === 0) return;
+
+    console.log(`📢 ${newPersons.length}건의 새로운 알림 전송됨`);
+
+    // 알림음 재생
+    playAlertSound();
+
+    // 통합된 커스텀 토스트로 실종자 정보 표시
+    toast(
+      (props: any) => React.createElement(MissingPersonToast, {
+        persons: newPersons,
+        onClose: () => props.closeToast?.()
+      }),
+      {
+        autoClose: 15000,
+        position: 'top-center',
+        closeButton: false,
+        className: '!bg-transparent !p-0 !shadow-none',
+        bodyClassName: '!p-0',
+        hideProgressBar: true,
+        closeOnClick: false,
+        pauseOnHover: true,
+        draggable: false,
+        toastId: 'missing-persons-alert'
+      }
+    );
+
+    // 브라우저 알림 (첫 번째 실종자 정보만)
+    if (Notification.permission === 'granted' && newPersons.length > 0) {
+      const firstPerson = newPersons[0];
+      new Notification('실종자 긴급 알림', {
+        body: newPersons.length > 1
+          ? `${firstPerson.name} (${firstPerson.age}세) 외 ${newPersons.length - 1}명의 실종자 정보가 등록되었습니다.`
+          : `${firstPerson.name} (${firstPerson.age}세)님이 ${firstPerson.location.address}에서 실종되었습니다.`,
+        icon: '/icons/emergency.png',
+        requireInteraction: false,
+        tag: 'missing-persons-batch'
+      });
     }
   }, [addMissingPersons, playAlertSound]);
 

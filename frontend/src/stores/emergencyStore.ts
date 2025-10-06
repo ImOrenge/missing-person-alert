@@ -32,6 +32,12 @@ function parseTimeRange(range: TimeRange): number {
       return 7 * 24 * 60 * 60 * 1000;
     case '30d':
       return 30 * 24 * 60 * 60 * 1000;
+    case '60d':
+      return 60 * 24 * 60 * 60 * 1000;
+    case '90d':
+      return 90 * 24 * 60 * 60 * 1000;
+    case '1y':
+      return 365 * 24 * 60 * 60 * 1000;
     default:
       return 0;
   }
@@ -44,7 +50,7 @@ export const useEmergencyStore = create<EmergencyStore>((set, get) => ({
   filters: {
     regions: [],
     types: ['missing_child', 'disabled', 'dementia'],
-    timeRange: 'all'
+    timeRange: '30d' // 기본값: 30일
   },
   isConnected: false,
   selectedPersonId: null,

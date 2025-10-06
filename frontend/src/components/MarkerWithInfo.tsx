@@ -117,21 +117,58 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
                 <strong>나이:</strong> {person.age}세
               </p>
               <p style={{ margin: '5px 0' }}>
-                <strong>성별:</strong> {person.gender === 'M' ? '남성' : '여성'}
+                <strong>성별:</strong> {person.gender === 'M' ? '남성' : person.gender === 'F' ? '여성' : '미상'}
               </p>
+              {person.height && (
+                <p style={{ margin: '5px 0' }}>
+                  <strong>키:</strong> {person.height}cm
+                </p>
+              )}
+              {person.weight && (
+                <p style={{ margin: '5px 0' }}>
+                  <strong>몸무게:</strong> {person.weight}kg
+                </p>
+              )}
               <p style={{ margin: '5px 0' }}>
                 <strong>실종 장소:</strong> {person.location.address}
               </p>
               <p style={{ margin: '5px 0' }}>
                 <strong>실종 일시:</strong>{' '}
-                {new Date(person.missingDate).toLocaleString('ko-KR')}
+                {(() => {
+                  const date = new Date(person.missingDate);
+                  if (isNaN(date.getTime())) {
+                    return person.missingDate;
+                  }
+                  return date.toLocaleDateString('ko-KR', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                  });
+                })()}
               </p>
               <p style={{ margin: '5px 0' }}>
                 <strong>유형:</strong> {getTypeLabel(person.type)}
               </p>
-              <p style={{ margin: '5px 0' }}>
-                <strong>특징:</strong> {person.description}
-              </p>
+              {person.clothes && (
+                <p style={{ margin: '5px 0' }}>
+                  <strong>옷차림:</strong> {person.clothes}
+                </p>
+              )}
+              {person.bodyType && (
+                <p style={{ margin: '5px 0' }}>
+                  <strong>체격:</strong> {person.bodyType}
+                </p>
+              )}
+              {person.hairColor && (
+                <p style={{ margin: '5px 0' }}>
+                  <strong>머리색:</strong> {person.hairColor}
+                </p>
+              )}
+              {person.description && (
+                <p style={{ margin: '5px 0' }}>
+                  <strong>특징:</strong> {person.description}
+                </p>
+              )}
             </div>
 
             <div style={{ marginTop: '15px', display: 'flex', gap: '10px' }}>

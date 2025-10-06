@@ -28,419 +28,214 @@ class APIPoller {
   }
 
   /**
-   * 안전드림 실종아동 데이터 폴링 (전체 페이지, 역순)
-   * 웹사이트: https://www.safe182.go.kr/home/lcm/lcmMssList.do
+   * 안전드림 182 API를 통한 실종자 데이터 조회
+   * API 엔드포인트: https://www.safe182.go.kr/api/lcm/findChildList.do
    */
   async pollMissingPersonsAPI() {
     try {
-      console.log('🔍 안전드림 실종아동 데이터 조회 시도...');
+      console.log('🔍 안전드림 182 API 호출 시작...');
 
-      // 1단계: 첫 페이지 조회하여 총 페이지 수 확인
-      const firstPageResponse = await axios.get('https://www.safe182.go.kr/home/lcm/lcmMssList.do', {
-        params: {
-          rptDscd: '2',
-          pageIndex: '1',
-          pageUnit: '20'
-        },
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        },
-        timeout: 15000
-      });
+      // API 인증 정보
+      const esntlId = process.env.SAFE182_ESNTL_ID || '10011616';
+      const authKey = process.env.SAFE182_AUTH_KEY || 'd4dce53abbc84060';
 
-      if (!firstPageResponse.data) {
-        console.warn('⚠️  안전드림 응답 없음. 샘플 데이터를 사용합니다.');
-        return this.generateSampleMissingPersons();
-      }
-
-      // HTML에서 총 페이지 수 파싱
-      const totalPages = this.extractTotalPages(firstPageResponse.data);
-      console.log(`📊 총 ${totalPages}개 페이지 발견`);
-
-      // 2단계: 1페이지부터 3페이지까지 파싱
       let allItems = [];
-      let totalNewCount = 0;
-      let totalDuplicateCount = 0;
+      let currentPage = 1;
+      const rowSize = 100; // API 최대 허용 건수
+      let hasMoreData = true;
 
-      const startPage = 1;
-      const endPage = Math.min(3, totalPages);
+      // 페이지네이션으로 모든 데이터 수집
+      while (hasMoreData) {
+        if (currentPage === 1) {
+          console.log(`📄 데이터 조회 중...`);
+        }
 
-      for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
-        console.log(`\n📄 페이지 ${pageNum}/${totalPages} 파싱 중...`);
-
-        const response = await axios.get('https://www.safe182.go.kr/home/lcm/lcmMssList.do', {
-          params: {
-            rptDscd: '2',
-            pageIndex: pageNum.toString(),
-            pageUnit: '20'
-          },
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-          },
-          timeout: 15000
+        // API 파라미터 설정
+        const params = new URLSearchParams({
+          esntlId: esntlId,
+          authKey: authKey,
+          rowSize: rowSize.toString(),
+          page: currentPage.toString()
         });
 
-        if (typeof response.data === 'string' && response.data.includes('<!DOCTYPE')) {
-          const items = await this.parseHTMLResponse(response.data);
+        // 대상 구분 추가 (010: 아동, 020: 일반가출, 060: 지적장애, 070: 치매)
+        params.append('writngTrgetDscds', '010');
+        params.append('writngTrgetDscds', '020');
+        params.append('writngTrgetDscds', '060');
+        params.append('writngTrgetDscds', '070');
 
-          if (items && items.length > 0) {
-            console.log(`  ✅ ${items.length}건 파싱 완료`);
-            allItems = allItems.concat(items);
+        // API 호출
+        const response = await axios.post(
+          'https://www.safe182.go.kr/api/lcm/findChildList.do',
+          params.toString(),
+          {
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            },
+            timeout: 15000
           }
+        );
+
+        // API 응답 확인 (result: "00" = 성공, "01" = 실패)
+        if (!response.data || (response.data.result !== '00' && response.data.result !== 'true')) {
+          console.warn('⚠️  API 호출 실패:', response.data?.msg || '알 수 없는 오류');
+          break;
         }
 
-        // API 부하 방지 (페이지 간 0.5초 대기)
-        await new Promise(resolve => setTimeout(resolve, 500));
+        const apiList = response.data.list || [];
+        const totalCount = response.data.totalCount || 0;
+
+        if (apiList.length === 0) {
+          if (currentPage === 1) {
+            console.log(`📭 실종자 정보 없음`);
+          }
+          hasMoreData = false;
+          break;
+        }
+
+        console.log(`  ✓ ${apiList.length}건 수신 (전체 ${totalCount}건 중)`);
+        if (currentPage > 1) {
+          console.log(`📄 페이지 ${currentPage} 조회 완료`);
+        }
+
+        allItems = allItems.concat(apiList);
+
+        // 마지막 페이지인지 확인
+        if (allItems.length >= totalCount || apiList.length < rowSize) {
+          hasMoreData = false;
+        } else {
+          currentPage++;
+          // API 부하 방지를 위해 페이지 간 대기
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
       }
 
-      // 3단계: 3달 이상 지난 데이터 필터링
-      const threeMonthsAgo = Date.now() - (90 * 24 * 60 * 60 * 1000);
-      const filteredItems = allItems.filter(item => {
+      if (allItems.length === 0) {
+        return;
+      }
+
+      console.log(`\n📊 총 ${allItems.length}건 수집 완료`);
+
+      // API 데이터를 내부 형식으로 변환
+      const transformedItems = [];
+
+      for (const item of allItems) {
         try {
-          const missingDate = new Date(item.missingDate).getTime();
-          if (missingDate < threeMonthsAgo) {
-            console.log(`  🗑️  3달 지난 데이터 폐기: ${item.name} (${item.missingDate})`);
-            return false;
-          }
-          return true;
+          const transformedItem = await this.transformAPIData(item);
+          transformedItems.push(transformedItem);
         } catch (error) {
-          // 날짜 파싱 실패 시 유지
-          return true;
+          console.error(`  ⚠️ 데이터 변환 실패 (${item.nm}):`, error.message);
         }
-      });
+      }
 
-      console.log(`\n📊 필터링 결과: ${allItems.length}건 → ${filteredItems.length}건 (${allItems.length - filteredItems.length}건 폐기)`);
+      console.log(`✅ ${transformedItems.length}건 변환 완료`);
 
-      // 4단계: 실종일 기준으로 정렬 (최신순)
-      filteredItems.sort((a, b) => {
+      // 실종일 기준 최신순 정렬
+      transformedItems.sort((a, b) => {
         try {
           const dateA = new Date(a.missingDate).getTime();
           const dateB = new Date(b.missingDate).getTime();
-          return dateB - dateA; // 내림차순 (최신순)
+          return dateB - dateA;
         } catch (error) {
           return 0;
         }
       });
 
-      console.log(`📅 데이터 정렬 완료 (최신순)`);
-
-      // 5단계: Firebase에 저장 (중복 체크 포함)
-      if (filteredItems.length > 0) {
-        const saveResult = await firebaseService.saveMissingPersons(filteredItems);
-        totalNewCount = saveResult.saved;
-        totalDuplicateCount = saveResult.duplicates;
+      // Firebase에 저장
+      if (transformedItems.length > 0) {
+        const saveResult = await firebaseService.saveMissingPersons(transformedItems);
 
         if (saveResult.saved > 0) {
           console.log(`💾 ${saveResult.saved}건 저장 (중복 ${saveResult.duplicates}건 제외)`);
+
+          // Firebase에서 최근 저장된 데이터 조회 후 WebSocket 전송
+          const recentlySaved = await firebaseService.getMissingPersons(saveResult.saved);
+
+          if (recentlySaved.length > 0) {
+            this.wsManager.broadcast('NEW_MISSING_PERSON', recentlySaved);
+            console.log(`📡 ${recentlySaved.length}건 WebSocket 전송 완료`);
+          }
+
+          this.lastFetchTime = new Date();
         } else {
           console.log(`⏭️  모두 중복 (${saveResult.duplicates}건)`);
         }
       }
 
-      // 6단계: 결과 요약 및 WebSocket 전송
-      console.log(`\n📊 전체 파싱 완료: 신규 ${totalNewCount}건, 중복 ${totalDuplicateCount}건`);
-
-      if (totalNewCount > 0) {
-        // Firebase에서 최근 저장된 데이터 조회
-        const recentlySaved = await firebaseService.getMissingPersons(totalNewCount);
-
-        // WebSocket으로 신규 실종자만 전송
-        if (recentlySaved.length > 0) {
-          this.wsManager.broadcast('NEW_MISSING_PERSON', recentlySaved);
-          console.log(`📡 ${recentlySaved.length}건 WebSocket 전송 완료`);
-        }
-
-        this.lastFetchTime = new Date();
-      } else {
-        console.log('📭 새로운 실종자 정보 없음');
-      }
-
-      return;
-
-      // JSON 응답인 경우 처리
-      const items = this.extractItems(response.data);
-
-      if (!items || items.length === 0) {
-        console.log('📭 새로운 실종자 정보 없음');
-        return;
-      }
-
-      // 새로운 항목 필터링
-      const newItems = items.filter(item => {
-        const itemId = item.msspsnIdntfccd || item.num || `${item.nm}_${item.age}`;
-        const itemDate = new Date(item.occrde || item.regDt || Date.now());
-
-        return itemDate > this.lastFetchTime && !this.notifiedIds.has(itemId);
-      });
-
-      if (newItems.length > 0) {
-        console.log(`🚨 새로운 실종자 ${newItems.length}건 발견`);
-
-        // WebSocket으로 전송
-        const transformedData = newItems.map(item => this.transformMissingPersonData(item));
-        this.wsManager.broadcast('NEW_MISSING_PERSON', transformedData);
-
-        // ID 캐시에 추가
-        newItems.forEach(item => {
-          const itemId = item.msspsnIdntfccd || item.num || `${item.nm}_${item.age}`;
-          this.notifiedIds.add(itemId);
-        });
-
-        // 캐시 크기 제한
-        this.limitCacheSize();
-        this.lastFetchTime = new Date();
-      }
-
     } catch (error) {
-      console.error('❌ 실종자 데이터 조회 오류:', error.message);
+      console.error('❌ 안전드림 API 호출 오류:', error.message);
       if (error.response) {
         console.error('응답 상태:', error.response.status);
+        console.error('응답 데이터:', error.response.data);
       }
-      // 오류 발생 시 샘플 데이터로 시스템 시연
-      console.log('📝 샘플 데이터로 시스템을 시연합니다.');
-      this.generateSampleMissingPersons();
     }
   }
 
   /**
-   * HTML에서 총 페이지 수 추출
+   * 안전드림 API 데이터를 내부 형식으로 변환
    */
-  extractTotalPages(html) {
+  async transformAPIData(apiData) {
+    // ID 생성 (msspsnIdntfccd 사용 또는 고유값 생성) - 항상 문자열로 변환
+    const id = String(apiData.msspsnIdntfccd || `safe182_${apiData.nm}_${apiData.age}`);
+
+    // 성별 변환 (남자/여자 -> M/F)
+    const gender = apiData.sexdstnDscd === '남자' ? 'M' :
+                   apiData.sexdstnDscd === '여자' ? 'F' : 'U';
+
+    // 대상 구분을 타입으로 변환
+    let type = 'missing_child';
+    if (apiData.writngTrgetDscd === '070') type = 'dementia';
+    else if (apiData.writngTrgetDscd === '060') type = 'disabled';
+    else if (apiData.writngTrgetDscd === '020') type = 'runaway';
+    else if (apiData.writngTrgetDscd === '010') type = 'missing_child';
+
+    // 실종일시 파싱 (YYYYMMDD 형식을 ISO 형식으로 변환)
+    let missingDate;
     try {
-      const $ = cheerio.load(html);
-
-      // 페이지네이션에서 마지막 페이지 번호 찾기
-      // 일반적인 패턴: <a>1</a> <a>2</a> ... <a>마지막</a>
-      const pageLinks = $('a[href*="pageIndex"]');
-
-      let maxPage = 1;
-
-      pageLinks.each((index, element) => {
-        const href = $(element).attr('href') || '';
-        const text = $(element).text().trim();
-
-        // href에서 pageIndex 파라미터 추출
-        const pageMatch = href.match(/pageIndex[=:](\d+)/);
-        if (pageMatch) {
-          const pageNum = parseInt(pageMatch[1]);
-          if (pageNum > maxPage) {
-            maxPage = pageNum;
-          }
-        }
-
-        // 텍스트가 숫자인 경우도 체크
-        const textNum = parseInt(text);
-        if (!isNaN(textNum) && textNum > maxPage) {
-          maxPage = textNum;
-        }
-      });
-
-      // 페이지 정보가 없으면 기본값 1
-      if (maxPage === 0) {
-        maxPage = 1;
+      if (apiData.occrde) {
+        const dateStr = apiData.occrde.toString();
+        const year = dateStr.substring(0, 4);
+        const month = dateStr.substring(4, 6);
+        const day = dateStr.substring(6, 8);
+        missingDate = new Date(`${year}-${month}-${day}`).toISOString();
+      } else {
+        missingDate = new Date().toISOString();
       }
-
-      console.log(`  📄 페이지네이션 분석: 최대 페이지 = ${maxPage}`);
-      return maxPage;
-
     } catch (error) {
-      console.error('⚠️ 총 페이지 수 추출 실패:', error.message);
-      return 1; // 실패 시 기본값
+      missingDate = new Date().toISOString();
     }
+
+    // 주소에서 좌표 가져오기
+    const location = await this.geocodeAddress(apiData.occrAdres || '주소 미상');
+
+    // 사진 URL 생성
+    const photo = apiData.tknphotolength !== '0' && apiData.msspsnIdntfccd
+      ? `https://www.safe182.go.kr/api/lcm/imgView.do?msspsnIdntfccd=${apiData.msspsnIdntfccd}`
+      : null;
+
+    return {
+      id,
+      name: apiData.nm || '미상',
+      age: parseInt(apiData.ageNow) || parseInt(apiData.age) || 0,
+      gender,
+      location,
+      photo,
+      description: apiData.alldressingDscd || '특이사항 없음',
+      missingDate,
+      type,
+      status: 'active',
+      height: apiData.height || null,
+      weight: apiData.bdwgh || null,
+      clothes: apiData.alldressingDscd || null,
+      // 추가 상세 정보
+      bodyType: apiData.frmDscd || null,
+      faceShape: apiData.faceshpeDscd || null,
+      hairShape: apiData.hairshpeDscd || null,
+      hairColor: apiData.haircolrDscd || null
+    };
   }
 
-  /**
-   * 안전드림 HTML 응답 파싱
-   */
-  async parseHTMLResponse(html) {
-    try {
-      const $ = cheerio.load(html);
-      const items = [];
-
-      console.log('📋 HTML 파싱 디버깅 시작...');
-
-      // 실종자 정보가 있는 링크만 선택
-      const links = $('a[href*="lcmMssGet.do"]');
-
-      console.log(`  ✓ 실종자 링크 발견: ${links.length}개`);
-
-      if (links.length === 0) {
-        console.log('  ✗ 실종자 항목을 찾을 수 없습니다.');
-        console.log('  HTML 샘플:', html.substring(0, 1000));
-        return [];
-      }
-
-      // 중복 방지를 위한 fingerprint Set (이름+나이+성별)
-      const processedFingerprints = new Set();
-
-      // 각 링크의 부모 li 요소에서 데이터 추출
-      links.each((index, element) => {
-        try {
-          const $link = $(element);
-          const $item = $link.closest('li');
-
-          // 링크에서 ID 추출
-          const link = $link.attr('href') || '';
-          const idMatch = link.match(/msspsnIdntfccd=(\d+)/);
-
-          // 먼저 이름과 나이를 추출하여 fingerprint 생성
-          const fullText = $item.text().trim();
-          const nameAgeMatch = fullText.match(/([가-힣]{2,})\s*\((\d+)세\)/);
-
-          if (!nameAgeMatch) {
-            return; // 이름 정보 없으면 건너뛰기
-          }
-
-          const name = nameAgeMatch[1];
-          const age = parseInt(nameAgeMatch[2]);
-
-          // 성별 추출
-          const genderMatch = fullText.match(/(남자|여자|남|여)/);
-          const gender = genderMatch ? (genderMatch[1] === '남자' || genderMatch[1] === '남' ? 'M' : 'F') : 'U';
-
-          // Fingerprint 생성 (이름+나이+성별)
-          const fingerprint = `${name}_${age}_${gender}`;
-
-          // 이미 처리한 동일인이면 건너뛰기
-          if (processedFingerprints.has(fingerprint)) {
-            console.log(`  ⏭️  중복 건너뜀: ${name} (${age}세, ${gender})`);
-            return;
-          }
-          processedFingerprints.add(fingerprint);
-
-          // ID는 URL에서 추출하거나, fingerprint를 해시하여 생성
-          const id = idMatch ? idMatch[1] : `safe182_${Buffer.from(fingerprint).toString('base64').replace(/=/g, '')}`;
-
-          console.log(`\n--- 항목 ${items.length + 1} ---`);
-          console.log('링크:', link);
-          console.log('ID:', id);
-          console.log('이름:', name, '나이:', age, '성별:', gender);
-
-          // 대상구분 추출 (예: "치매", "아동", "장애")
-          const targetMatch = fullText.match(/(치매|아동|장애|지적장애)/);
-          let type = 'missing_child';
-          if (targetMatch) {
-            const target = targetMatch[1];
-            if (target.includes('치매')) type = 'dementia';
-            else if (target.includes('장애')) type = 'disabled';
-            else type = 'missing_child';
-          }
-
-          // 이미지 URL 추출 (여러 패턴 시도)
-          let photo = null;
-          const $img = $item.find('img');
-
-          if ($img.length > 0) {
-            const imgSrc = $img.attr('src');
-
-            if (imgSrc && !imgSrc.includes('no_image') && !imgSrc.includes('noimage')) {
-              // 절대 경로인 경우 그대로 사용
-              if (imgSrc.startsWith('http')) {
-                photo = imgSrc;
-              }
-              // 상대 경로인 경우 베이스 URL 추가
-              else if (imgSrc.startsWith('/')) {
-                photo = `https://www.safe182.go.kr${imgSrc}`;
-              }
-              // 기타 경로
-              else {
-                photo = `https://www.safe182.go.kr/${imgSrc}`;
-              }
-
-              console.log('이미지 URL:', photo);
-            } else {
-              console.log('이미지 없음 또는 no_image 플레이스홀더');
-            }
-          } else {
-            console.log('img 태그 없음');
-          }
-
-          // 현재나이 추출
-          const currentAgeMatch = fullText.match(/현재나이\s*:?\s*(\d+)세/);
-          const currentAge = currentAgeMatch ? parseInt(currentAgeMatch[1]) : age;
-
-          // 실종일 추출 (여러 패턴 시도)
-          let missingDate = new Date().toISOString();
-          const datePatterns = [
-            /실종일\s*:?\s*([0-9.\-/]+)/,
-            /실종일시\s*:?\s*([0-9.\-/\s:]+)/,
-            /발생일\s*:?\s*([0-9.\-/]+)/
-          ];
-
-          for (const pattern of datePatterns) {
-            const match = fullText.match(pattern);
-            if (match) {
-              missingDate = match[1].trim();
-              break;
-            }
-          }
-
-          // 실종장소 추출 (여러 패턴 시도)
-          let address = '주소 미상';
-          const locationPatterns = [
-            /실종장소\s*:?\s*([^\n가-힣]*[가-힣][^\n]+?)(?=\s*옷차림|$)/,
-            /발생장소\s*:?\s*([^\n]+)/,
-            /장소\s*:?\s*([^\n]+)/,
-            /실종장소\s*:?\s*(.+?)(?=옷차림|특징|$)/
-          ];
-
-          for (const pattern of locationPatterns) {
-            const match = fullText.match(pattern);
-            if (match) {
-              address = match[1].trim();
-              // 불필요한 공백 제거
-              address = address.replace(/\s+/g, ' ').trim();
-              if (address && address.length > 2 && !address.includes('미상')) {
-                break;
-              }
-            }
-          }
-
-          // 옷차림 추출
-          const clothingMatch = fullText.match(/옷차림\s*:?\s*([^\n]+)/);
-          const clothes = clothingMatch ? clothingMatch[1].trim() : null;
-
-          console.log('실종장소:', address);
-          console.log('실종일:', missingDate);
-
-          // 위치 정보를 Promise로 저장 (나중에 geocoding)
-          const itemData = {
-            id,
-            name,
-            age: currentAge || age,
-            gender,
-            address,
-            photo,
-            description: clothes || '특이사항 없음',
-            missingDate,
-            type,
-            status: 'active',
-            clothes
-          };
-
-          items.push(itemData);
-
-          console.log(`  ✓ 파싱 완료: ${name} (${gender}, ${currentAge || age}세)`);
-
-        } catch (err) {
-          console.error('  ✗ 항목 파싱 오류:', err.message);
-        }
-      });
-
-      console.log(`\n총 ${items.length}개 항목 파싱 완료`);
-
-      // 모든 항목에 대해 geocoding 수행
-      const itemsWithLocation = await this.addGeocodingToItems(items);
-
-      console.log(`✅ Geocoding 완료: ${itemsWithLocation.length}개 항목\n`);
-      return itemsWithLocation;
-
-    } catch (error) {
-      console.error('❌ HTML 파싱 오류:', error.message);
-      console.error(error.stack);
-      return [];
-    }
-  }
 
   /**
    * 주소를 좌표로 변환 (Geocoding)
@@ -565,34 +360,6 @@ class APIPoller {
     return { lat: 37.5665, lng: 126.9780, address };
   }
 
-  /**
-   * 모든 항목에 geocoding 추가
-   */
-  async addGeocodingToItems(items) {
-    const results = [];
-
-    for (const item of items) {
-      try {
-        // 한국 도시 좌표 매핑 사용 (빠르고 안정적)
-        const location = await this.geocodeAddress(item.address);
-
-        results.push({
-          ...item,
-          location
-        });
-
-      } catch (error) {
-        console.error(`  ⚠️ ${item.name} geocoding 실패:`, error.message);
-        // 실패해도 기본 위치로 추가
-        results.push({
-          ...item,
-          location: { lat: 37.5665, lng: 126.9780, address: item.address }
-        });
-      }
-    }
-
-    return results;
-  }
 
   /**
    * 안전드림 긴급재난문자 API 폴링 (현재 비활성화)
@@ -602,137 +369,6 @@ class APIPoller {
     // 안전드림에서는 실종아동 정보만 제공
     // 재난문자가 필요한 경우 행정안전부 API 사용 필요
     console.log('ℹ️  재난문자 API는 현재 사용 불가');
-  }
-
-  /**
-   * API 응답에서 items 배열 추출 (다양한 응답 구조 지원)
-   */
-  extractItems(data) {
-    if (Array.isArray(data)) return data;
-    if (data.response?.body?.items?.item) return Array.isArray(data.response.body.items.item)
-      ? data.response.body.items.item
-      : [data.response.body.items.item];
-    if (data.body?.items) return Array.isArray(data.body.items)
-      ? data.body.items
-      : [data.body.items];
-    if (data.items) return Array.isArray(data.items)
-      ? data.items
-      : [data.items];
-    return [];
-  }
-
-  /**
-   * 안전드림 실종자 데이터 변환
-   * API 응답 필드: nm(이름), age(나이), sexdstnDscd(성별), occrAdres(발생주소),
-   * writngTrgetDscd(대상구분), etcSpfeatr(특징), occrde(발생일시), tknphotoFile(사진)
-   */
-  transformMissingPersonData(apiData) {
-    return {
-      id: apiData.num || apiData.esntlId || `missing_${Date.now()}_${Math.random()}`,
-      name: apiData.nm || '미상',
-      age: parseInt(apiData.age) || parseInt(apiData.ageNow) || 0,
-      gender: this.parseGender(apiData.sexdstnDscd),
-      location: {
-        lat: parseFloat(apiData.lat) || 37.5665,
-        lng: parseFloat(apiData.lng) || 126.9780,
-        address: apiData.occrAdres || apiData.occrPlace || '주소 미상'
-      },
-      photo: apiData.tknphotoFile || apiData.photoFile || null,
-      description: apiData.etcSpfeatr || apiData.drssChartr || '특이사항 없음',
-      missingDate: apiData.occrde || apiData.regDt || new Date().toISOString(),
-      type: this.getTypeFromTarget(apiData.writngTrgetDscd),
-      status: 'active',
-      height: apiData.height || null,
-      weight: apiData.weight || null,
-      clothes: apiData.drssChartr || null
-    };
-  }
-
-  /**
-   * 성별 코드 변환
-   */
-  parseGender(sexCode) {
-    if (!sexCode) return 'U';
-    const code = String(sexCode).toLowerCase();
-    if (code.includes('남') || code === 'm' || code === '1') return 'M';
-    if (code.includes('여') || code === 'f' || code === '2') return 'F';
-    return 'U';
-  }
-
-  /**
-   * 대상 구분을 타입으로 변환
-   */
-  getTypeFromTarget(target) {
-    if (!target) return 'missing_child';
-
-    const targetStr = String(target);
-    if (targetStr.includes('치매') || targetStr.includes('노인')) return 'dementia';
-    if (targetStr.includes('장애')) return 'disabled';
-    return 'missing_child';
-  }
-
-  /**
-   * 재난문자 데이터 변환
-   */
-  transformEmergencyMessageData(apiData) {
-    return {
-      id: apiData.msgId || apiData.id || `emergency_${Date.now()}`,
-      region: apiData.regionName || apiData.locationName || '전국',
-      regionCode: apiData.locationId || apiData.regionCode || '000',
-      sendTime: apiData.sendDateTime || apiData.createDate || new Date().toISOString(),
-      content: apiData.msgContents || apiData.msg || '긴급재난문자',
-      disasterType: apiData.disasterType || apiData.dstSeNm || '기타'
-    };
-  }
-
-
-
-  /**
-   * 샘플 데이터 생성 (테스트용 - 안전드림 API 형식)
-   */
-  generateSampleMissingPersons() {
-    const timestamp = Date.now();
-    const samples = [
-      {
-        id: `sample_${timestamp}_1`,
-        name: '홍길동',
-        age: 8,
-        gender: 'M',
-        location: {
-          lat: 37.5665,
-          lng: 126.9780,
-          address: '서울특별시 중구'
-        },
-        photo: null,
-        description: '파란색 티셔츠, 검은색 반바지 착용',
-        missingDate: new Date().toISOString(),
-        type: 'missing_child',
-        status: 'active',
-        clothes: '파란색 티셔츠, 검은색 반바지'
-      },
-      {
-        id: `sample_${timestamp}_2`,
-        name: '김영희',
-        age: 75,
-        gender: 'F',
-        location: {
-          lat: 37.5172,
-          lng: 127.0473,
-          address: '서울특별시 강남구'
-        },
-        photo: null,
-        description: '흰색 블라우스, 검은색 바지 착용',
-        missingDate: new Date().toISOString(),
-        type: 'dementia',
-        status: 'active',
-        clothes: '흰색 블라우스, 검은색 바지'
-      }
-    ];
-
-    // 중복 필터링 없이 바로 전송 (테스트용)
-    this.wsManager.broadcast('NEW_MISSING_PERSON', samples);
-
-    console.log(`📝 샘플 데이터 ${samples.length}건 전송됨 (ID: sample_${timestamp}_*)`);
   }
 }
 
