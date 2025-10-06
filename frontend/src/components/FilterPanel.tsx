@@ -1,5 +1,5 @@
 import React from 'react';
-import { X } from 'lucide-react';
+import { X, ArrowUpDown } from 'lucide-react';
 import { useEmergencyStore } from '../stores/emergencyStore';
 
 const KOREAN_REGIONS = [
@@ -27,7 +27,7 @@ interface Props {
 }
 
 export default function FilterPanel({ onClose }: Props) {
-  const { filters, updateFilters, missingPersons } = useEmergencyStore();
+  const { filters, updateFilters, missingPersons, sortOrder, toggleSortOrder } = useEmergencyStore();
 
   const handleRegionToggle = (region: string) => {
     const newRegions = filters.regions.includes(region)
@@ -211,6 +211,44 @@ export default function FilterPanel({ onClose }: Props) {
             <option value="1y">최근 1년</option>
             <option value="all">전체</option>
           </select>
+        </div>
+
+        {/* 정렬 순서 */}
+        <div>
+          <h3 style={{ marginBottom: '10px', fontSize: '16px', color: '#2c3e50' }}>
+            📅 날짜 정렬
+          </h3>
+          <button
+            onClick={toggleSortOrder}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              width: '180px',
+              padding: '10px 15px',
+              borderRadius: '8px',
+              border: '1px solid #ced4da',
+              fontSize: '14px',
+              backgroundColor: 'white',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              fontWeight: '500'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = '#f8f9fa';
+              e.currentTarget.style.borderColor = '#007bff';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'white';
+              e.currentTarget.style.borderColor = '#ced4da';
+            }}
+          >
+            <ArrowUpDown size={16} />
+            {sortOrder === 'desc' ? '최신순 ▼' : '오래된순 ▲'}
+          </button>
+          <p style={{ marginTop: '5px', fontSize: '12px', color: '#666' }}>
+            {sortOrder === 'desc' ? '최근 실종자부터 표시' : '오래된 실종자부터 표시'}
+          </p>
         </div>
       </div>
     </div>

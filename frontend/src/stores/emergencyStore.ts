@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { MissingPerson, EmergencyMessage, FilterState, TimeRange } from '../types';
 
+type SortOrder = 'asc' | 'desc';
+
 interface EmergencyStore {
   // 상태
   missingPersons: MissingPerson[];
@@ -9,6 +11,7 @@ interface EmergencyStore {
   isConnected: boolean;
   selectedPersonId: string | null;
   hoveredPersonId: string | null;
+  sortOrder: SortOrder;
 
   // 액션
   addMissingPerson: (person: MissingPerson) => void;
@@ -18,6 +21,8 @@ interface EmergencyStore {
   setConnectionStatus: (status: boolean) => void;
   setSelectedPersonId: (id: string | null) => void;
   setHoveredPersonId: (id: string | null) => void;
+  setSortOrder: (order: SortOrder) => void;
+  toggleSortOrder: () => void;
   getFilteredPersons: () => MissingPerson[];
   clearAllData: () => void;
   removeDuplicates: () => void;
@@ -55,6 +60,7 @@ export const useEmergencyStore = create<EmergencyStore>((set, get) => ({
   isConnected: false,
   selectedPersonId: null,
   hoveredPersonId: null,
+  sortOrder: 'desc', // 기본값: 최신순 (내림차순)
 
   // 실종자 1명 추가
   addMissingPerson: (person) => {
@@ -147,11 +153,23 @@ export const useEmergencyStore = create<EmergencyStore>((set, get) => ({
     set({ hoveredPersonId: id });
   },
 
+  // 정렬 순서 설정
+  setSortOrder: (order) => {
+    set({ sortOrder: order });
+  },
+
+  // 정렬 순서 토글
+  toggleSortOrder: () => {
+    set((state) => ({
+      sortOrder: state.sortOrder === 'asc' ? 'desc' : 'asc'
+    }));
+  },
+
   // 필터링된 실종자 목록 가져오기
   getFilteredPersons: () => {
-    const { missingPersons, filters } = get();
+    const { missingPersons, filters, sortOrder } = get();
 
-    return missingPersons.filter((person) => {
+    const filtered = missingPersons.filter((person) => {
       // 지역 필터
       if (filters.regions.length > 0) {
         const personRegion = person.location.address.split(' ')[0];
@@ -175,6 +193,13 @@ export const useEmergencyStore = create<EmergencyStore>((set, get) => ({
       }
 
       return true;
+    });
+
+    // 날짜순 정렬
+    return filtered.sort((a, b) => {
+      const dateA = new Date(a.missingDate).getTime();
+      const dateB = new Date(b.missingDate).getTime();
+      return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
     });
   },
 
