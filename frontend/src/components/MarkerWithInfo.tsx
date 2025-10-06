@@ -21,10 +21,18 @@ function getColorByType(type: string): string {
   switch (type) {
     case 'missing_child':
       return '#e74c3c'; // 빨강 (아동)
+    case 'general':
+      return '#3498db'; // 파랑 (일반)
+    case 'runaway':
+      return '#16a085'; // 청록 (가출)
     case 'disabled':
       return '#f39c12'; // 주황 (장애인)
     case 'dementia':
       return '#9b59b6'; // 보라 (치매)
+    case 'facility':
+      return '#27ae60'; // 녹색 (시설보호자)
+    case 'unknown':
+      return '#7f8c8d'; // 회색 (신원불상)
     default:
       return '#95a5a6';
   }
@@ -35,10 +43,18 @@ function getTypeLabel(type: string): string {
   switch (type) {
     case 'missing_child':
       return '실종 아동';
+    case 'general':
+      return '일반 실종자';
+    case 'runaway':
+      return '가출인';
     case 'disabled':
       return '지적장애인';
     case 'dementia':
       return '치매환자';
+    case 'facility':
+      return '시설보호자';
+    case 'unknown':
+      return '신원불상';
     default:
       return '기타';
   }

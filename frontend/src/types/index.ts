@@ -1,5 +1,5 @@
 // 실종자 유형
-export type MissingPersonType = 'missing_child' | 'disabled' | 'dementia';
+export type MissingPersonType = 'missing_child' | 'runaway' | 'disabled' | 'dementia' | 'facility' | 'unknown';
 
 // 실종자 상태
 export type MissingPersonStatus = 'active' | 'found' | 'investigating';
@@ -31,6 +31,15 @@ export interface MissingPerson {
   faceShape?: string;
   hairShape?: string;
   hairColor?: string;
+  // 제보자 정보 (사용자 제보인 경우)
+  reportedBy?: {
+    uid: string;
+    name: string;
+    phone: string;
+    relation: string;
+    reportedAt: string;
+  };
+  source?: 'user_report' | 'api';
 }
 
 // 긴급재난문자

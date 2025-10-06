@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Bell, BellOff, ChevronLeft, ChevronRight, LogIn, LogOut, UserCircle, Plus } from 'lucide-react';
+import { Bell, BellOff, ChevronLeft, ChevronRight, LogIn, LogOut, UserCircle, Plus, FileText } from 'lucide-react';
 import EmergencyMap from './components/EmergencyMap';
 import Sidebar from './components/Sidebar';
 import FilterPanel from './components/FilterPanel';
 import ReportModal from './components/ReportModal';
+import MyReportsModal from './components/MyReportsModal';
 import LoginModal from './components/LoginModal';
 import AnnouncementBanner from './components/AnnouncementBanner';
 import { useEmergencyStore } from './stores/emergencyStore';
@@ -26,6 +27,7 @@ function App() {
   const [showSidebar, setShowSidebar] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showMyReportsModal, setShowMyReportsModal] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [notifications, setNotifications] = useState(true);
@@ -104,6 +106,13 @@ function App() {
             {/* 로그인/로그아웃 */}
             {currentUser ? (
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowMyReportsModal(true)}
+                  className="p-2 hover:bg-red-700 rounded-lg transition-colors"
+                  title="내 제보 기록"
+                >
+                  <FileText size={20} />
+                </button>
                 <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-red-800 rounded-full">
                   <UserCircle size={18} />
                   <span className="text-sm">{currentUser.displayName || currentUser.email}</span>
@@ -152,19 +161,26 @@ function App() {
         </div>
       </div>
 
-      {/* 제보하기 버튼 */}
-      <button
-        onClick={() => setShowReportModal(true)}
-        className="fixed bottom-20 right-6 bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-full shadow-lg flex items-center gap-2 transition-all hover:scale-105 z-40"
-      >
-        <Plus size={20} />
-        <span className="font-semibold">실종자 제보</span>
-      </button>
+      {/* 제보하기 버튼 (로그인 시에만 표시) */}
+      {currentUser && (
+        <button
+          onClick={() => setShowReportModal(true)}
+          className="fixed bottom-20 right-6 bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-full shadow-lg flex items-center gap-2 transition-all hover:scale-105 z-40"
+        >
+          <Plus size={20} />
+          <span className="font-semibold">실종자 제보</span>
+        </button>
+      )}
 
       {/* 모달들 */}
       <ReportModal
         isOpen={showReportModal}
         onClose={() => setShowReportModal(false)}
+      />
+
+      <MyReportsModal
+        isOpen={showMyReportsModal}
+        onClose={() => setShowMyReportsModal(false)}
       />
 
       <LoginModal

@@ -58,11 +58,18 @@ class APIPoller {
           page: currentPage.toString()
         });
 
-        // 대상 구분 추가 (010: 아동, 020: 일반가출, 060: 지적장애, 070: 치매)
-        params.append('writngTrgetDscds', '010');
-        params.append('writngTrgetDscds', '020');
-        params.append('writngTrgetDscds', '060');
-        params.append('writngTrgetDscds', '070');
+        // 대상 구분 추가
+        // 010: 아동, 020: 일반가출, 040: 시설보호자
+        // 060: 지적장애, 061: 18세미만 지적장애, 062: 18세이상 지적장애
+        // 070: 치매, 080: 신원불상
+        params.append('writngTrgetDscds', '010'); // 아동
+        params.append('writngTrgetDscds', '020'); // 일반가출
+        params.append('writngTrgetDscds', '040'); // 시설보호자
+        params.append('writngTrgetDscds', '060'); // 지적장애
+        params.append('writngTrgetDscds', '061'); // 18세미만 지적장애
+        params.append('writngTrgetDscds', '062'); // 18세이상 지적장애
+        params.append('writngTrgetDscds', '070'); // 치매
+        params.append('writngTrgetDscds', '080'); // 신원불상
 
         // API 호출
         const response = await axios.post(
@@ -183,12 +190,34 @@ class APIPoller {
     const gender = apiData.sexdstnDscd === '남자' ? 'M' :
                    apiData.sexdstnDscd === '여자' ? 'F' : 'U';
 
-    // 대상 구분을 타입으로 변환
-    let type = 'missing_child';
-    if (apiData.writngTrgetDscd === '070') type = 'dementia';
-    else if (apiData.writngTrgetDscd === '060') type = 'disabled';
-    else if (apiData.writngTrgetDscd === '020') type = 'runaway';
-    else if (apiData.writngTrgetDscd === '010') type = 'missing_child';
+    // 대상 구분을 타입으로 변환 (세부 분류)
+    const age = parseInt(apiData.ageNow) || parseInt(apiData.age) || 0;
+    let type = 'general'; // 기본값: 일반 실종자
+
+    switch (apiData.writngTrgetDscd) {
+      case '010': // 아동
+        type = age < 18 ? 'missing_child' : 'general';
+        break;
+      case '020': // 일반가출
+        type = 'runaway';
+        break;
+      case '040': // 시설보호자
+        type = 'facility';
+        break;
+      case '060': // 지적장애
+      case '061': // 18세미만 지적장애
+      case '062': // 18세이상 지적장애
+        type = 'disabled';
+        break;
+      case '070': // 치매
+        type = 'dementia';
+        break;
+      case '080': // 신원불상
+        type = 'unknown';
+        break;
+      default:
+        type = age < 18 ? 'missing_child' : 'general';
+    }
 
     // 실종일시 파싱 (YYYYMMDD 형식을 ISO 형식으로 변환)
     let missingDate;
@@ -217,7 +246,7 @@ class APIPoller {
     return {
       id,
       name: apiData.nm || '미상',
-      age: parseInt(apiData.ageNow) || parseInt(apiData.age) || 0,
+      age: age,
       gender,
       location,
       photo,
@@ -225,6 +254,7 @@ class APIPoller {
       missingDate,
       type,
       status: 'active',
+      source: 'api', // API 데이터 표시
       height: apiData.height || null,
       weight: apiData.bdwgh || null,
       clothes: apiData.alldressingDscd || null,
@@ -232,7 +262,9 @@ class APIPoller {
       bodyType: apiData.frmDscd || null,
       faceShape: apiData.faceshpeDscd || null,
       hairShape: apiData.hairshpeDscd || null,
-      hairColor: apiData.haircolrDscd || null
+      hairColor: apiData.haircolrDscd || null,
+      // API 원본 대상 구분 코드 (디버깅/확인용)
+      apiTargetCode: apiData.writngTrgetDscd || null
     };
   }
 
@@ -271,24 +303,43 @@ class APIPoller {
    * 한국 주요 도시 좌표 반환
    */
   getKoreanCityCoordinates(address) {
-    // 시/도 단위 좌표 매핑
+    // 시/도 단위 좌표 매핑 (긴 형식 우선 매칭)
     const cityCoordinates = {
+      '서울특별시': { lat: 37.5665, lng: 126.9780 },
       '서울': { lat: 37.5665, lng: 126.9780 },
+      '부산광역시': { lat: 35.1796, lng: 129.0756 },
       '부산': { lat: 35.1796, lng: 129.0756 },
+      '대구광역시': { lat: 35.8714, lng: 128.6014 },
       '대구': { lat: 35.8714, lng: 128.6014 },
+      '인천광역시': { lat: 37.4563, lng: 126.7052 },
       '인천': { lat: 37.4563, lng: 126.7052 },
+      '광주광역시': { lat: 35.1595, lng: 126.8526 },
       '광주': { lat: 35.1595, lng: 126.8526 },
+      '대전광역시': { lat: 36.3504, lng: 127.3845 },
       '대전': { lat: 36.3504, lng: 127.3845 },
+      '울산광역시': { lat: 35.5384, lng: 129.3114 },
       '울산': { lat: 35.5384, lng: 129.3114 },
+      '세종특별자치시': { lat: 36.4800, lng: 127.2890 },
       '세종': { lat: 36.4800, lng: 127.2890 },
+      '경기도': { lat: 37.4138, lng: 127.5183 },
       '경기': { lat: 37.4138, lng: 127.5183 },
+      '강원특별자치도': { lat: 37.8228, lng: 128.1555 },
+      '강원도': { lat: 37.8228, lng: 128.1555 },
       '강원': { lat: 37.8228, lng: 128.1555 },
+      '충청북도': { lat: 36.8000, lng: 127.7000 },
       '충북': { lat: 36.8000, lng: 127.7000 },
+      '충청남도': { lat: 36.5184, lng: 126.8000 },
       '충남': { lat: 36.5184, lng: 126.8000 },
+      '전북특별자치도': { lat: 35.7175, lng: 127.1530 },
+      '전라북도': { lat: 35.7175, lng: 127.1530 },
       '전북': { lat: 35.7175, lng: 127.1530 },
+      '전라남도': { lat: 34.8679, lng: 126.9910 },
       '전남': { lat: 34.8679, lng: 126.9910 },
+      '경상북도': { lat: 36.4919, lng: 128.8889 },
       '경북': { lat: 36.4919, lng: 128.8889 },
+      '경상남도': { lat: 35.4606, lng: 128.2132 },
       '경남': { lat: 35.4606, lng: 128.2132 },
+      '제주특별자치도': { lat: 33.4890, lng: 126.4983 },
       '제주': { lat: 33.4890, lng: 126.4983 }
     };
 
@@ -333,7 +384,29 @@ class APIPoller {
       '용인': { lat: 37.2411, lng: 127.1776 },
       '평택': { lat: 36.9921, lng: 127.1129 },
       '의정부': { lat: 37.7382, lng: 127.0337 },
-      '평창': { lat: 37.3704, lng: 128.3903 }
+      '평창': { lat: 37.3704, lng: 128.3903 },
+      // 경상북도 주요 시/군
+      '포항': { lat: 36.0190, lng: 129.3435 },
+      '경주': { lat: 35.8562, lng: 129.2247 },
+      '안동': { lat: 36.5684, lng: 128.7294 },
+      '구미': { lat: 36.1196, lng: 128.3446 },
+      '영주': { lat: 36.8056, lng: 128.6239 },
+      '영천': { lat: 35.9733, lng: 128.9386 },
+      '상주': { lat: 36.4109, lng: 128.1590 },
+      '문경': { lat: 36.5865, lng: 128.1867 },
+      '김천': { lat: 36.1399, lng: 128.1137 },
+      '칠곡군': { lat: 35.9956, lng: 128.4019 },
+      // 경상남도 주요 시/군
+      '창원': { lat: 35.2281, lng: 128.6811 },
+      '진주': { lat: 35.1800, lng: 128.1076 },
+      '통영': { lat: 34.8544, lng: 128.4331 },
+      '사천': { lat: 34.9419, lng: 128.0642 },
+      '김해': { lat: 35.2285, lng: 128.8894 },
+      '밀양': { lat: 35.5038, lng: 128.7467 },
+      '거제': { lat: 34.8806, lng: 128.6211 },
+      '양산': { lat: 35.3350, lng: 129.0375 },
+      '함안군': { lat: 35.2722, lng: 128.4061 },
+      '창녕군': { lat: 35.5444, lng: 128.4922 }
     };
 
     // 주소에서 시/도 찾기

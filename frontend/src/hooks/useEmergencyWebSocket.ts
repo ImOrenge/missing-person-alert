@@ -53,40 +53,40 @@ export function useEmergencyWebSocket() {
     console.log(`📢 ${newPersons.length}건의 새로운 알림 전송됨`);
 
     // 알림음 재생
-    playAlertSound();
+    // playAlertSound();
 
-    // 통합된 커스텀 토스트로 실종자 정보 표시
-    toast(
-      (props: any) => React.createElement(MissingPersonToast, {
-        persons: newPersons,
-        onClose: () => props.closeToast?.()
-      }),
-      {
-        autoClose: 15000,
-        position: 'top-center',
-        closeButton: false,
-        className: '!bg-transparent !p-0 !shadow-none',
-        bodyClassName: '!p-0',
-        hideProgressBar: true,
-        closeOnClick: false,
-        pauseOnHover: true,
-        draggable: false,
-        toastId: 'missing-persons-alert'
-      }
-    );
+    // 통합된 커스텀 토스트로 실종자 정보 표시 (임시 주석처리)
+    // toast(
+    //   (props: any) => React.createElement(MissingPersonToast, {
+    //     persons: newPersons,
+    //     onClose: () => props.closeToast?.()
+    //   }),
+    //   {
+    //     autoClose: 15000,
+    //     position: 'top-center',
+    //     closeButton: false,
+    //     className: '!bg-transparent !p-0 !shadow-none',
+    //     bodyClassName: '!p-0',
+    //     hideProgressBar: true,
+    //     closeOnClick: false,
+    //     pauseOnHover: true,
+    //     draggable: false,
+    //     toastId: 'missing-persons-alert'
+    //   }
+    // );
 
-    // 브라우저 알림 (첫 번째 실종자 정보만)
-    if (Notification.permission === 'granted' && newPersons.length > 0) {
-      const firstPerson = newPersons[0];
-      new Notification('실종자 긴급 알림', {
-        body: newPersons.length > 1
-          ? `${firstPerson.name} (${firstPerson.age}세) 외 ${newPersons.length - 1}명의 실종자 정보가 등록되었습니다.`
-          : `${firstPerson.name} (${firstPerson.age}세)님이 ${firstPerson.location.address}에서 실종되었습니다.`,
-        icon: '/icons/emergency.png',
-        requireInteraction: false,
-        tag: 'missing-persons-batch'
-      });
-    }
+    // 브라우저 알림 (첫 번째 실종자 정보만) (임시 주석처리)
+    // if (Notification.permission === 'granted' && newPersons.length > 0) {
+    //   const firstPerson = newPersons[0];
+    //   new Notification('실종자 긴급 알림', {
+    //     body: newPersons.length > 1
+    //       ? `${firstPerson.name} (${firstPerson.age}세) 외 ${newPersons.length - 1}명의 실종자 정보가 등록되었습니다.`
+    //       : `${firstPerson.name} (${firstPerson.age}세)님이 ${firstPerson.location.address}에서 실종되었습니다.`,
+    //     icon: '/icons/emergency.png',
+    //     requireInteraction: false,
+    //     tag: 'missing-persons-batch'
+    //   });
+    // }
   }, [addMissingPersons, playAlertSound]);
 
   // 새로운 긴급재난문자 처리

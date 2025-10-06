@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useEmergencyStore } from '../stores/emergencyStore';
 import { MissingPersonType } from '../types';
 import { toast } from 'react-toastify';
+import { getAuth } from 'firebase/auth';
 
 interface Props {
   isOpen: boolean;
@@ -32,7 +33,7 @@ export default function ReportModal({ isOpen, onClose }: Props) {
     });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     // 필수 필드 검증
@@ -41,47 +42,92 @@ export default function ReportModal({ isOpen, onClose }: Props) {
       return;
     }
 
-    // 실종자 데이터 생성
-    const newPerson = {
-      id: `report_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      name: formData.name,
-      age: parseInt(formData.age),
-      gender: formData.gender,
-      location: {
-        lat: 37.5665 + (Math.random() - 0.5) * 0.5, // 임시 좌표 (추후 Geocoding API 사용)
-        lng: 126.9780 + (Math.random() - 0.5) * 0.5,
-        address: `${formData.region} ${formData.address}`
-      },
-      photo: formData.photo || undefined,
-      description: formData.description || '특이사항 없음',
-      missingDate: new Date().toISOString(),
-      type: formData.type,
-      status: 'active' as const
-    };
+    // 로그인 확인
+    const auth = getAuth();
+    const user = auth.currentUser;
 
-    // 스토어에 추가
-    addMissingPerson(newPerson);
+    if (!user) {
+      toast.error('로그인이 필요합니다');
+      return;
+    }
 
-    // 성공 알림
-    toast.success('실종자 제보가 접수되었습니다. 빠른 시일 내에 확인하겠습니다.');
+    // 제보자 정보 확인
+    if (!formData.reporterName || !formData.reporterPhone) {
+      toast.error('제보자 이름과 연락처는 필수입니다');
+      return;
+    }
 
-    // 폼 리셋
-    setFormData({
-      name: '',
-      age: '',
-      gender: 'M',
-      type: 'missing_child',
-      address: '',
-      region: '서울특별시',
-      description: '',
-      photo: '',
-      reporterName: '',
-      reporterPhone: '',
-      reporterRelation: ''
-    });
+    try {
+      // 실종자 데이터 생성
+      const personData = {
+        name: formData.name,
+        age: parseInt(formData.age),
+        gender: formData.gender,
+        location: {
+          lat: 37.5665, // 백엔드에서 주소로 좌표 변환
+          lng: 126.9780,
+          address: `${formData.region} ${formData.address}`
+        },
+        photo: formData.photo || undefined,
+        description: formData.description || '특이사항 없음',
+        type: formData.type
+      };
 
-    // 모달 닫기
-    onClose();
+      // 제보자 정보
+      const reporterData = {
+        name: formData.reporterName,
+        phone: formData.reporterPhone,
+        relation: formData.reporterRelation || '미상'
+      };
+
+      // API 호출
+      const token = await user.getIdToken();
+      const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3000'}/api/reports`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          person: personData,
+          reporter: reporterData,
+          uid: user.uid
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || '제보 등록에 실패했습니다');
+      }
+
+      // 로컬 스토어에도 추가
+      addMissingPerson(data.report);
+
+      // 성공 알림
+      toast.success('실종자 제보가 성공적으로 등록되었습니다');
+
+      // 폼 리셋
+      setFormData({
+        name: '',
+        age: '',
+        gender: 'M',
+        type: 'missing_child',
+        address: '',
+        region: '서울특별시',
+        description: '',
+        photo: '',
+        reporterName: '',
+        reporterPhone: '',
+        reporterRelation: ''
+      });
+
+      // 모달 닫기
+      onClose();
+    } catch (error: any) {
+      console.error('제보 등록 실패:', error);
+      toast.error(error.message || '제보 등록 중 오류가 발생했습니다');
+    }
   };
 
   if (!isOpen) return null;
@@ -219,6 +265,7 @@ export default function ReportModal({ isOpen, onClose }: Props) {
                 }}
               >
                 <option value="missing_child">실종 아동</option>
+                <option value="general">일반 실종자</option>
                 <option value="disabled">지적장애인</option>
                 <option value="dementia">치매환자</option>
               </select>

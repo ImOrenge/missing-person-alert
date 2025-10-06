@@ -152,6 +152,25 @@ class FirebaseService {
   }
 
   /**
+   * 특정 실종자 데이터 삭제
+   */
+  async deleteMissingPerson(id) {
+    if (!this.db) {
+      return false;
+    }
+
+    try {
+      const personRef = ref(this.db, `missingPersons/${id}`);
+      await remove(personRef);
+      console.log(`✅ 실종자 삭제: ${id}`);
+      return true;
+    } catch (error) {
+      console.error('❌ Firebase 삭제 실패:', error.message);
+      return false;
+    }
+  }
+
+  /**
    * 중복 데이터 제거 (이름, 나이, 성별이 같은 데이터 중 오래된 것 삭제)
    */
   async removeDuplicates() {
