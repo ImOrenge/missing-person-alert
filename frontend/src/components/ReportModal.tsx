@@ -265,9 +265,11 @@ export default function ReportModal({ isOpen, onClose }: Props) {
                 }}
               >
                 <option value="missing_child">실종 아동</option>
-                <option value="general">일반 실종자</option>
+                <option value="runaway">가출인</option>
                 <option value="disabled">지적장애인</option>
                 <option value="dementia">치매환자</option>
+                <option value="facility">시설보호자</option>
+                <option value="unknown">신원불상</option>
               </select>
             </div>
           </div>

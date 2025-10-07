@@ -87,8 +87,8 @@ const MissingPersonSchema = {
   type: {
     type: 'string',
     required: true,
-    enum: ['missing_child', 'disabled', 'dementia'],
-    description: '실종자 유형 (missing_child: 아동, disabled: 장애인, dementia: 치매)'
+    enum: ['missing_child', 'disabled', 'dementia', 'runaway', 'facility', 'unknown'],
+    description: '실종자 유형 (missing_child: 아동, disabled: 장애인, dementia: 치매, runaway: 가출인, facility: 시설보호자, unknown: 신원불상)'
   },
   status: {
     type: 'string',
@@ -123,6 +123,42 @@ const MissingPersonSchema = {
     type: 'number',
     required: true,
     description: '데이터 업데이트 시간 (timestamp)'
+  },
+  source: {
+    type: 'string',
+    required: false,
+    nullable: true,
+    description: '데이터 출처 (api, manual 등)'
+  },
+  bodyType: {
+    type: 'string',
+    required: false,
+    nullable: true,
+    description: '체형'
+  },
+  faceShape: {
+    type: 'string',
+    required: false,
+    nullable: true,
+    description: '얼굴형'
+  },
+  hairShape: {
+    type: 'string',
+    required: false,
+    nullable: true,
+    description: '머리 모양'
+  },
+  hairColor: {
+    type: 'string',
+    required: false,
+    nullable: true,
+    description: '머리 색깔'
+  },
+  apiTargetCode: {
+    type: 'string',
+    required: false,
+    nullable: true,
+    description: 'API 원본 대상 구분 코드'
   }
 };
 

@@ -192,11 +192,11 @@ class APIPoller {
 
     // 대상 구분을 타입으로 변환 (세부 분류)
     const age = parseInt(apiData.ageNow) || parseInt(apiData.age) || 0;
-    let type = 'general'; // 기본값: 일반 실종자
+    let type = 'runaway'; // 기본값: 가출인
 
     switch (apiData.writngTrgetDscd) {
       case '010': // 아동
-        type = age < 18 ? 'missing_child' : 'general';
+        type = age < 18 ? 'missing_child' : 'runaway';
         break;
       case '020': // 일반가출
         type = 'runaway';
@@ -216,7 +216,7 @@ class APIPoller {
         type = 'unknown';
         break;
       default:
-        type = age < 18 ? 'missing_child' : 'general';
+        type = age < 18 ? 'missing_child' : 'runaway';
     }
 
     // 실종일시 파싱 (YYYYMMDD 형식을 ISO 형식으로 변환)

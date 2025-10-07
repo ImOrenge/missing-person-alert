@@ -10,7 +10,6 @@ interface Props {
 const getTypeLabel = (type: string): string => {
   const labels: Record<string, string> = {
     missing_child: '실종 아동',
-    general: '일반 실종자',
     runaway: '가출인',
     disabled: '지적장애인',
     dementia: '치매환자',
@@ -23,8 +22,7 @@ const getTypeLabel = (type: string): string => {
 const getTypeColor = (type: string): string => {
   const colors: Record<string, string> = {
     missing_child: 'bg-red-500',
-    general: 'bg-blue-500',
-    runaway: 'bg-teal-500',
+    runaway: 'bg-blue-500',
     disabled: 'bg-orange-500',
     dementia: 'bg-purple-500',
     facility: 'bg-green-600',

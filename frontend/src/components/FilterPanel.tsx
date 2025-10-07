@@ -78,10 +78,6 @@ export default function FilterPanel({ onClose }: Props) {
               {missingPersons.filter((p) => p.type === 'missing_child').length}명
             </p>
             <p style={{ margin: '5px 0', fontSize: '14px', color: '#3498db' }}>
-              <strong>일반:</strong>{' '}
-              {missingPersons.filter((p) => p.type === 'general').length}명
-            </p>
-            <p style={{ margin: '5px 0', fontSize: '14px', color: '#16a085' }}>
               <strong>가출:</strong>{' '}
               {missingPersons.filter((p) => p.type === 'runaway').length}명
             </p>
@@ -174,8 +170,7 @@ export default function FilterPanel({ onClose }: Props) {
           >
             {[
               { value: 'missing_child', label: '🔴 실종 아동', color: '#e74c3c' },
-              { value: 'general', label: '🔵 일반 실종자', color: '#3498db' },
-              { value: 'runaway', label: '🟢 가출인', color: '#16a085' },
+              { value: 'runaway', label: '🔵 가출인', color: '#3498db' },
               { value: 'disabled', label: '🟠 지적장애인', color: '#f39c12' },
               { value: 'dementia', label: '🟣 치매환자', color: '#9b59b6' },
               { value: 'facility', label: '🟢 시설보호자', color: '#27ae60' },

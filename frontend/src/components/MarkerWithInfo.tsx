@@ -21,10 +21,8 @@ function getColorByType(type: string): string {
   switch (type) {
     case 'missing_child':
       return '#e74c3c'; // 빨강 (아동)
-    case 'general':
-      return '#3498db'; // 파랑 (일반)
     case 'runaway':
-      return '#16a085'; // 청록 (가출)
+      return '#3498db'; // 파랑 (가출)
     case 'disabled':
       return '#f39c12'; // 주황 (장애인)
     case 'dementia':
@@ -43,8 +41,6 @@ function getTypeLabel(type: string): string {
   switch (type) {
     case 'missing_child':
       return '실종 아동';
-    case 'general':
-      return '일반 실종자';
     case 'runaway':
       return '가출인';
     case 'disabled':
