@@ -3,22 +3,10 @@ import { X, ArrowUpDown } from 'lucide-react';
 import { useEmergencyStore } from '../stores/emergencyStore';
 
 const KOREAN_REGIONS = [
-  '서울특별시',
-  '부산광역시',
-  '대구광역시',
-  '인천광역시',
-  '광주광역시',
-  '대전광역시',
-  '울산광역시',
-  '세종특별자치시',
-  '경기도',
-  '강원도',
-  '충청북도',
-  '충청남도',
-  '전라북도',
-  '전라남도',
-  '경상북도',
-  '경상남도',
+  '서울특별시', '부산광역시', '대구광역시', '인천광역시',
+  '광주광역시', '대전광역시', '울산광역시', '세종특별자치시',
+  '경기도', '강원도', '충청북도', '충청남도',
+  '전라북도', '전라남도', '경상북도', '경상남도',
   '제주특별자치도'
 ];
 
@@ -43,11 +31,17 @@ export default function FilterPanel({ onClose }: Props) {
     updateFilters({ types: newTypes });
   };
 
+  const handleTimeRangeChange = (range: string) => {
+    updateFilters({ timeRange: range as any });
+  };
+
   return (
-    <div className="bg-white p-6 shadow-lg border-b-2 border-gray-200">
+    <div className="bg-white w-full h-full flex flex-col">
       {/* 헤더 */}
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-bold text-gray-800">🔍 필터</h2>
+      <div className="flex-shrink-0 bg-white border-b p-4 flex items-center justify-between">
+        <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+          🔍 필터
+        </h2>
         <button
           onClick={onClose}
           className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
@@ -56,214 +50,146 @@ export default function FilterPanel({ onClose }: Props) {
         </button>
       </div>
 
-      <div className="flex gap-6 flex-wrap">
+      <div className="flex-1 overflow-y-auto p-4 space-y-6">
         {/* 통계 정보 */}
-        <div style={{ minWidth: '150px' }}>
-          <h3 style={{ marginBottom: '10px', fontSize: '16px', color: '#2c3e50' }}>
-            📊 현황
+        <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-xl p-4">
+          <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+            📊 실종자 현황
           </h3>
-          <div
-            style={{
-              padding: '15px',
-              backgroundColor: 'white',
-              borderRadius: '8px',
-              boxShadow: '0 2px 5px rgba(0,0,0,0.1)'
-            }}
-          >
-            <p style={{ margin: '5px 0', fontSize: '14px' }}>
-              <strong>전체:</strong> {missingPersons.length}명
-            </p>
-            <p style={{ margin: '5px 0', fontSize: '14px', color: '#e74c3c' }}>
-              <strong>아동:</strong>{' '}
-              {missingPersons.filter((p) => p.type === 'missing_child').length}명
-            </p>
-            <p style={{ margin: '5px 0', fontSize: '14px', color: '#3498db' }}>
-              <strong>가출:</strong>{' '}
-              {missingPersons.filter((p) => p.type === 'runaway').length}명
-            </p>
-            <p style={{ margin: '5px 0', fontSize: '14px', color: '#f39c12' }}>
-              <strong>장애인:</strong>{' '}
-              {missingPersons.filter((p) => p.type === 'disabled').length}명
-            </p>
-            <p style={{ margin: '5px 0', fontSize: '14px', color: '#9b59b6' }}>
-              <strong>치매:</strong>{' '}
-              {missingPersons.filter((p) => p.type === 'dementia').length}명
-            </p>
-            <p style={{ margin: '5px 0', fontSize: '14px', color: '#27ae60' }}>
-              <strong>시설:</strong>{' '}
-              {missingPersons.filter((p) => p.type === 'facility').length}명
-            </p>
-            <p style={{ margin: '5px 0', fontSize: '14px', color: '#7f8c8d' }}>
-              <strong>불상:</strong>{' '}
-              {missingPersons.filter((p) => p.type === 'unknown').length}명
-            </p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-white rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-gray-800">{missingPersons.length}</p>
+              <p className="text-xs text-gray-600 mt-1">전체</p>
+            </div>
+            <div className="bg-white rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-red-600">
+                {missingPersons.filter((p) => p.type === 'missing_child').length}
+              </p>
+              <p className="text-xs text-gray-600 mt-1">아동</p>
+            </div>
+            <div className="bg-white rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-orange-600">
+                {missingPersons.filter((p) => p.type === 'disabled').length}
+              </p>
+              <p className="text-xs text-gray-600 mt-1">장애인</p>
+            </div>
+            <div className="bg-white rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-purple-600">
+                {missingPersons.filter((p) => p.type === 'dementia').length}
+              </p>
+              <p className="text-xs text-gray-600 mt-1">치매</p>
+            </div>
           </div>
         </div>
 
-        {/* 지역 필터 */}
+        {/* 정렬 */}
         <div>
-          <h3 style={{ marginBottom: '10px', fontSize: '16px', color: '#2c3e50' }}>
-            🗺️ 지역 선택
-          </h3>
-          <select
-            multiple
-            value={filters.regions}
-            onChange={(e) => {
-              const selected = Array.from(e.target.selectedOptions, (opt) => opt.value);
-              updateFilters({ regions: selected });
-            }}
-            style={{
-              width: '200px',
-              height: '150px',
-              padding: '8px',
-              borderRadius: '8px',
-              border: '1px solid #ced4da',
-              fontSize: '13px',
-              backgroundColor: 'white'
-            }}
-          >
-            {KOREAN_REGIONS.map((region) => (
-              <option key={region} value={region}>
-                {region}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() => updateFilters({ regions: [] })}
-            style={{
-              marginTop: '8px',
-              width: '100%',
-              padding: '8px',
-              backgroundColor: '#6c757d',
-              color: 'white',
-              border: 'none',
-              borderRadius: '5px',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: '500'
-            }}
-          >
-            전체 지역
-          </button>
-          {filters.regions.length > 0 && (
-            <p style={{ marginTop: '5px', fontSize: '12px', color: '#666' }}>
-              {filters.regions.length}개 지역 선택됨
-            </p>
-          )}
-        </div>
-
-        {/* 유형 필터 */}
-        <div>
-          <h3 style={{ marginBottom: '10px', fontSize: '16px', color: '#2c3e50' }}>
-            👥 실종자 유형
-          </h3>
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '12px',
-              backgroundColor: 'white',
-              padding: '15px',
-              borderRadius: '8px',
-              boxShadow: '0 2px 5px rgba(0,0,0,0.1)'
-            }}
-          >
-            {[
-              { value: 'missing_child', label: '🔴 실종 아동', color: '#e74c3c' },
-              { value: 'runaway', label: '🔵 가출인', color: '#3498db' },
-              { value: 'disabled', label: '🟠 지적장애인', color: '#f39c12' },
-              { value: 'dementia', label: '🟣 치매환자', color: '#9b59b6' },
-              { value: 'facility', label: '🟢 시설보호자', color: '#27ae60' },
-              { value: 'unknown', label: '⚫ 신원불상', color: '#7f8c8d' }
-            ].map(({ value, label, color }) => (
-              <label
-                key={value}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  cursor: 'pointer',
-                  fontSize: '14px'
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={filters.types.includes(value as any)}
-                  onChange={() => handleTypeToggle(value)}
-                  style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                />
-                <span style={{ fontWeight: filters.types.includes(value as any) ? 'bold' : 'normal' }}>
-                  {label}
-                </span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        {/* 시간 범위 필터 */}
-        <div>
-          <h3 style={{ marginBottom: '10px', fontSize: '16px', color: '#2c3e50' }}>
-            ⏰ 기간 선택
-          </h3>
-          <select
-            value={filters.timeRange}
-            onChange={(e) => updateFilters({ timeRange: e.target.value as any })}
-            style={{
-              width: '180px',
-              padding: '10px',
-              borderRadius: '8px',
-              border: '1px solid #ced4da',
-              fontSize: '14px',
-              backgroundColor: 'white',
-              cursor: 'pointer'
-            }}
-          >
-            <option value="24h">최근 24시간</option>
-            <option value="7d">최근 7일</option>
-            <option value="30d">최근 30일</option>
-            <option value="60d">최근 60일</option>
-            <option value="90d">최근 90일</option>
-            <option value="1y">최근 1년</option>
-            <option value="all">전체</option>
-          </select>
-        </div>
-
-        {/* 정렬 순서 */}
-        <div>
-          <h3 style={{ marginBottom: '10px', fontSize: '16px', color: '#2c3e50' }}>
-            📅 날짜 정렬
-          </h3>
+          <h3 className="text-sm font-bold text-gray-700 mb-3">🔄 정렬</h3>
           <button
             onClick={toggleSortOrder}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              width: '180px',
-              padding: '10px 15px',
-              borderRadius: '8px',
-              border: '1px solid #ced4da',
-              fontSize: '14px',
-              backgroundColor: 'white',
-              cursor: 'pointer',
-              transition: 'all 0.2s',
-              fontWeight: '500'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = '#f8f9fa';
-              e.currentTarget.style.borderColor = '#007bff';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'white';
-              e.currentTarget.style.borderColor = '#ced4da';
-            }}
+            className="w-full md:w-auto flex items-center justify-center gap-2 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
           >
-            <ArrowUpDown size={16} />
-            {sortOrder === 'desc' ? '최신순 ▼' : '오래된순 ▲'}
+            <ArrowUpDown size={18} />
+            <span className="font-medium">
+              {sortOrder === 'desc' ? '최신순' : '오래된순'}
+            </span>
           </button>
-          <p style={{ marginTop: '5px', fontSize: '12px', color: '#666' }}>
-            {sortOrder === 'desc' ? '최근 실종자부터 표시' : '오래된 실종자부터 표시'}
-          </p>
+        </div>
+
+        {/* 실종 기간 */}
+        <div>
+          <h3 className="text-sm font-bold text-gray-700 mb-3">📅 실종 기간</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {[
+              { range: '30d', label: '30일 이내' },
+              { range: '90d', label: '90일 이내' },
+              { range: '180d', label: '180일 이내' },
+              { range: '1y', label: '1년 이내' },
+              { range: '3y', label: '3년 이내' },
+              { range: '5y', label: '5년 이내' },
+              { range: 'all', label: '전체' },
+            ].map((item) => (
+              <button
+                key={item.range}
+                onClick={() => handleTimeRangeChange(item.range)}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                  filters.timeRange === item.range
+                    ? 'bg-indigo-600 text-white shadow-lg'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 실종자 유형 */}
+        <div>
+          <h3 className="text-sm font-bold text-gray-700 mb-3">👥 실종자 유형</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {[
+              { type: 'missing_child', label: '실종 아동', color: 'bg-red-500' },
+              { type: 'runaway', label: '가출인', color: 'bg-blue-500' },
+              { type: 'disabled', label: '지적장애인', color: 'bg-orange-500' },
+              { type: 'dementia', label: '치매환자', color: 'bg-purple-500' },
+              { type: 'facility', label: '시설보호자', color: 'bg-green-600' },
+              { type: 'unknown', label: '신원불상', color: 'bg-gray-500' },
+            ].map((item) => (
+              <button
+                key={item.type}
+                onClick={() => handleTypeToggle(item.type)}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                  filters.types.includes(item.type as any)
+                    ? `${item.color} text-white shadow-lg`
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 지역 */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-bold text-gray-700">📍 지역</h3>
+            <button
+              onClick={() => updateFilters({ regions: [] })}
+              className="text-xs text-red-600 hover:text-red-700 font-medium"
+            >
+              전체 선택 해제
+            </button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+            {KOREAN_REGIONS.map((region) => (
+              <button
+                key={region}
+                onClick={() => handleRegionToggle(region)}
+                className={`px-3 py-2 rounded-lg text-sm transition-all ${
+                  filters.regions.includes(region)
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {region.replace(/(특별시|광역시|특별자치시|특별자치도|도)$/, '')}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 필터 리셋 */}
+        <div className="pt-4 border-t">
+          <button
+            onClick={() => {
+              updateFilters({ types: [], regions: [], timeRange: '30d' });
+              onClose();
+            }}
+            className="w-full px-4 py-3 bg-gray-800 hover:bg-gray-900 text-white rounded-lg font-semibold transition-colors"
+          >
+            모든 필터 초기화
+          </button>
         </div>
       </div>
     </div>

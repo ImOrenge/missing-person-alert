@@ -1,10 +1,11 @@
 import React from 'react';
-import { Filter, User, Clock, MapPin } from 'lucide-react';
+import { Filter, User, Clock, MapPin, X } from 'lucide-react';
 import { useEmergencyStore } from '../stores/emergencyStore';
 
 interface Props {
   onShowFilters: () => void;
   showFilters: boolean;
+  onClose?: () => void;
 }
 
 const getTypeLabel = (type: string): string => {
@@ -34,7 +35,6 @@ const getTypeColor = (type: string): string => {
 const getTimeSince = (date: string): string => {
   const missingDate = new Date(date);
 
-  // 날짜 파싱 실패 시 원본 문자열 반환
   if (isNaN(missingDate.getTime())) {
     return date;
   }
@@ -44,14 +44,12 @@ const getTimeSince = (date: string): string => {
   const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
   const diffHours = Math.floor((diffTime % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
 
-  // 실종 당시 날짜 표시
   const formattedDate = missingDate.toLocaleDateString('ko-KR', {
     year: 'numeric',
     month: 'long',
     day: 'numeric'
   });
 
-  // 경과 시간 계산
   if (diffDays > 0) {
     return `${formattedDate} (${diffDays}일 경과)`;
   } else if (diffHours > 0) {
@@ -60,7 +58,7 @@ const getTimeSince = (date: string): string => {
   return formattedDate;
 };
 
-export default function Sidebar({ onShowFilters, showFilters }: Props) {
+export default function Sidebar({ onShowFilters, showFilters, onClose }: Props) {
   const getFilteredPersons = useEmergencyStore(state => state.getFilteredPersons);
   const selectedPersonId = useEmergencyStore(state => state.selectedPersonId);
   const hoveredPersonId = useEmergencyStore(state => state.hoveredPersonId);
@@ -69,14 +67,25 @@ export default function Sidebar({ onShowFilters, showFilters }: Props) {
   const filteredPersons = getFilteredPersons();
 
   return (
-    <div className="w-80 bg-white border-r border-gray-200 flex flex-col shadow-lg">
+    <div className="w-full h-full md:w-80 bg-white md:border-r border-gray-200 flex flex-col shadow-lg">
       {/* 헤더 */}
       <div className="p-4 border-b border-gray-200 bg-gray-50">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-bold text-gray-800">실종자 목록</h2>
-          <span className="px-2.5 py-1 bg-red-100 text-red-700 rounded-full text-sm font-semibold">
-            {filteredPersons.length}명
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="px-2.5 py-1 bg-red-100 text-red-700 rounded-full text-sm font-semibold">
+              {filteredPersons.length}명
+            </span>
+            {/* 모바일 닫기 버튼 */}
+            {onClose && (
+              <button
+                onClick={onClose}
+                className="md:hidden p-2 hover:bg-gray-200 rounded-lg transition-colors"
+              >
+                <X size={20} />
+              </button>
+            )}
+          </div>
         </div>
 
         <button
@@ -114,7 +123,10 @@ export default function Sidebar({ onShowFilters, showFilters }: Props) {
                       ? 'bg-red-50 border-l-4 border-red-500 shadow-md'
                       : 'hover:bg-gray-50'
                   }`}
-                  onClick={() => setSelectedPersonId(person.id)}
+                  onClick={() => {
+                    setSelectedPersonId(person.id);
+                    if (onClose) onClose(); // 모바일에서는 선택 후 사이드바 닫기
+                  }}
                   onMouseEnter={() => setHoveredPersonId(person.id)}
                   onMouseLeave={() => setHoveredPersonId(null)}
                 >
@@ -127,7 +139,6 @@ export default function Sidebar({ onShowFilters, showFilters }: Props) {
                         alt={person.name}
                         className="w-16 h-16 rounded-lg object-cover"
                         onError={(e) => {
-                          // 이미지 로드 실패 시 기본 아이콘으로 대체
                           const target = e.target as HTMLImageElement;
                           target.style.display = 'none';
                           if (target.nextElementSibling) {

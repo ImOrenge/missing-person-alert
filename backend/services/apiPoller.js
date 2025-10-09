@@ -196,7 +196,7 @@ class APIPoller {
 
     switch (apiData.writngTrgetDscd) {
       case '010': // 아동
-        type = age < 18 ? 'missing_child' : 'runaway';
+        type = 'missing_child';
         break;
       case '020': // 일반가출
         type = 'runaway';

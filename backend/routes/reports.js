@@ -3,36 +3,28 @@ const router = express.Router();
 const firebaseService = require('../services/firebaseService');
 const { validateMissingPerson, normalizeMissingPerson } = require('../schemas/firebaseSchema');
 const APIPoller = require('../services/apiPoller');
-
-/**
- * 인증 확인 미들웨어
- */
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ error: '로그인이 필요합니다' });
-  }
-
-  req.token = token;
-  next();
-};
+const {
+  verifyFirebaseToken,
+  verifyPhoneAuthenticated,
+  verifyAdmin,
+  rateLimit,
+  optionalAuth
+} = require('../middleware/authMiddleware');
 
 /**
  * POST /api/reports
- * 실종자 제보 등록 (인증 필요)
+ * 실종자 제보 등록 (전화번호 인증 필요)
  */
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', verifyFirebaseToken, verifyPhoneAuthenticated, rateLimit, async (req, res) => {
   try {
-    const { person, reporter } = req.body;
+    const { person } = req.body;
 
-    if (!person || !reporter) {
-      return res.status(400).json({ error: '실종자 정보와 제보자 정보가 필요합니다' });
+    if (!person) {
+      return res.status(400).json({ error: '실종자 정보가 필요합니다' });
     }
 
-    // 제보자 UID (Firebase Auth에서 전달)
-    const reporterUid = req.body.uid || `user_${Date.now()}`;
+    // 제보자 UID (req.user에서 가져옴)
+    const reporterUid = req.user.uid;
 
     // 주소를 좌표로 변환
     const apiPoller = new APIPoller(null);
@@ -45,9 +37,6 @@ router.post('/', authenticateToken, async (req, res) => {
       location: location, // 변환된 좌표 사용
       reportedBy: {
         uid: reporterUid,
-        name: reporter.name,
-        phone: reporter.phone,
-        relation: reporter.relation,
         reportedAt: new Date().toISOString()
       },
       status: 'active',
@@ -71,7 +60,7 @@ router.post('/', authenticateToken, async (req, res) => {
     const saveResult = await firebaseService.saveMissingPersons([normalized]);
 
     if (saveResult.saved > 0) {
-      console.log(`✅ 사용자 제보 저장: ${normalized.name} (제보자: ${reporter.name})`);
+      console.log(`✅ 사용자 제보 저장: ${normalized.name} (제보자 UID: ${reporterUid})`);
 
       // WebSocket으로 실시간 전송 (wsManager가 있다면)
       if (global.wsManager) {
@@ -99,13 +88,9 @@ router.post('/', authenticateToken, async (req, res) => {
  * GET /api/reports/my
  * 내가 제보한 실종자 목록 조회 (인증 필요)
  */
-router.get('/my', authenticateToken, async (req, res) => {
+router.get('/my', verifyFirebaseToken, async (req, res) => {
   try {
-    const uid = req.body.uid || req.query.uid;
-
-    if (!uid) {
-      return res.status(400).json({ error: 'UID가 필요합니다' });
-    }
+    const uid = req.user.uid;
 
     // Firebase에서 모든 실종자 데이터 조회
     const allPersons = await firebaseService.getMissingPersons(1000);
@@ -125,6 +110,35 @@ router.get('/my', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('❌ 제보 기록 조회 실패:', error);
     res.status(500).json({ error: '제보 기록 조회 중 오류가 발생했습니다' });
+  }
+});
+
+/**
+ * GET /api/reports/all
+ * 모든 제보 조회 (관리자 전용)
+ */
+router.get('/all', verifyFirebaseToken, verifyAdmin, async (req, res) => {
+  try {
+    const uid = req.user.uid;
+
+    // Firebase에서 모든 실종자 데이터 조회
+    const allPersons = await firebaseService.getMissingPersons(1000);
+
+    // 사용자 제보만 필터링 (API 데이터 제외)
+    const userReports = allPersons.filter(
+      (person) => person.source === 'user_report' && person.reportedBy
+    );
+
+    console.log(`✅ 전체 제보 조회 (관리자): ${uid} - ${userReports.length}건`);
+
+    res.json({
+      success: true,
+      count: userReports.length,
+      reports: userReports
+    });
+  } catch (error) {
+    console.error('❌ 전체 제보 조회 실패:', error);
+    res.status(500).json({ error: '전체 제보 조회 중 오류가 발생했습니다' });
   }
 });
 
@@ -156,10 +170,10 @@ router.get('/:id', async (req, res) => {
  * DELETE /api/reports/:id
  * 제보 삭제 (본인만 가능)
  */
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', verifyFirebaseToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const uid = req.body.uid;
+    const uid = req.user.uid;
 
     // 제보 정보 조회
     const person = await firebaseService.getMissingPerson(id);

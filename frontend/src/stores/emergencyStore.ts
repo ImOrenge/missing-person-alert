@@ -37,12 +37,16 @@ function parseTimeRange(range: TimeRange): number {
       return 7 * 24 * 60 * 60 * 1000;
     case '30d':
       return 30 * 24 * 60 * 60 * 1000;
-    case '60d':
-      return 60 * 24 * 60 * 60 * 1000;
     case '90d':
       return 90 * 24 * 60 * 60 * 1000;
+    case '180d':
+      return 180 * 24 * 60 * 60 * 1000;
     case '1y':
       return 365 * 24 * 60 * 60 * 1000;
+    case '3y':
+      return 3 * 365 * 24 * 60 * 60 * 1000;
+    case '5y':
+      return 5 * 365 * 24 * 60 * 60 * 1000;
     default:
       return 0;
   }

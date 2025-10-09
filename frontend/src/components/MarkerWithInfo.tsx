@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   AdvancedMarker,
   Pin,
@@ -7,6 +7,7 @@ import {
 } from '@vis.gl/react-google-maps';
 import { MissingPerson } from '../types';
 import { toast } from 'react-toastify';
+import ShareModal from './ShareModal';
 
 interface Props {
   person: MissingPerson;
@@ -56,27 +57,9 @@ function getTypeLabel(type: string): string {
   }
 }
 
-// 공유 기능
-function shareInfo(person: MissingPerson) {
-  if (navigator.share) {
-    navigator
-      .share({
-        title: `실종자 정보: ${person.name}`,
-        text: `${person.name} (${person.age}세)님이 ${person.location.address}에서 실종되었습니다.`,
-        url: window.location.href
-      })
-      .catch((error) => console.log('공유 실패:', error));
-  } else {
-    // 폴백: 클립보드 복사
-    const text = `실종자 정보\n이름: ${person.name}\n나이: ${person.age}세\n장소: ${person.location.address}`;
-    navigator.clipboard.writeText(text).then(() => {
-      toast.info('정보가 클립보드에 복사되었습니다');
-    });
-  }
-}
-
 const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, onClick, onClose }: Props) => {
   const [markerRef, marker] = useAdvancedMarkerRef();
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
 
   // 강조 상태에 따라 스케일과 테두리 조정
   const scale = isHighlighted || isSelected ? 1.5 : 1.2;
@@ -201,7 +184,7 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
                 112 신고
               </button>
               <button
-                onClick={() => shareInfo(person)}
+                onClick={() => setIsShareModalOpen(true)}
                 style={{
                   flex: 1,
                   padding: '10px',
@@ -220,6 +203,13 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
           </div>
         </InfoWindow>
       )}
+
+      {/* SNS 공유 모달 */}
+      <ShareModal
+        person={person}
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+      />
     </>
   );
 });

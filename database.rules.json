@@ -43,7 +43,7 @@
           ".validate": "newData.isString()"
         },
         "type": {
-          ".validate": "newData.isString() && (newData.val() == 'missing_child' || newData.val() == 'disabled' || newData.val() == 'dementia')"
+          ".validate": "newData.isString() && (newData.val() == 'missing_child' || newData.val() == 'disabled' || newData.val() == 'dementia' || newData.val() == 'runaway' || newData.val() == 'facility' || newData.val() == 'unknown')"
         },
         "status": {
           ".validate": "newData.isString() && (newData.val() == 'active' || newData.val() == 'found' || newData.val() == 'archived')"
@@ -59,6 +59,24 @@
         },
         "updatedAt": {
           ".validate": "newData.isNumber()"
+        },
+        "source": {
+          ".validate": "newData.isString() || newData.val() == null"
+        },
+        "bodyType": {
+          ".validate": "newData.isString() || newData.val() == null"
+        },
+        "faceShape": {
+          ".validate": "newData.isString() || newData.val() == null"
+        },
+        "hairShape": {
+          ".validate": "newData.isString() || newData.val() == null"
+        },
+        "hairColor": {
+          ".validate": "newData.isString() || newData.val() == null"
+        },
+        "apiTargetCode": {
+          ".validate": "newData.isString() || newData.val() == null"
         }
       }
     },

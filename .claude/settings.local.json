@@ -12,7 +12,9 @@
       "Bash(taskkill:*)",
       "Bash(awk:*)",
       "Bash(node:*)",
-      "Bash(npm uninstall:*)"
+      "Bash(npm uninstall:*)",
+      "Bash(npx playwright test:*)",
+      "Bash(npm run build:*)"
     ],
     "deny": [],
     "ask": []

@@ -8,6 +8,7 @@
     "@types/react-dom": "^18.2.18",
     "@types/react-window": "^1.8.8",
     "@vis.gl/react-google-maps": "^1.0.0",
+    "axios": "^1.12.2",
     "firebase": "^12.3.0",
     "lucide-react": "^0.309.0",
     "react": "^18.2.0",

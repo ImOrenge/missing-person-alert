@@ -1,0 +1,76 @@
+      {/* 메인 콘텐츠 */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* 사이드바 */}
+        {showSidebar && (
+          <Sidebar
+            onShowFilters={() => setShowFilters(!showFilters)}
+            showFilters={showFilters}
+          />
+        )}
+
+        {/* 지도 */}
+        <div className="flex-1 relative">
+          <EmergencyMap />
+
+          {/* 필터 패널 (오버레이) */}
+          {showFilters && (
+            <div className="absolute top-0 left-0 right-0 z-10 bg-white shadow-lg">
+              <FilterPanel onClose={() => setShowFilters(false)} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 제보하기 버튼 (로그인 시에만 표시) */}
+      {currentUser && (
+        <button
+          onClick={() => setShowReportModal(true)}
+          className="fixed bottom-20 right-6 bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-full shadow-lg flex items-center gap-2 transition-all hover:scale-105 z-40"
+        >
+          <Plus size={20} />
+          <span className="font-semibold">실종자 제보</span>
+        </button>
+      )}
+
+      {/* 모달들 */}
+      <ReportModal
+        isOpen={showReportModal}
+        onClose={() => setShowReportModal(false)}
+      />
+
+      <MyReportsModal
+        isOpen={showMyReportsModal}
+        onClose={() => setShowMyReportsModal(false)}
+      />
+
+      <LoginModal
+        isOpen={showLoginModal}
+        onClose={() => setShowLoginModal(false)}
+      />
+
+      {/* 토스트 알림 */}
+      <ToastContainer
+        position="bottom-left"
+        autoClose={3000}
+        hideProgressBar={false}
+        newestOnTop
+        closeOnClick
+        rtl={false}
+        pauseOnFocusLoss
+        draggable
+        pauseOnHover
+      />
+
+      {/* 공지사항 배너 (하단) */}
+      <div className="fixed bottom-0 left-0 right-0 z-30">
+        <AnnouncementBanner
+          announcement={ANNOUNCEMENTS[currentAnnouncementIndex]}
+          onPrev={() => setCurrentAnnouncementIndex((prev) => (prev - 1 + ANNOUNCEMENTS.length) % ANNOUNCEMENTS.length)}
+          onNext={() => setCurrentAnnouncementIndex((prev) => (prev + 1) % ANNOUNCEMENTS.length)}
+        />
+      </div>
+    </div>
+  );
+}
+
+export default App;

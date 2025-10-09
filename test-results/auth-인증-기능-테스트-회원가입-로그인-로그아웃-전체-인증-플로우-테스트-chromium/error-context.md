@@ -1,0 +1,306 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - button [ref=e7] [cursor=pointer]:
+          - img [ref=e8]
+        - heading "🚨 실시간 실종자 알림" [level=1] [ref=e10]
+        - generic [ref=e11]: 313명
+      - generic [ref=e12]:
+        - button "알림 끄기" [ref=e13] [cursor=pointer]:
+          - img [ref=e14]
+        - generic [ref=e19]: 연결됨
+        - button "로그인" [ref=e20] [cursor=pointer]:
+          - img [ref=e21]
+          - generic [ref=e24]: 로그인
+  - generic [ref=e25]:
+    - generic [ref=e26]:
+      - generic [ref=e27]:
+        - generic [ref=e28]:
+          - heading "실종자 목록" [level=2] [ref=e29]
+          - generic [ref=e30]: 11명
+        - button "필터" [ref=e31] [cursor=pointer]:
+          - img [ref=e32]
+          - generic [ref=e34]: 필터
+      - generic [ref=e36]:
+        - generic [ref=e38] [cursor=pointer]:
+          - img "김다순" [ref=e40]
+          - generic [ref=e41]:
+            - generic [ref=e42]:
+              - heading "김다순" [level=3] [ref=e43]
+              - generic [ref=e44]: 치매환자
+            - generic [ref=e45]:
+              - generic [ref=e46]:
+                - img [ref=e47]
+                - generic [ref=e50]: 81세 · 여성
+              - generic [ref=e51]:
+                - img [ref=e52]
+                - generic [ref=e55]: 서울 강서구 공항대로43길
+              - generic [ref=e56]:
+                - img [ref=e57]
+                - generic [ref=e60]: 2025년 10월 7일 (7시간 경과)
+        - generic [ref=e62] [cursor=pointer]:
+          - img "최순자" [ref=e64]
+          - generic [ref=e65]:
+            - generic [ref=e66]:
+              - heading "최순자" [level=3] [ref=e67]
+              - generic [ref=e68]: 치매환자
+            - generic [ref=e69]:
+              - generic [ref=e70]:
+                - img [ref=e71]
+                - generic [ref=e74]: 85세 · 여성
+              - generic [ref=e75]:
+                - img [ref=e76]
+                - generic [ref=e79]: 화성시 봉담읍 와우리591,봉담휴먼빌
+              - generic [ref=e80]:
+                - img [ref=e81]
+                - generic [ref=e84]: 2025년 10월 7일 (7시간 경과)
+        - generic [ref=e86] [cursor=pointer]:
+          - img "백유조" [ref=e88]
+          - generic [ref=e89]:
+            - generic [ref=e90]:
+              - heading "백유조" [level=3] [ref=e91]
+              - generic [ref=e92]: 치매환자
+            - generic [ref=e93]:
+              - generic [ref=e94]:
+                - img [ref=e95]
+                - generic [ref=e98]: 85세 · 남성
+              - generic [ref=e99]:
+                - generic [ref=e100]: 👕
+                - generic [ref=e101]: 기타
+              - generic [ref=e102]:
+                - img [ref=e103]
+                - generic [ref=e106]: 서울특별시 성북구 길음로
+              - generic [ref=e107]:
+                - img [ref=e108]
+                - generic [ref=e111]: 2025년 10월 6일 (1일 경과)
+        - generic [ref=e113] [cursor=pointer]:
+          - img "김강연" [ref=e115]
+          - generic [ref=e116]:
+            - generic [ref=e117]:
+              - heading "김강연" [level=3] [ref=e118]
+              - generic [ref=e119]: 치매환자
+            - generic [ref=e120]:
+              - generic [ref=e121]:
+                - img [ref=e122]
+                - generic [ref=e125]: 75세 · 여성
+              - generic [ref=e126]:
+                - img [ref=e127]
+                - generic [ref=e130]: 부산광역시 중구 남포길
+              - generic [ref=e131]:
+                - img [ref=e132]
+                - generic [ref=e135]: 2025년 10월 6일 (1일 경과)
+        - generic [ref=e137] [cursor=pointer]:
+          - img "김명현" [ref=e139]
+          - generic [ref=e140]:
+            - generic [ref=e141]:
+              - heading "김명현" [level=3] [ref=e142]
+              - generic [ref=e143]: 지적장애인
+            - generic [ref=e144]:
+              - generic [ref=e145]:
+                - img [ref=e146]
+                - generic [ref=e149]: 41세 · 남성
+              - generic [ref=e150]:
+                - generic [ref=e151]: 👕
+                - generic [ref=e152]: 캐주얼차림
+              - generic [ref=e153]:
+                - img [ref=e154]
+                - generic [ref=e157]: 충청북도 청주시 청원구
+              - generic [ref=e158]:
+                - img [ref=e159]
+                - generic [ref=e162]: 2025년 10월 5일 (2일 경과)
+        - generic [ref=e164] [cursor=pointer]:
+          - img "이호병" [ref=e166]
+          - generic [ref=e167]:
+            - generic [ref=e168]:
+              - heading "이호병" [level=3] [ref=e169]
+              - generic [ref=e170]: 치매환자
+            - generic [ref=e171]:
+              - generic [ref=e172]:
+                - img [ref=e173]
+                - generic [ref=e176]: 84세 · 남성
+              - generic [ref=e177]:
+                - img [ref=e178]
+                - generic [ref=e181]: 부산광역시 영도구 청학북로16번길
+              - generic [ref=e182]:
+                - img [ref=e183]
+                - generic [ref=e186]: 2025년 10월 2일 (5일 경과)
+        - generic [ref=e188] [cursor=pointer]:
+          - img "엄정호" [ref=e190]
+          - generic [ref=e191]:
+            - generic [ref=e192]:
+              - heading "엄정호" [level=3] [ref=e193]
+              - generic [ref=e194]: 지적장애인
+            - generic [ref=e195]:
+              - generic [ref=e196]:
+                - img [ref=e197]
+                - generic [ref=e200]: 61세 · 남성
+              - generic [ref=e201]:
+                - generic [ref=e202]: 👕
+                - generic [ref=e203]: 기타
+              - generic [ref=e204]:
+                - img [ref=e205]
+                - generic [ref=e208]: 경기도 안양시 만안구
+              - generic [ref=e209]:
+                - img [ref=e210]
+                - generic [ref=e213]: 2025년 10월 1일 (6일 경과)
+        - generic [ref=e215] [cursor=pointer]:
+          - img "정형자" [ref=e217]
+          - generic [ref=e218]:
+            - generic [ref=e219]:
+              - heading "정형자" [level=3] [ref=e220]
+              - generic [ref=e221]: 치매환자
+            - generic [ref=e222]:
+              - generic [ref=e223]:
+                - img [ref=e224]
+                - generic [ref=e227]: 78세 · 여성
+              - generic [ref=e228]:
+                - img [ref=e229]
+                - generic [ref=e232]: 광주광역시 동구 경양로
+              - generic [ref=e233]:
+                - img [ref=e234]
+                - generic [ref=e237]: 2025년 9월 30일 (7일 경과)
+        - generic [ref=e239] [cursor=pointer]:
+          - img "강영인" [ref=e241]
+          - generic [ref=e242]:
+            - generic [ref=e243]:
+              - heading "강영인" [level=3] [ref=e244]
+              - generic [ref=e245]: 지적장애인
+            - generic [ref=e246]:
+              - generic [ref=e247]:
+                - img [ref=e248]
+                - generic [ref=e251]: 78세 · 남성
+              - generic [ref=e252]:
+                - img [ref=e253]
+                - generic [ref=e256]: 강원특별자치도 평창군 기풍로
+              - generic [ref=e257]:
+                - img [ref=e258]
+                - generic [ref=e261]: 2025년 9월 26일 (11일 경과)
+        - generic [ref=e263] [cursor=pointer]:
+          - img "정영배" [ref=e265]
+          - generic [ref=e266]:
+            - generic [ref=e267]:
+              - heading "정영배" [level=3] [ref=e268]
+              - generic [ref=e269]: 치매환자
+            - generic [ref=e270]:
+              - generic [ref=e271]:
+                - img [ref=e272]
+                - generic [ref=e275]: 69세 · 남성
+              - generic [ref=e276]:
+                - img [ref=e277]
+                - generic [ref=e280]: 광주광역시 북구 서림로
+              - generic [ref=e281]:
+                - img [ref=e282]
+                - generic [ref=e285]: 2025년 9월 22일 (15일 경과)
+        - generic [ref=e287] [cursor=pointer]:
+          - img "김미정" [ref=e289]
+          - generic [ref=e290]:
+            - generic [ref=e291]:
+              - heading "김미정" [level=3] [ref=e292]
+              - generic [ref=e293]: 지적장애인
+            - generic [ref=e294]:
+              - generic [ref=e295]:
+                - img [ref=e296]
+                - generic [ref=e299]: 40세 · 여성
+              - generic [ref=e300]:
+                - generic [ref=e301]: 👕
+                - generic [ref=e302]: 기타
+              - generic [ref=e303]:
+                - img [ref=e304]
+                - generic [ref=e307]: 경상남도 진주시 망경동
+              - generic [ref=e308]:
+                - img [ref=e309]
+                - generic [ref=e312]: 2025년 9월 17일 (20일 경과)
+    - generic [ref=e317]:
+      - generic:
+        - button "Keyboard shortcuts"
+      - region "Map" [ref=e318]
+      - generic [ref=e319]:
+        - generic [ref=e366]:
+          - generic:
+            - generic:
+              - generic:
+                - button "김다순" [ref=e368] [cursor=pointer]:
+                  - generic [ref=e370]:
+                    - generic:
+                      - img
+                - button "최순자" [ref=e376] [cursor=pointer]:
+                  - generic [ref=e378]:
+                    - generic:
+                      - img
+                - button "백유조" [ref=e384] [cursor=pointer]:
+                  - generic [ref=e386]:
+                    - generic:
+                      - img
+                - button "김강연" [ref=e392] [cursor=pointer]:
+                  - generic [ref=e394]:
+                    - generic:
+                      - img
+                - button "김명현" [ref=e400] [cursor=pointer]:
+                  - generic [ref=e402]:
+                    - generic:
+                      - img
+                - button "이호병" [ref=e408] [cursor=pointer]:
+                  - generic [ref=e410]:
+                    - generic:
+                      - img
+                - button "엄정호" [ref=e416] [cursor=pointer]:
+                  - generic [ref=e418]:
+                    - generic:
+                      - img
+                - button "정형자" [ref=e424] [cursor=pointer]:
+                  - generic [ref=e426]:
+                    - generic:
+                      - img
+                - button "강영인" [ref=e432] [cursor=pointer]:
+                  - generic [ref=e434]:
+                    - generic:
+                      - img
+                - button "정영배" [ref=e440] [cursor=pointer]:
+                  - generic [ref=e442]:
+                    - generic:
+                      - img
+                - button "김미정" [ref=e448] [cursor=pointer]:
+                  - generic [ref=e450]:
+                    - generic:
+                      - img
+        - iframe [ref=e456]:
+          
+        - menubar [ref=e457] [cursor=pointer]:
+          - menuitemradio "Show street map" [checked] [ref=e459]: Map
+          - menuitemradio "Show satellite imagery" [ref=e461]: Satellite
+        - button "Toggle fullscreen view" [ref=e462] [cursor=pointer]
+        - generic:
+          - generic:
+            - button "Map camera controls" [ref=e464] [cursor=pointer]
+            - generic [ref=e466] [cursor=pointer]:
+              - button "Zoom in" [ref=e467]
+              - button "Zoom out" [ref=e469]
+        - link "Open this area in Google Maps (opens a new window)" [ref=e471] [cursor=pointer]:
+          - /url: https://maps.google.com/maps?ll=37.5665,126.978&z=7&t=m&hl=en-US&gl=US&mapclient=apiv3
+          - img "Google" [ref=e473]
+        - generic [ref=e474]:
+          - button "Keyboard shortcuts" [ref=e480] [cursor=pointer]
+          - generic [ref=e485]: Map data ©2025 Google, TMap Mobility
+          - link "Terms (opens in new tab)" [ref=e490] [cursor=pointer]:
+            - /url: https://www.google.com/intl/en-US_US/help/terms_maps.html
+            - text: Terms
+  - generic [ref=e492]:
+    - alert [ref=e493]:
+      - img [ref=e495]
+      - generic [ref=e497]: 로그아웃되었습니다
+    - button "close" [ref=e498] [cursor=pointer]:
+      - img [ref=e499]
+    - progressbar "notification timer" [ref=e503]
+  - generic [ref=e506]:
+    - button "이전 공지" [ref=e507] [cursor=pointer]:
+      - img [ref=e508]
+    - generic [ref=e510]:
+      - img [ref=e511]
+      - paragraph [ref=e513]: 실시간 알림을 켜두시면 새로운 실종자 정보를 즉시 받아보실 수 있습니다
+    - button "다음 공지" [ref=e514] [cursor=pointer]:
+      - img [ref=e515]
+```

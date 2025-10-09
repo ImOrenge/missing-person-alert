@@ -20,10 +20,7 @@ export default function ReportModal({ isOpen, onClose }: Props) {
     address: '',
     region: '서울특별시',
     description: '',
-    photo: '',
-    reporterName: '',
-    reporterPhone: '',
-    reporterRelation: ''
+    photo: ''
   });
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -51,12 +48,6 @@ export default function ReportModal({ isOpen, onClose }: Props) {
       return;
     }
 
-    // 제보자 정보 확인
-    if (!formData.reporterName || !formData.reporterPhone) {
-      toast.error('제보자 이름과 연락처는 필수입니다');
-      return;
-    }
-
     try {
       // 실종자 데이터 생성
       const personData = {
@@ -73,13 +64,6 @@ export default function ReportModal({ isOpen, onClose }: Props) {
         type: formData.type
       };
 
-      // 제보자 정보
-      const reporterData = {
-        name: formData.reporterName,
-        phone: formData.reporterPhone,
-        relation: formData.reporterRelation || '미상'
-      };
-
       // API 호출
       const token = await user.getIdToken();
       const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3000'}/api/reports`, {
@@ -90,7 +74,6 @@ export default function ReportModal({ isOpen, onClose }: Props) {
         },
         body: JSON.stringify({
           person: personData,
-          reporter: reporterData,
           uid: user.uid
         })
       });
@@ -116,10 +99,7 @@ export default function ReportModal({ isOpen, onClose }: Props) {
         address: '',
         region: '서울특별시',
         description: '',
-        photo: '',
-        reporterName: '',
-        reporterPhone: '',
-        reporterRelation: ''
+        photo: ''
       });
 
       // 모달 닫기
@@ -377,70 +357,6 @@ export default function ReportModal({ isOpen, onClose }: Props) {
                 fontSize: '14px'
               }}
             />
-          </div>
-
-          {/* 제보자 정보 */}
-          <div style={{ marginBottom: '20px' }}>
-            <h3 style={{ fontSize: '16px', marginBottom: '15px', color: '#34495e' }}>제보자 정보</h3>
-
-            <div style={{ marginBottom: '15px' }}>
-              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px' }}>
-                제보자 이름
-              </label>
-              <input
-                type="text"
-                name="reporterName"
-                value={formData.reporterName}
-                onChange={handleChange}
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  borderRadius: '6px',
-                  border: '1px solid #ddd',
-                  fontSize: '14px'
-                }}
-              />
-            </div>
-
-            <div style={{ marginBottom: '15px' }}>
-              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px' }}>
-                연락처
-              </label>
-              <input
-                type="tel"
-                name="reporterPhone"
-                value={formData.reporterPhone}
-                onChange={handleChange}
-                placeholder="010-1234-5678"
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  borderRadius: '6px',
-                  border: '1px solid #ddd',
-                  fontSize: '14px'
-                }}
-              />
-            </div>
-
-            <div style={{ marginBottom: '15px' }}>
-              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px' }}>
-                실종자와의 관계
-              </label>
-              <input
-                type="text"
-                name="reporterRelation"
-                value={formData.reporterRelation}
-                onChange={handleChange}
-                placeholder="예: 부모, 친척, 지인 등"
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  borderRadius: '6px',
-                  border: '1px solid #ddd',
-                  fontSize: '14px'
-                }}
-              />
-            </div>
           </div>
 
           {/* 제출 버튼 */}

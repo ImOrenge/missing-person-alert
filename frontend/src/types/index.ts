@@ -5,7 +5,7 @@ export type MissingPersonType = 'missing_child' | 'runaway' | 'disabled' | 'deme
 export type MissingPersonStatus = 'active' | 'found' | 'investigating';
 
 // 시간 범위
-export type TimeRange = '24h' | '7d' | '30d' | '60d' | '90d' | '1y' | 'all';
+export type TimeRange = '24h' | '7d' | '30d' | '90d' | '180d' | '1y' | '3y' | '5y' | 'all';
 
 // 실종자 정보
 export interface MissingPerson {
@@ -40,6 +40,7 @@ export interface MissingPerson {
     reportedAt: string;
   };
   source?: 'user_report' | 'api';
+  updatedAt?: number;
 }
 
 // 긴급재난문자

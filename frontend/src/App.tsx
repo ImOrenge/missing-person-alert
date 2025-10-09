@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { Bell, BellOff, ChevronLeft, ChevronRight, LogIn, LogOut, UserCircle, Plus, FileText } from 'lucide-react';
+import { Bell, BellOff, ChevronLeft, ChevronRight, LogIn, LogOut, UserCircle, Plus, FileText, Shield } from 'lucide-react';
 import EmergencyMap from './components/EmergencyMap';
 import Sidebar from './components/Sidebar';
 import FilterPanel from './components/FilterPanel';
 import ReportModal from './components/ReportModal';
 import MyReportsModal from './components/MyReportsModal';
+import AllReportsModal from './components/AllReportsModal';
 import LoginModal from './components/LoginModal';
 import AnnouncementBanner from './components/AnnouncementBanner';
 import { useEmergencyStore } from './stores/emergencyStore';
-import { useEmergencyWebSocket } from './hooks/useEmergencyWebSocket';
-import { useFirebaseSync } from './hooks/useFirebaseSync';
+import { useApiData } from './hooks/useApiData';
 import { ToastContainer, toast } from 'react-toastify';
 import { onAuthChange, logout as firebaseLogout } from './services/firebase';
+import { hasAdminAccess } from './utils/adminUtils';
 import type { User } from 'firebase/auth';
 import 'react-toastify/dist/ReactToastify.css';
 
@@ -28,23 +29,31 @@ function App() {
   const [showFilters, setShowFilters] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [showMyReportsModal, setShowMyReportsModal] = useState(false);
+  const [showAllReportsModal, setShowAllReportsModal] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [notifications, setNotifications] = useState(true);
   const [currentAnnouncementIndex, setCurrentAnnouncementIndex] = useState(0);
 
-  const { isConnected } = useEmergencyWebSocket();
+  const { isConnected } = useApiData();
   const missingPersons = useEmergencyStore(state => state.missingPersons);
-
-  // Firebase 실시간 동기화
-  useFirebaseSync();
 
   // Firebase 인증 상태 감지
   useEffect(() => {
     const unsubscribe = onAuthChange((user) => {
       setCurrentUser(user);
       if (user) {
-        toast.success(`환영합니다, ${user.displayName || user.email}님!`);
+        const adminAccess = hasAdminAccess(user.email, user.uid);
+        setIsAdmin(adminAccess);
+
+        if (adminAccess) {
+          toast.success(`🛡️ 관리자 권한으로 로그인되었습니다!`);
+        } else {
+          toast.success(`환영합니다, ${user.displayName || user.email}님!`);
+        }
+      } else {
+        setIsAdmin(false);
       }
     });
 
@@ -106,6 +115,15 @@ function App() {
             {/* 로그인/로그아웃 */}
             {currentUser ? (
               <div className="flex items-center gap-2">
+                {isAdmin && (
+                  <button
+                    onClick={() => setShowAllReportsModal(true)}
+                    className="p-2 hover:bg-red-700 rounded-lg transition-colors bg-yellow-500 hover:bg-yellow-600"
+                    title="전체 제보 관리 (관리자)"
+                  >
+                    <Shield size={20} />
+                  </button>
+                )}
                 <button
                   onClick={() => setShowMyReportsModal(true)}
                   className="p-2 hover:bg-red-700 rounded-lg transition-colors"
@@ -114,6 +132,7 @@ function App() {
                   <FileText size={20} />
                 </button>
                 <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-red-800 rounded-full">
+                  {isAdmin && <Shield size={16} color="#fbbf24" />}
                   <UserCircle size={18} />
                   <span className="text-sm">{currentUser.displayName || currentUser.email}</span>
                 </div>
@@ -139,7 +158,7 @@ function App() {
       </header>
 
       {/* 메인 콘텐츠 */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden pb-10">
         {/* 사이드바 */}
         {showSidebar && (
           <Sidebar
@@ -183,13 +202,28 @@ function App() {
         onClose={() => setShowMyReportsModal(false)}
       />
 
+      <AllReportsModal
+        isOpen={showAllReportsModal}
+        onClose={() => setShowAllReportsModal(false)}
+      />
+
       <LoginModal
         isOpen={showLoginModal}
         onClose={() => setShowLoginModal(false)}
       />
 
       {/* 토스트 알림 */}
-      <ToastContainer />
+      <ToastContainer
+        position="bottom-left"
+        autoClose={3000}
+        hideProgressBar={false}
+        newestOnTop
+        closeOnClick
+        rtl={false}
+        pauseOnFocusLoss
+        draggable
+        pauseOnHover
+      />
 
       {/* 공지사항 배너 (하단) */}
       <div className="fixed bottom-0 left-0 right-0 z-30">
