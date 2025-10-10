@@ -9,11 +9,13 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// 라우터 (제보 기능만 유지)
+// 라우터
 const authRouter = require('./routes/auth');
 const reportsRouter = require('./routes/reports');
+const apiRouter = require('./routes/api');
 app.use('/api/auth', authRouter);
 app.use('/api/reports', reportsRouter);
+app.use('/api', apiRouter);
 
 console.log('✅ 실종자 제보 API 서버 시작');
 

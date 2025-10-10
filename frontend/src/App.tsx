@@ -13,6 +13,7 @@ import { useApiData } from './hooks/useApiData';
 import { ToastContainer, toast } from 'react-toastify';
 import { onAuthChange, logout as firebaseLogout } from './services/firebase';
 import { hasAdminAccess } from './utils/adminUtils';
+import { loadRecaptchaScript } from './utils/recaptcha';
 import type { User } from 'firebase/auth';
 import 'react-toastify/dist/ReactToastify.css';
 
@@ -38,6 +39,20 @@ function App() {
 
   const { isConnected } = useApiData();
   const missingPersons = useEmergencyStore(state => state.missingPersons);
+
+  // reCAPTCHA 전역 초기화
+  useEffect(() => {
+    const initRecaptcha = async () => {
+      try {
+        await loadRecaptchaScript();
+        console.log('✅ reCAPTCHA 전역 초기화 완료');
+      } catch (error) {
+        console.warn('⚠️ reCAPTCHA 초기화 실패 (제보 시 다시 시도됩니다):', error);
+      }
+    };
+
+    initRecaptcha();
+  }, []);
 
   // Firebase 인증 상태 감지
   useEffect(() => {

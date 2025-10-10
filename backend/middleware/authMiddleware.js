@@ -1,5 +1,6 @@
 const { getAuth } = require('firebase-admin/auth');
 const admin = require('firebase-admin');
+const axios = require('axios');
 
 // Firebase Admin 초기화 (한번만 실행)
 if (!admin.apps.length) {
@@ -222,10 +223,113 @@ const optionalAuth = async (req, res, next) => {
   }
 };
 
+/**
+ * Google reCAPTCHA v3 검증 미들웨어
+ */
+const verifyRecaptcha = async (req, res, next) => {
+  try {
+    // reCAPTCHA 토큰 추출
+    const recaptchaToken = req.headers['x-recaptcha-token'];
+
+    if (!recaptchaToken) {
+      return res.status(400).json({
+        success: false,
+        error: 'reCAPTCHA 토큰이 제공되지 않았습니다',
+        code: 'RECAPTCHA_TOKEN_MISSING'
+      });
+    }
+
+    // reCAPTCHA Secret Key
+    const secretKey = process.env.RECAPTCHA_SECRET_KEY;
+
+    if (!secretKey) {
+      console.error('❌ RECAPTCHA_SECRET_KEY가 설정되지 않았습니다');
+      return res.status(500).json({
+        success: false,
+        error: '서버 설정 오류가 발생했습니다'
+      });
+    }
+
+    // Google reCAPTCHA API 호출
+    const verificationUrl = 'https://www.google.com/recaptcha/api/siteverify';
+    const response = await axios.post(verificationUrl, null, {
+      params: {
+        secret: secretKey,
+        response: recaptchaToken,
+        remoteip: req.ip
+      }
+    });
+
+    const { success, score, action, 'error-codes': errorCodes } = response.data;
+
+    // 검증 실패
+    if (!success) {
+      console.error('❌ reCAPTCHA 검증 실패:', errorCodes);
+      return res.status(400).json({
+        success: false,
+        error: 'reCAPTCHA 검증에 실패했습니다',
+        code: 'RECAPTCHA_VERIFICATION_FAILED',
+        details: errorCodes
+      });
+    }
+
+    // 점수 확인 (0.0 ~ 1.0, 높을수록 사람일 가능성이 높음)
+    const MIN_SCORE = parseFloat(process.env.RECAPTCHA_MIN_SCORE) || 0.5;
+
+    if (score < MIN_SCORE) {
+      console.warn(`⚠️ reCAPTCHA 점수가 낮습니다: ${score} (최소: ${MIN_SCORE})`);
+      return res.status(403).json({
+        success: false,
+        error: '보안 검증에 실패했습니다. 다시 시도해주세요.',
+        code: 'RECAPTCHA_SCORE_TOO_LOW',
+        score: score
+      });
+    }
+
+    // 액션 확인 (선택적)
+    const expectedAction = req.recaptchaAction || 'report_submit';
+    if (action !== expectedAction) {
+      console.warn(`⚠️ reCAPTCHA 액션 불일치: ${action} (예상: ${expectedAction})`);
+    }
+
+    console.log(`✅ reCAPTCHA 검증 성공 (점수: ${score}, 액션: ${action})`);
+
+    // 검증 결과를 req 객체에 추가
+    req.recaptcha = {
+      success: true,
+      score: score,
+      action: action
+    };
+
+    next();
+  } catch (error) {
+    console.error('❌ reCAPTCHA 검증 중 오류:', error.message);
+
+    // 네트워크 오류 등으로 인한 실패는 일단 통과 (선택적)
+    // 프로덕션에서는 이를 차단할 수도 있음
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(500).json({
+        success: false,
+        error: 'reCAPTCHA 검증 중 오류가 발생했습니다'
+      });
+    }
+
+    // 개발 환경에서는 통과
+    console.warn('⚠️ 개발 환경: reCAPTCHA 검증 오류 무시');
+    req.recaptcha = {
+      success: true,
+      score: 1.0,
+      action: 'development'
+    };
+    next();
+  }
+};
+
 module.exports = {
   verifyFirebaseToken,
   verifyPhoneAuthenticated,
   verifyAdmin,
   rateLimit,
-  optionalAuth
+  optionalAuth,
+  verifyRecaptcha
 };

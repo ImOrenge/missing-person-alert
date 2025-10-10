@@ -8,14 +8,15 @@ const {
   verifyPhoneAuthenticated,
   verifyAdmin,
   rateLimit,
-  optionalAuth
+  optionalAuth,
+  verifyRecaptcha
 } = require('../middleware/authMiddleware');
 
 /**
  * POST /api/reports
- * 실종자 제보 등록 (전화번호 인증 필요)
+ * 실종자 제보 등록 (전화번호 인증 + reCAPTCHA 필요)
  */
-router.post('/', verifyFirebaseToken, verifyPhoneAuthenticated, rateLimit, async (req, res) => {
+router.post('/', verifyFirebaseToken, verifyPhoneAuthenticated, verifyRecaptcha, rateLimit, async (req, res) => {
   try {
     const { person } = req.body;
 
@@ -60,7 +61,7 @@ router.post('/', verifyFirebaseToken, verifyPhoneAuthenticated, rateLimit, async
     const saveResult = await firebaseService.saveMissingPersons([normalized]);
 
     if (saveResult.saved > 0) {
-      console.log(`✅ 사용자 제보 저장: ${normalized.name} (제보자 UID: ${reporterUid})`);
+      console.log(`✅ 사용자 제보 저장: ${normalized.name} (제보자 UID: ${reporterUid}, reCAPTCHA 점수: ${req.recaptcha.score})`);
 
       // WebSocket으로 실시간 전송 (wsManager가 있다면)
       if (global.wsManager) {

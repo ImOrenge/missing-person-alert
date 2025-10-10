@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useEmergencyStore } from '../stores/emergencyStore';
 import { MissingPersonType } from '../types';
 import { toast } from 'react-toastify';
 import { getAuth } from 'firebase/auth';
+import { loadRecaptchaScript } from '../utils/recaptcha';
 
 interface Props {
   isOpen: boolean;
@@ -11,6 +12,8 @@ interface Props {
 
 export default function ReportModal({ isOpen, onClose }: Props) {
   const addMissingPerson = useEmergencyStore((state) => state.addMissingPerson);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRecaptchaReady, setIsRecaptchaReady] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -23,6 +26,24 @@ export default function ReportModal({ isOpen, onClose }: Props) {
     photo: ''
   });
 
+  // reCAPTCHA 초기화 (execute는 호출하지 않음)
+  useEffect(() => {
+    const initRecaptcha = async () => {
+      try {
+        await loadRecaptchaScript();
+        setIsRecaptchaReady(true);
+        console.log('✅ reCAPTCHA Enterprise 준비 완료 (백엔드에서 자동 검증)');
+      } catch (error) {
+        console.warn('⚠️ reCAPTCHA 초기화 실패:', error);
+        setIsRecaptchaReady(true); // 실패해도 제보는 가능하도록
+      }
+    };
+
+    if (isOpen) {
+      initRecaptcha();
+    }
+  }, [isOpen]);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setFormData({
       ...formData,
@@ -32,6 +53,11 @@ export default function ReportModal({ isOpen, onClose }: Props) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // 중복 제출 방지
+    if (isSubmitting) {
+      return;
+    }
 
     // 필수 필드 검증
     if (!formData.name || !formData.age || !formData.address) {
@@ -47,6 +73,8 @@ export default function ReportModal({ isOpen, onClose }: Props) {
       toast.error('로그인이 필요합니다');
       return;
     }
+
+    setIsSubmitting(true);
 
     try {
       // 실종자 데이터 생성
@@ -107,6 +135,8 @@ export default function ReportModal({ isOpen, onClose }: Props) {
     } catch (error: any) {
       console.error('제보 등록 실패:', error);
       toast.error(error.message || '제보 등록 중 오류가 발생했습니다');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -359,6 +389,50 @@ export default function ReportModal({ isOpen, onClose }: Props) {
             />
           </div>
 
+          {/* 보안 안내 */}
+          <div style={{
+            marginBottom: '20px',
+            padding: '12px',
+            backgroundColor: '#f8f9fa',
+            borderRadius: '6px',
+            border: '1px solid #e9ecef'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+              <span style={{ fontSize: '18px' }}>🔒</span>
+              <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#495057' }}>보안 안내</span>
+            </div>
+            <ul style={{
+              margin: '0',
+              paddingLeft: '20px',
+              fontSize: '12px',
+              color: '#6c757d',
+              lineHeight: '1.6'
+            }}>
+              <li>전화번호 SMS 인증이 완료되어야 제보가 가능합니다</li>
+              <li>reCAPTCHA로 자동입력이 방지됩니다</li>
+              <li>제보 정보는 안전하게 암호화되어 저장됩니다</li>
+              <li>허위 제보 시 법적 책임을 질 수 있습니다</li>
+            </ul>
+            {isRecaptchaReady && (
+              <div style={{
+                marginTop: '8px',
+                fontSize: '11px',
+                color: '#6c757d',
+                fontStyle: 'italic'
+              }}>
+                이 사이트는 reCAPTCHA로 보호되며 Google{' '}
+                <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer" style={{ color: '#007bff' }}>
+                  개인정보 보호정책
+                </a>
+                {' '}및{' '}
+                <a href="https://policies.google.com/terms" target="_blank" rel="noopener noreferrer" style={{ color: '#007bff' }}>
+                  서비스 약관
+                </a>
+                이 적용됩니다.
+              </div>
+            )}
+          </div>
+
           {/* 제출 버튼 */}
           <div style={{ display: 'flex', gap: '10px' }}>
             <button
@@ -380,19 +454,21 @@ export default function ReportModal({ isOpen, onClose }: Props) {
             </button>
             <button
               type="submit"
+              disabled={isSubmitting}
               style={{
                 flex: 1,
                 padding: '12px',
                 borderRadius: '6px',
                 border: 'none',
-                backgroundColor: '#e74c3c',
+                backgroundColor: isSubmitting ? '#95a5a6' : '#e74c3c',
                 color: 'white',
                 fontSize: '16px',
                 fontWeight: 'bold',
-                cursor: 'pointer'
+                cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                opacity: isSubmitting ? 0.6 : 1
               }}
             >
-              제보하기
+              {isSubmitting ? '제보 중...' : '제보하기'}
             </button>
           </div>
         </form>

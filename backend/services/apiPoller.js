@@ -36,8 +36,8 @@ class APIPoller {
       console.log('🔍 안전드림 182 API 호출 시작...');
 
       // API 인증 정보
-      const esntlId = process.env.SAFE182_ESNTL_ID || '10011616';
-      const authKey = process.env.SAFE182_AUTH_KEY || 'd4dce53abbc84060';
+      const esntlId = process.env.SAFE182_ESNTL_ID || '10000847';
+      const authKey = process.env.SAFE182_AUTH_KEY || 'f16ae98f22b44441';
 
       let allItems = [];
       let currentPage = 1;

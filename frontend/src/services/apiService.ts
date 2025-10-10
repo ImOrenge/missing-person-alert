@@ -1,24 +1,22 @@
 import axios from 'axios';
 import { MissingPerson } from '../types';
 
-const SAFE182_BASE_URL = 'https://www.safe182.go.kr/api';
-const SAFE182_ESNTL_ID = '10011616';
-const SAFE182_AUTH_KEY = 'd4dce53abbc84060';
-
 /**
- * 안전드림 API에서 실종자 데이터를 가져옵니다
+ * 백엔드 프록시를 통해 안전드림 API에서 실종자 데이터를 가져옵니다
+ * (CORS 문제 해결을 위해 백엔드를 경유)
  */
 export async function fetchMissingPersons(): Promise<MissingPerson[]> {
   try {
     console.log('🌐 안전드림 API 호출 시작...');
 
-    const response = await axios.get(`${SAFE182_BASE_URL}/lcm/findChildList.do`, {
-      params: {
-        esntlId: SAFE182_ESNTL_ID,
-        authKey: SAFE182_AUTH_KEY,
-        rowSize: 1000
-      }
-    });
+    // 백엔드 프록시를 통해 API 호출
+    const response = await axios.get('/api/safe182/missing-persons');
+
+    // API 인증 실패 또는 오류 처리
+    if (response.data.error || response.data.result !== '00') {
+      console.warn('⚠️ API 응답 오류:', response.data.message || response.data.msg);
+      return [];
+    }
 
     if (!response.data || !response.data.list) {
       console.warn('⚠️ API 응답에 데이터가 없습니다');
@@ -72,6 +70,11 @@ export async function fetchMissingPersons(): Promise<MissingPerson[]> {
       const address = item.occrAdres || item.address || '대한민국';
       const location = getLocationFromAddress(address);
 
+      // 이미지 URL 생성 (백엔드 프록시를 통해)
+      const photoUrl = item.msspsnIdntfccd
+        ? `/api/safe182/photo/${item.msspsnIdntfccd}`
+        : undefined;
+
       return {
         id: item.rnum || `api-${Date.now()}-${Math.random()}`,
         name: item.nm || item.name || '이름 미상',
@@ -82,7 +85,7 @@ export async function fetchMissingPersons(): Promise<MissingPerson[]> {
           lng: location.lng,
           address
         },
-        photo: item.imgUrl || item.photoUrl || undefined,
+        photo: photoUrl,
         description: [
           item.etcSpfeatr,
           item.clothes,

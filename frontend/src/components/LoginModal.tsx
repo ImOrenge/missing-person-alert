@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, LogIn, Mail } from 'lucide-react';
 import { loginWithEmail, loginWithGoogle, registerWithEmail } from '../services/firebase';
+import { PhoneAuthModal } from './PhoneAuthModal';
 import { toast } from 'react-toastify';
 
 interface Props {
@@ -13,6 +14,8 @@ export default function LoginModal({ isOpen, onClose }: Props) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPhoneAuth, setShowPhoneAuth] = useState(false);
+  const [pendingRegistration, setPendingRegistration] = useState<{ email: string; password: string } | null>(null);
 
   if (!isOpen) return null;
 
@@ -21,17 +24,55 @@ export default function LoginModal({ isOpen, onClose }: Props) {
     setLoading(true);
 
     try {
-      const result = isSignUp
-        ? await registerWithEmail(email, password)
-        : await loginWithEmail(email, password);
+      if (isSignUp) {
+        // 회원가입 시 전화번호 인증 먼저 진행
+        setPendingRegistration({ email, password });
+        setShowPhoneAuth(true);
+        setLoading(false);
+      } else {
+        // 로그인은 바로 진행
+        const result = await loginWithEmail(email, password);
+
+        if (result.success) {
+          toast.success('로그인되었습니다!');
+          onClose();
+          setEmail('');
+          setPassword('');
+        } else {
+          toast.error(result.error || '로그인에 실패했습니다');
+        }
+        setLoading(false);
+      }
+    } catch (error: any) {
+      console.error('로그인/회원가입 오류:', error);
+      toast.error(error.message || '오류가 발생했습니다');
+      setLoading(false);
+    }
+  };
+
+  const handlePhoneAuthSuccess = async () => {
+    // 전화번호 인증 완료 후 회원가입 진행
+    if (!pendingRegistration) {
+      toast.error('회원가입 정보가 없습니다');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const result = await registerWithEmail(
+        pendingRegistration.email,
+        pendingRegistration.password
+      );
 
       if (result.success) {
-        toast.success(isSignUp ? '회원가입이 완료되었습니다!' : '로그인되었습니다!');
-        onClose();
+        toast.success('회원가입이 완료되었습니다!');
+        setShowPhoneAuth(false);
+        setPendingRegistration(null);
         setEmail('');
         setPassword('');
+        onClose();
       } else {
-        toast.error(result.error || '로그인에 실패했습니다');
+        toast.error(result.error || '회원가입에 실패했습니다');
       }
     } catch (error) {
       toast.error('오류가 발생했습니다');
@@ -52,22 +93,24 @@ export default function LoginModal({ isOpen, onClose }: Props) {
       } else {
         toast.error(result.error || 'Google 로그인에 실패했습니다');
       }
-    } catch (error) {
-      toast.error('오류가 발생했습니다');
+    } catch (error: any) {
+      console.error('Google 로그인 오류:', error);
+      toast.error(error.message || '오류가 발생했습니다');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div
-      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-      onClick={onClose}
-    >
+    <>
       <div
-        className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6"
-        onClick={(e) => e.stopPropagation()}
+        className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+        onClick={onClose}
       >
+        <div
+          className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6"
+          onClick={(e) => e.stopPropagation()}
+        >
         {/* 헤더 */}
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
@@ -161,7 +204,24 @@ export default function LoginModal({ isOpen, onClose }: Props) {
         <p className="mt-4 text-xs text-gray-500 text-center">
           로그인하시면 실종자 제보 기록을 관리할 수 있습니다
         </p>
+
+        {isSignUp && (
+          <p className="mt-2 text-xs text-yellow-600 text-center font-medium">
+            ⚠️ 회원가입 시 전화번호 인증이 필요합니다
+          </p>
+        )}
       </div>
     </div>
+
+    {/* 전화번호 인증 모달 */}
+    <PhoneAuthModal
+      isOpen={showPhoneAuth}
+      onClose={() => {
+        setShowPhoneAuth(false);
+        setPendingRegistration(null);
+      }}
+      onSuccess={handlePhoneAuthSuccess}
+    />
+    </>
   );
 }
