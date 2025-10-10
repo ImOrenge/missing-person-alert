@@ -1,13 +1,33 @@
 const { getAuth } = require('firebase-admin/auth');
 const admin = require('firebase-admin');
 const axios = require('axios');
+const path = require('path');
 
 // Firebase Admin 초기화 (한번만 실행)
 if (!admin.apps.length) {
   try {
-    admin.initializeApp({
-      projectId: process.env.FIREBASE_PROJECT_ID || 'missing-person-alram',
-    });
+    // 서비스 계정 키 파일 경로 또는 환경 변수 사용
+    const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
+
+    if (serviceAccountPath) {
+      // 절대 경로로 변환
+      const absolutePath = path.isAbsolute(serviceAccountPath)
+        ? serviceAccountPath
+        : path.resolve(__dirname, '..', serviceAccountPath);
+
+      // 서비스 계정 키 파일이 있는 경우
+      const serviceAccount = require(absolutePath);
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+        projectId: process.env.FIREBASE_PROJECT_ID || 'missing-person-alram',
+      });
+    } else {
+      // 개발 환경: 인증 없이 초기화 (토큰 검증만 사용)
+      // 프로덕션에서는 서비스 계정 키 필수
+      admin.initializeApp({
+        projectId: process.env.FIREBASE_PROJECT_ID || 'missing-person-alram',
+      });
+    }
     console.log('✅ Firebase Admin 초기화 완료');
   } catch (error) {
     console.error('❌ Firebase Admin 초기화 실패:', error.message);
@@ -120,7 +140,37 @@ const verifyAdmin = async (req, res, next) => {
       });
     }
 
-    // Firebase에서 사용자 정보 가져오기
+    // 개발 환경이거나 서비스 계정 키가 없는 경우
+    const isDevelopment = process.env.NODE_ENV !== 'production';
+    const hasServiceAccount = !!process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
+
+    if (!hasServiceAccount) {
+      console.warn('⚠️ Firebase 서비스 계정 키가 설정되지 않았습니다.');
+
+      if (isDevelopment) {
+        // 개발 환경: 관리자 이메일 목록으로 확인
+        const adminEmails = (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim()).filter(e => e);
+
+        if (adminEmails.length > 0 && req.user.email && adminEmails.includes(req.user.email)) {
+          console.log(`✅ 개발 모드: ${req.user.email} 관리자 권한 부여`);
+          return next();
+        }
+
+        return res.status(403).json({
+          success: false,
+          error: '관리자 권한이 필요합니다',
+          code: 'ADMIN_REQUIRED'
+        });
+      }
+
+      // 프로덕션에서 서비스 계정 키 없으면 오류
+      return res.status(500).json({
+        success: false,
+        error: '서버 설정 오류: Firebase 서비스 계정 키가 필요합니다'
+      });
+    }
+
+    // 서비스 계정 키가 있는 경우: Firebase에서 사용자 정보 가져오기
     const userRecord = await getAuth().getUser(req.user.uid);
 
     // 커스텀 클레임에서 관리자 권한 확인

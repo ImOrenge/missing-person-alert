@@ -3,7 +3,7 @@ import { useEmergencyStore } from '../stores/emergencyStore';
 import { MissingPersonType } from '../types';
 import { toast } from 'react-toastify';
 import { getAuth } from 'firebase/auth';
-import { loadRecaptchaScript } from '../utils/recaptcha';
+import { loadRecaptchaScript, executeRecaptcha } from '../utils/recaptcha';
 
 interface Props {
   isOpen: boolean;
@@ -77,6 +77,17 @@ export default function ReportModal({ isOpen, onClose }: Props) {
     setIsSubmitting(true);
 
     try {
+      // reCAPTCHA 토큰 생성
+      let recaptchaToken = '';
+      try {
+        recaptchaToken = await executeRecaptcha('report_submit');
+      } catch (error) {
+        console.warn('⚠️ reCAPTCHA 토큰 생성 실패:', error);
+        toast.error('보안 인증에 실패했습니다. 다시 시도해주세요.');
+        setIsSubmitting(false);
+        return;
+      }
+
       // 실종자 데이터 생성
       const personData = {
         name: formData.name,
@@ -98,7 +109,8 @@ export default function ReportModal({ isOpen, onClose }: Props) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${token}`,
+          'x-recaptcha-token': recaptchaToken
         },
         body: JSON.stringify({
           person: personData,
