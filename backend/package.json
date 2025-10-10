@@ -8,6 +8,7 @@
     "dev": "nodemon server.js"
   },
   "dependencies": {
+    "@google-cloud/recaptcha-enterprise": "^6.3.0",
     "axios": "^1.6.7",
     "cheerio": "^1.1.2",
     "cors": "^2.8.5",

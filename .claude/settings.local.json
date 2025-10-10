@@ -14,7 +14,8 @@
       "Bash(node:*)",
       "Bash(npm uninstall:*)",
       "Bash(npx playwright test:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []

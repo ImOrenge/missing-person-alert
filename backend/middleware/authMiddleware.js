@@ -2,6 +2,7 @@ const { getAuth } = require('firebase-admin/auth');
 const admin = require('firebase-admin');
 const axios = require('axios');
 const path = require('path');
+const { RecaptchaEnterpriseServiceClient } = require('@google-cloud/recaptcha-enterprise');
 
 // Firebase Admin 초기화 (한번만 실행)
 if (!admin.apps.length) {
@@ -274,7 +275,7 @@ const optionalAuth = async (req, res, next) => {
 };
 
 /**
- * Google reCAPTCHA v3 검증 미들웨어
+ * Google reCAPTCHA Enterprise 검증 미들웨어
  */
 const verifyRecaptcha = async (req, res, next) => {
   try {
@@ -289,41 +290,55 @@ const verifyRecaptcha = async (req, res, next) => {
       });
     }
 
-    // reCAPTCHA Secret Key
-    const secretKey = process.env.RECAPTCHA_SECRET_KEY;
+    // 환경 변수 확인
+    const projectId = process.env.FIREBASE_PROJECT_ID || 'missing-person-alram';
+    const siteKey = process.env.RECAPTCHA_SITE_KEY;
 
-    if (!secretKey) {
-      console.error('❌ RECAPTCHA_SECRET_KEY가 설정되지 않았습니다');
+    if (!siteKey) {
+      console.error('❌ RECAPTCHA_SITE_KEY가 설정되지 않았습니다');
       return res.status(500).json({
         success: false,
         error: '서버 설정 오류가 발생했습니다'
       });
     }
 
-    // Google reCAPTCHA API 호출
-    const verificationUrl = 'https://www.google.com/recaptcha/api/siteverify';
-    const response = await axios.post(verificationUrl, null, {
-      params: {
-        secret: secretKey,
-        response: recaptchaToken,
-        remoteip: req.ip
+    // reCAPTCHA Enterprise 클라이언트 생성
+    const client = new RecaptchaEnterpriseServiceClient();
+    const projectPath = client.projectPath(projectId);
+
+    // Assessment 생성
+    const request = {
+      parent: projectPath,
+      assessment: {
+        event: {
+          token: recaptchaToken,
+          siteKey: siteKey,
+          expectedAction: req.recaptchaAction || 'report_submit'
+        }
       }
-    });
+    };
 
-    const { success, score, action, 'error-codes': errorCodes } = response.data;
+    const [response] = await client.createAssessment(request);
 
-    // 검증 실패
-    if (!success) {
-      console.error('❌ reCAPTCHA 검증 실패:', errorCodes);
+    // 토큰 유효성 검증
+    if (!response.tokenProperties.valid) {
+      console.error('❌ reCAPTCHA 토큰 무효:', response.tokenProperties.invalidReason);
       return res.status(400).json({
         success: false,
         error: 'reCAPTCHA 검증에 실패했습니다',
         code: 'RECAPTCHA_VERIFICATION_FAILED',
-        details: errorCodes
+        details: response.tokenProperties.invalidReason
       });
     }
 
+    // 액션 확인
+    const expectedAction = req.recaptchaAction || 'report_submit';
+    if (response.tokenProperties.action !== expectedAction) {
+      console.warn(`⚠️ reCAPTCHA 액션 불일치: ${response.tokenProperties.action} (예상: ${expectedAction})`);
+    }
+
     // 점수 확인 (0.0 ~ 1.0, 높을수록 사람일 가능성이 높음)
+    const score = response.riskAnalysis.score;
     const MIN_SCORE = parseFloat(process.env.RECAPTCHA_MIN_SCORE) || 0.5;
 
     if (score < MIN_SCORE) {
@@ -332,31 +347,26 @@ const verifyRecaptcha = async (req, res, next) => {
         success: false,
         error: '보안 검증에 실패했습니다. 다시 시도해주세요.',
         code: 'RECAPTCHA_SCORE_TOO_LOW',
-        score: score
+        score: score,
+        reasons: response.riskAnalysis.reasons
       });
     }
 
-    // 액션 확인 (선택적)
-    const expectedAction = req.recaptchaAction || 'report_submit';
-    if (action !== expectedAction) {
-      console.warn(`⚠️ reCAPTCHA 액션 불일치: ${action} (예상: ${expectedAction})`);
-    }
-
-    console.log(`✅ reCAPTCHA 검증 성공 (점수: ${score}, 액션: ${action})`);
+    console.log(`✅ reCAPTCHA Enterprise 검증 성공 (점수: ${score}, 액션: ${response.tokenProperties.action})`);
 
     // 검증 결과를 req 객체에 추가
     req.recaptcha = {
       success: true,
       score: score,
-      action: action
+      action: response.tokenProperties.action,
+      reasons: response.riskAnalysis.reasons
     };
 
     next();
   } catch (error) {
     console.error('❌ reCAPTCHA 검증 중 오류:', error.message);
 
-    // 네트워크 오류 등으로 인한 실패는 일단 통과 (선택적)
-    // 프로덕션에서는 이를 차단할 수도 있음
+    // 프로덕션에서는 차단
     if (process.env.NODE_ENV === 'production') {
       return res.status(500).json({
         success: false,
