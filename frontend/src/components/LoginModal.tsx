@@ -1,6 +1,14 @@
-import React, { useState } from 'react';
-import { X, LogIn, Mail } from 'lucide-react';
-import { loginWithEmail, loginWithGoogle, registerWithEmail } from '../services/firebase';
+import React, { useState, useEffect } from 'react';
+import { X, LogIn, Mail, Lock } from 'lucide-react';
+import {
+  loginWithEmail,
+  loginWithGoogle,
+  registerWithEmail,
+  initRecaptcha,
+  resolveMFAWithPhone,
+  completeMFASignIn,
+  clearRecaptcha
+} from '../services/firebase';
 import { PhoneAuthModal } from './PhoneAuthModal';
 import { toast } from 'react-toastify';
 
@@ -13,9 +21,38 @@ export default function LoginModal({ isOpen, onClose }: Props) {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordConfirm, setPasswordConfirm] = useState('');
+  const [name, setName] = useState('');
+  const [nickname, setNickname] = useState('');
+  const [address, setAddress] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPhoneAuth, setShowPhoneAuth] = useState(false);
-  const [pendingRegistration, setPendingRegistration] = useState<{ email: string; password: string } | null>(null);
+  const [pendingRegistration, setPendingRegistration] = useState<{
+    email: string;
+    password: string;
+    name: string;
+    nickname: string;
+    address: string;
+    phoneNumber: string;
+  } | null>(null);
+
+  // MFA 상태
+  const [showMFA, setShowMFA] = useState(false);
+  const [mfaResolver, setMfaResolver] = useState<any>(null);
+  const [mfaVerificationId, setMfaVerificationId] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
+
+  // 모달 닫힐 때 정리
+  useEffect(() => {
+    if (!isOpen) {
+      clearRecaptcha();
+      setShowMFA(false);
+      setMfaResolver(null);
+      setMfaVerificationId('');
+      setMfaCode('');
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -25,8 +62,27 @@ export default function LoginModal({ isOpen, onClose }: Props) {
 
     try {
       if (isSignUp) {
-        // 회원가입 시 전화번호 인증 먼저 진행
-        setPendingRegistration({ email, password });
+        // 회원가입 시 유효성 검증
+        if (password !== passwordConfirm) {
+          toast.error('비밀번호가 일치하지 않습니다');
+          setLoading(false);
+          return;
+        }
+
+        if (!name.trim()) {
+          toast.error('이름을 입력해주세요');
+          setLoading(false);
+          return;
+        }
+
+        if (!nickname.trim()) {
+          toast.error('닉네임을 입력해주세요');
+          setLoading(false);
+          return;
+        }
+
+        // 전화번호 인증 먼저 진행
+        setPendingRegistration({ email, password, name, nickname, address, phoneNumber });
         setShowPhoneAuth(true);
         setLoading(false);
       } else {
@@ -38,8 +94,43 @@ export default function LoginModal({ isOpen, onClose }: Props) {
           onClose();
           setEmail('');
           setPassword('');
+        } else if (result.requiresMFA) {
+          // MFA 필요 - reCAPTCHA 초기화 후 SMS 전송
+          toast.info('다단계 인증이 필요합니다');
+
+          // 먼저 MFA 모달 표시
+          setShowMFA(true);
+
+          // DOM 렌더링 후 reCAPTCHA 초기화 및 SMS 전송
+          setTimeout(async () => {
+            try {
+              initRecaptcha('mfa-recaptcha-container');
+
+              // reCAPTCHA 렌더링 대기
+              await new Promise(resolve => setTimeout(resolve, 500));
+
+              const mfaResult = await resolveMFAWithPhone(result.error);
+
+              if (mfaResult.success && mfaResult.verificationId) {
+                setMfaResolver(mfaResult.resolver);
+                setMfaVerificationId(mfaResult.verificationId);
+                toast.success(mfaResult.message);
+              } else {
+                toast.error(mfaResult.message || 'MFA 인증 실패');
+                setShowMFA(false);
+              }
+            } catch (error: any) {
+              console.error('MFA 초기화 오류:', error);
+              toast.error('MFA 초기화에 실패했습니다');
+              setShowMFA(false);
+            } finally {
+              setLoading(false);
+            }
+          }, 300);
+
+          return; // setLoading(false) 실행 방지
         } else {
-          toast.error(result.error || '로그인에 실패했습니다');
+          toast.error(result.message || result.error || '로그인에 실패했습니다');
         }
         setLoading(false);
       }
@@ -64,18 +155,38 @@ export default function LoginModal({ isOpen, onClose }: Props) {
         pendingRegistration.password
       );
 
-      if (result.success) {
+      if (result.success && result.user) {
+        // Firestore에 사용자 정보 저장
+        const { firestore, doc, setDoc, Timestamp } = await import('../services/firebase');
+        const userRef = doc(firestore, 'users', result.user.uid);
+
+        await setDoc(userRef, {
+          name: pendingRegistration.name,
+          nickname: pendingRegistration.nickname,
+          address: pendingRegistration.address || '',
+          phoneNumber: pendingRegistration.phoneNumber || '',
+          email: pendingRegistration.email,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now()
+        });
+
         toast.success('회원가입이 완료되었습니다!');
         setShowPhoneAuth(false);
         setPendingRegistration(null);
         setEmail('');
         setPassword('');
+        setPasswordConfirm('');
+        setName('');
+        setNickname('');
+        setAddress('');
+        setPhoneNumber('');
         onClose();
       } else {
         toast.error(result.error || '회원가입에 실패했습니다');
       }
-    } catch (error) {
-      toast.error('오류가 발생했습니다');
+    } catch (error: any) {
+      console.error('회원가입 오류:', error);
+      toast.error(error.message || '오류가 발생했습니다');
     } finally {
       setLoading(false);
     }
@@ -90,8 +201,43 @@ export default function LoginModal({ isOpen, onClose }: Props) {
       if (result.success) {
         toast.success('Google 로그인 성공!');
         onClose();
+      } else if (result.requiresMFA) {
+        // MFA 필요 - reCAPTCHA 초기화 후 SMS 전송
+        toast.info('다단계 인증이 필요합니다');
+
+        // 먼저 MFA 모달 표시
+        setShowMFA(true);
+
+        // DOM 렌더링 후 reCAPTCHA 초기화 및 SMS 전송
+        setTimeout(async () => {
+          try {
+            initRecaptcha('mfa-recaptcha-container');
+
+            // reCAPTCHA 렌더링 대기
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            const mfaResult = await resolveMFAWithPhone(result.error);
+
+            if (mfaResult.success && mfaResult.verificationId) {
+              setMfaResolver(mfaResult.resolver);
+              setMfaVerificationId(mfaResult.verificationId);
+              toast.success(mfaResult.message);
+            } else {
+              toast.error(mfaResult.message || 'MFA 인증 실패');
+              setShowMFA(false);
+            }
+          } catch (error: any) {
+            console.error('MFA 초기화 오류:', error);
+            toast.error('MFA 초기화에 실패했습니다');
+            setShowMFA(false);
+          } finally {
+            setLoading(false);
+          }
+        }, 300);
+
+        return; // setLoading(false) 실행 방지
       } else {
-        toast.error(result.error || 'Google 로그인에 실패했습니다');
+        toast.error(result.message || result.error || 'Google 로그인에 실패했습니다');
       }
     } catch (error: any) {
       console.error('Google 로그인 오류:', error);
@@ -101,8 +247,90 @@ export default function LoginModal({ isOpen, onClose }: Props) {
     }
   };
 
+  const handleMFAVerify = async () => {
+    if (!mfaCode.trim() || mfaCode.length !== 6) {
+      toast.error('6자리 인증 코드를 입력해주세요');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const result = await completeMFASignIn(mfaResolver, mfaVerificationId, mfaCode);
+
+      if (result.success) {
+        toast.success(result.message);
+        setShowMFA(false);
+        setMfaCode('');
+        onClose();
+      } else {
+        toast.error(result.message || 'MFA 인증 실패');
+      }
+    } catch (error: any) {
+      console.error('MFA 인증 오류:', error);
+      toast.error(error.message || '오류가 발생했습니다');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <>
+      {/* MFA 인증 모달 */}
+      {showMFA && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                <Lock className="text-blue-600" />
+                다단계 인증
+              </h2>
+              <button
+                onClick={() => {
+                  setShowMFA(false);
+                  setMfaCode('');
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <p className="text-gray-600 text-sm mb-4">
+              등록된 전화번호로 인증 코드가 전송되었습니다.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  인증 코드
+                </label>
+                <input
+                  type="text"
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value.replace(/[^0-9]/g, ''))}
+                  placeholder="6자리 인증 코드"
+                  maxLength={6}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-center text-2xl tracking-widest"
+                  disabled={loading}
+                  autoFocus
+                />
+              </div>
+
+              <button
+                onClick={handleMFAVerify}
+                disabled={loading || mfaCode.length !== 6}
+                className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+              >
+                {loading ? '확인 중...' : '인증하기'}
+              </button>
+            </div>
+
+            {/* MFA reCAPTCHA 컨테이너 */}
+            <div id="mfa-recaptcha-container" className="mt-4"></div>
+          </div>
+        </div>
+      )}
+
       <div
         className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
         onClick={onClose}
@@ -150,10 +378,73 @@ export default function LoginModal({ isOpen, onClose }: Props) {
         </div>
 
         {/* 이메일 로그인 폼 */}
-        <form onSubmit={handleEmailLogin} className="space-y-4">
+        <form onSubmit={handleEmailLogin} className="space-y-4 max-h-[60vh] overflow-y-auto px-1">
+          {isSignUp && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  이름 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                  disabled={loading}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none transition-colors disabled:opacity-50"
+                  placeholder="홍길동"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  닉네임 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={nickname}
+                  onChange={(e) => setNickname(e.target.value)}
+                  required
+                  disabled={loading}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none transition-colors disabled:opacity-50"
+                  placeholder="별명을 입력하세요"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  주소
+                </label>
+                <input
+                  type="text"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  disabled={loading}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none transition-colors disabled:opacity-50"
+                  placeholder="서울특별시 강남구..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  전화번호
+                </label>
+                <input
+                  type="tel"
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  disabled={loading}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none transition-colors disabled:opacity-50"
+                  placeholder="010-1234-5678"
+                />
+                <p className="mt-1 text-xs text-gray-500">회원가입 후 전화번호 인증이 진행됩니다</p>
+              </div>
+            </>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              이메일
+              이메일 <span className="text-red-500">*</span>
             </label>
             <input
               type="email"
@@ -168,7 +459,7 @@ export default function LoginModal({ isOpen, onClose }: Props) {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              비밀번호
+              비밀번호 <span className="text-red-500">*</span>
             </label>
             <input
               type="password"
@@ -182,13 +473,38 @@ export default function LoginModal({ isOpen, onClose }: Props) {
             />
           </div>
 
+          {isSignUp && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                비밀번호 확인 <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="password"
+                value={passwordConfirm}
+                onChange={(e) => setPasswordConfirm(e.target.value)}
+                required
+                disabled={loading}
+                minLength={6}
+                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none transition-colors disabled:opacity-50 ${
+                  passwordConfirm && password !== passwordConfirm
+                    ? 'border-red-500'
+                    : 'border-gray-300 focus:border-red-500'
+                }`}
+                placeholder="비밀번호를 다시 입력하세요"
+              />
+              {passwordConfirm && password !== passwordConfirm && (
+                <p className="mt-1 text-xs text-red-500">비밀번호가 일치하지 않습니다</p>
+              )}
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={loading}
             className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
           >
             <Mail size={20} />
-            {loading ? '처리 중...' : isSignUp ? '회원가입' : '로그인'}
+            {loading ? '처리 중...' : isSignUp ? '다음 (전화번호 인증)' : '로그인'}
           </button>
         </form>
 

@@ -15,7 +15,11 @@
       "Bash(npm uninstall:*)",
       "Bash(npx playwright test:*)",
       "Bash(npm run build:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(firebase functions:config:set:*)",
+      "Bash(del:*)",
+      "Bash(del \"c:\\missing person\\frontend\\src\\hooks\\useFirebaseData.ts\")",
+      "Bash(tasklist)"
     ],
     "deny": [],
     "ask": []

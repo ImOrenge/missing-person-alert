@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Bell, BellOff, ChevronLeft, ChevronRight, LogIn, LogOut, UserCircle, Plus, FileText, Shield } from 'lucide-react';
+import { Bell, BellOff, ChevronLeft, ChevronRight, LogIn, LogOut, UserCircle, Plus, FileText, Shield, User as UserIcon } from 'lucide-react';
 import EmergencyMap from './components/EmergencyMap';
 import Sidebar from './components/Sidebar';
 import FilterPanel from './components/FilterPanel';
 import ReportModal from './components/ReportModal';
 import MyReportsModal from './components/MyReportsModal';
-import AllReportsModal from './components/AllReportsModal';
+import AdminDashboard from './components/AdminDashboard';
 import LoginModal from './components/LoginModal';
+import UserProfileModal from './components/UserProfileModal';
+import VerificationPromptModal from './components/VerificationPromptModal';
+import { PhoneAuthModal } from './components/PhoneAuthModal';
 import AnnouncementBanner from './components/AnnouncementBanner';
 import { useEmergencyStore } from './stores/emergencyStore';
 import { useApiData } from './hooks/useApiData';
@@ -30,8 +33,11 @@ function App() {
   const [showFilters, setShowFilters] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [showMyReportsModal, setShowMyReportsModal] = useState(false);
-  const [showAllReportsModal, setShowAllReportsModal] = useState(false);
+  const [showAdminDashboard, setShowAdminDashboard] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showUserProfile, setShowUserProfile] = useState(false);
+  const [showVerificationPrompt, setShowVerificationPrompt] = useState(false);
+  const [showPhoneAuth, setShowPhoneAuth] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [notifications, setNotifications] = useState(true);
@@ -93,6 +99,32 @@ function App() {
     }
   };
 
+  const handleReportClick = () => {
+    if (!currentUser) {
+      setShowLoginModal(true);
+      return;
+    }
+
+    // 전화번호 인증 확인
+    if (!currentUser.phoneNumber) {
+      setShowVerificationPrompt(true);
+      return;
+    }
+
+    setShowReportModal(true);
+  };
+
+  const handlePhoneAuthSuccess = () => {
+    setShowPhoneAuth(false);
+    toast.success('전화번호 인증이 완료되었습니다!');
+
+    // 사용자 정보 새로고침
+    const auth = require('firebase/auth').getAuth();
+    auth.currentUser?.reload().then(() => {
+      setCurrentUser(auth.currentUser);
+    });
+  };
+
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-gray-50">
       {/* 상단 헤더 */}
@@ -132,9 +164,9 @@ function App() {
               <div className="flex items-center gap-2">
                 {isAdmin && (
                   <button
-                    onClick={() => setShowAllReportsModal(true)}
+                    onClick={() => setShowAdminDashboard(true)}
                     className="p-2 hover:bg-red-700 rounded-lg transition-colors bg-yellow-500 hover:bg-yellow-600"
-                    title="전체 제보 관리 (관리자)"
+                    title="관리자 대시보드"
                   >
                     <Shield size={20} />
                   </button>
@@ -146,7 +178,14 @@ function App() {
                 >
                   <FileText size={20} />
                 </button>
-                <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-red-800 rounded-full">
+                <button
+                  onClick={() => setShowUserProfile(true)}
+                  className="p-2 hover:bg-red-700 rounded-lg transition-colors"
+                  title="내 프로필"
+                >
+                  <UserIcon size={20} />
+                </button>
+                <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-red-800 rounded-full cursor-pointer" onClick={() => setShowUserProfile(true)}>
                   {isAdmin && <Shield size={16} color="#fbbf24" />}
                   <UserCircle size={18} />
                   <span className="text-sm">{currentUser.displayName || currentUser.email}</span>
@@ -198,7 +237,7 @@ function App() {
       {/* 제보하기 버튼 (로그인 시에만 표시) */}
       {currentUser && (
         <button
-          onClick={() => setShowReportModal(true)}
+          onClick={handleReportClick}
           className="fixed bottom-20 right-6 bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-full shadow-lg flex items-center gap-2 transition-all hover:scale-105 z-40"
         >
           <Plus size={20} />
@@ -217,14 +256,31 @@ function App() {
         onClose={() => setShowMyReportsModal(false)}
       />
 
-      <AllReportsModal
-        isOpen={showAllReportsModal}
-        onClose={() => setShowAllReportsModal(false)}
+      <AdminDashboard
+        isOpen={showAdminDashboard}
+        onClose={() => setShowAdminDashboard(false)}
       />
 
       <LoginModal
         isOpen={showLoginModal}
         onClose={() => setShowLoginModal(false)}
+      />
+
+      <UserProfileModal
+        isOpen={showUserProfile}
+        onClose={() => setShowUserProfile(false)}
+      />
+
+      <VerificationPromptModal
+        isOpen={showVerificationPrompt}
+        onClose={() => setShowVerificationPrompt(false)}
+        onVerify={() => setShowPhoneAuth(true)}
+      />
+
+      <PhoneAuthModal
+        isOpen={showPhoneAuth}
+        onClose={() => setShowPhoneAuth(false)}
+        onSuccess={handlePhoneAuthSuccess}
       />
 
       {/* 토스트 알림 */}

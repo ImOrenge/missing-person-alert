@@ -1,16 +1,20 @@
 import axios from 'axios';
 import { MissingPerson } from '../types';
 
+// 백엔드 API 기본 URL (배포 환경에서는 환경변수 사용, 개발 환경에서는 빈 문자열로 proxy 사용)
+const API_BASE_URL = process.env.REACT_APP_API_URL || '';
+
 /**
  * 백엔드 프록시를 통해 안전드림 API에서 실종자 데이터를 가져옵니다
  * (CORS 문제 해결을 위해 백엔드를 경유)
  */
 export async function fetchMissingPersons(): Promise<MissingPerson[]> {
   try {
-    console.log('🌐 안전드림 API 호출 시작...');
+    const apiUrl = `${API_BASE_URL}/api/safe182/missing-persons`;
+    console.log('🌐 안전드림 API 호출 시작...', apiUrl);
 
     // 백엔드 프록시를 통해 API 호출
-    const response = await axios.get('/api/safe182/missing-persons');
+    const response = await axios.get(apiUrl);
 
     // API 인증 실패 또는 오류 처리
     if (response.data.error || response.data.result !== '00') {
@@ -72,7 +76,7 @@ export async function fetchMissingPersons(): Promise<MissingPerson[]> {
 
       // 이미지 URL 생성 (백엔드 프록시를 통해)
       const photoUrl = item.msspsnIdntfccd
-        ? `/api/safe182/photo/${item.msspsnIdntfccd}`
+        ? `${API_BASE_URL}/api/safe182/photo/${item.msspsnIdntfccd}`
         : undefined;
 
       return {

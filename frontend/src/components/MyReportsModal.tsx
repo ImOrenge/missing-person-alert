@@ -31,20 +31,29 @@ export default function MyReportsModal({ isOpen, onClose }: Props) {
     try {
       setLoading(true);
       const token = await user.getIdToken();
-      const response = await fetch(
-        `${process.env.REACT_APP_API_URL || 'http://localhost:3000'}/api/reports/my?uid=${user.uid}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        }
-      );
+      const apiUrl = `${process.env.REACT_APP_API_URL || ''}/api/reports/my?uid=${user.uid}`;
+      console.log('📡 제보 기록 조회:', apiUrl);
 
-      const data = await response.json();
+      const response = await fetch(apiUrl, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
 
       if (!response.ok) {
-        throw new Error(data.error || '제보 기록 조회에 실패했습니다');
+        // 응답이 실패한 경우, JSON 파싱 전에 먼저 확인
+        let errorMessage = '제보 기록 조회에 실패했습니다';
+        try {
+          const data = await response.json();
+          errorMessage = data.error || errorMessage;
+        } catch (e) {
+          // JSON 파싱 실패 시 기본 메시지 사용
+          console.error('응답이 JSON 형식이 아닙니다:', e);
+        }
+        throw new Error(errorMessage);
       }
+
+      const data = await response.json();
 
       setReports(data.reports || []);
     } catch (error: any) {
@@ -70,17 +79,15 @@ export default function MyReportsModal({ isOpen, onClose }: Props) {
 
     try {
       const token = await user.getIdToken();
-      const response = await fetch(
-        `${process.env.REACT_APP_API_URL || 'http://localhost:3000'}/api/reports/${id}`,
-        {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ uid: user.uid })
-        }
-      );
+      const apiUrl = `${process.env.REACT_APP_API_URL || ''}/api/reports/${id}`;
+      const response = await fetch(apiUrl, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ uid: user.uid })
+      });
 
       const data = await response.json();
 

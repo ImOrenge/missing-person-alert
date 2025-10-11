@@ -8,8 +8,20 @@ const router = express.Router();
  */
 router.get('/safe182/missing-persons', async (req, res) => {
   try {
-    const esntlId = process.env.SAFE182_ESNTL_ID || '10000847';
-    const authKey = process.env.SAFE182_AUTH_KEY || 'f16ae98f22b44441';
+    const esntlId = process.env.SAFE182_ESNTL_ID;
+    const authKey = process.env.SAFE182_AUTH_KEY;
+
+    // 환경변수 검증
+    if (!esntlId || !authKey) {
+      console.error('❌ 안전드림 API 인증정보 누락:', { esntlId: !!esntlId, authKey: !!authKey });
+      return res.status(500).json({
+        error: 'API 인증정보 설정 필요',
+        message: 'SAFE182_ESNTL_ID 및 SAFE182_AUTH_KEY 환경변수를 설정해주세요',
+        list: []
+      });
+    }
+
+    console.log(`🔑 API 인증정보: esntlId=${esntlId}, authKey=${authKey.substring(0, 4)}****`);
 
     // URLSearchParams로 POST 요청 파라미터 구성
     const params = new URLSearchParams({
@@ -29,6 +41,7 @@ router.get('/safe182/missing-persons', async (req, res) => {
     params.append('writngTrgetDscds', '080'); // 신원불상
 
     // POST 요청으로 API 호출
+    console.log('📡 안전드림 API 요청 시작...');
     const response = await axios.post(
       'https://www.safe182.go.kr/api/lcm/findChildList.do',
       params.toString(),
@@ -40,6 +53,8 @@ router.get('/safe182/missing-persons', async (req, res) => {
         timeout: 15000
       }
     );
+
+    console.log(`✅ 안전드림 API 응답 수신: result=${response.data?.result}, msg=${response.data?.msg}`);
 
     // API 응답 검증
     if (response.data.result === '99') {
@@ -63,9 +78,17 @@ router.get('/safe182/missing-persons', async (req, res) => {
     res.json(response.data);
   } catch (error) {
     console.error('❌ 안전드림 API 호출 오류:', error.message);
+    if (error.response) {
+      console.error('   응답 상태:', error.response.status);
+      console.error('   응답 데이터:', JSON.stringify(error.response.data));
+    } else if (error.request) {
+      console.error('   요청 실패: 응답 없음 (네트워크/타임아웃)');
+    }
     res.status(500).json({
       error: 'API 호출 실패',
-      message: error.message
+      message: error.message,
+      details: error.response?.data || null,
+      list: []
     });
   }
 });

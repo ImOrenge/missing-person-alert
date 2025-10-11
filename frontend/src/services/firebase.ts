@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getDatabase, ref, onValue, query, orderByChild, limitToLast, update, get } from 'firebase/database';
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, orderBy, limit, Timestamp } from 'firebase/firestore';
 import {
   getAuth,
   signInWithEmailAndPassword,
@@ -12,8 +12,9 @@ import {
   RecaptchaVerifier,
   signInWithPhoneNumber,
   ConfirmationResult,
+  getMultiFactorResolver,
   PhoneAuthProvider,
-  linkWithCredential
+  PhoneMultiFactorGenerator
 } from 'firebase/auth';
 
 const firebaseConfig = {
@@ -23,13 +24,12 @@ const firebaseConfig = {
   storageBucket: "missing-person-alram.firebasestorage.app",
   messagingSenderId: "558387804013",
   appId: "1:558387804013:web:1d85bc6e03e17e80a5cc64",
-  measurementId: "G-DNE8F851CX",
-  databaseURL: "https://missing-person-alram-default-rtdb.asia-southeast1.firebasedatabase.app"
+  measurementId: "G-DNE8F851CX"
 };
 
 // Firebase 초기화
 const app = initializeApp(firebaseConfig);
-const database = getDatabase(app);
+const firestore = getFirestore(app);
 const auth = getAuth(app);
 
 // Google 로그인 제공자
@@ -66,6 +66,17 @@ export const loginWithEmail = async (email: string, password: string) => {
     };
   } catch (error: any) {
     console.error('로그인 실패:', error);
+
+    // MFA 필요한 경우
+    if (error.code === 'auth/multi-factor-auth-required') {
+      return {
+        success: false,
+        requiresMFA: true,
+        error: error,
+        message: '이 계정은 다단계 인증이 필요합니다'
+      };
+    }
+
     return {
       success: false,
       error: error.message
@@ -85,6 +96,17 @@ export const loginWithGoogle = async () => {
     };
   } catch (error: any) {
     console.error('Google 로그인 실패:', error);
+
+    // MFA 필요한 경우
+    if (error.code === 'auth/multi-factor-auth-required') {
+      return {
+        success: false,
+        requiresMFA: true,
+        error: error,
+        message: '이 계정은 다단계 인증이 필요합니다'
+      };
+    }
+
     return {
       success: false,
       error: error.message
@@ -124,21 +146,45 @@ let recaptchaVerifier: RecaptchaVerifier | null = null;
  * reCAPTCHA 초기화
  */
 export const initRecaptcha = (containerId: string) => {
-  if (recaptchaVerifier) {
-    recaptchaVerifier.clear();
-  }
-
-  recaptchaVerifier = new RecaptchaVerifier(auth, containerId, {
-    size: 'invisible',
-    callback: () => {
-      console.log('reCAPTCHA 인증 완료');
-    },
-    'expired-callback': () => {
-      console.log('reCAPTCHA 만료됨');
+  try {
+    if (recaptchaVerifier) {
+      try {
+        recaptchaVerifier.clear();
+      } catch (e) {
+        console.warn('reCAPTCHA clear 실패 (무시):', e);
+      }
+      recaptchaVerifier = null;
     }
-  });
 
-  return recaptchaVerifier;
+    // DOM 요소 확인
+    const container = document.getElementById(containerId);
+    if (!container) {
+      console.error(`reCAPTCHA 컨테이너를 찾을 수 없습니다: ${containerId}`);
+      throw new Error(`reCAPTCHA 컨테이너를 찾을 수 없습니다: ${containerId}`);
+    }
+
+    // 기존 reCAPTCHA 위젯 제거
+    container.innerHTML = '';
+
+    recaptchaVerifier = new RecaptchaVerifier(auth, containerId, {
+      size: 'invisible', // invisible 모드로 변경
+      callback: () => {
+        console.log('✅ Firebase reCAPTCHA 인증 완료');
+      },
+      'expired-callback': () => {
+        console.warn('⚠️ Firebase reCAPTCHA 만료됨');
+      },
+      'error-callback': (error: any) => {
+        console.error('❌ Firebase reCAPTCHA 오류:', error);
+      }
+    });
+
+    console.log('🔄 Firebase reCAPTCHA 초기화 완료');
+    return recaptchaVerifier;
+  } catch (error) {
+    console.error('reCAPTCHA 초기화 실패:', error);
+    throw error;
+  }
 };
 
 /**
@@ -199,30 +245,81 @@ export const verifyPhoneCode = async (confirmationResult: ConfirmationResult, co
 };
 
 /**
- * 기존 사용자 계정에 전화번호 연결
+ * 전화번호 인증 후 Firestore에 저장 (기존 계정에 추가)
  */
-export const linkPhoneNumber = async (phoneNumber: string, verificationCode: string) => {
+export const linkPhoneNumber = async (confirmationResult: ConfirmationResult, code: string) => {
   try {
     const currentUser = auth.currentUser;
     if (!currentUser) {
       throw new Error('로그인된 사용자가 없습니다');
     }
 
-    const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+82${phoneNumber.replace(/^0/, '')}`;
-    const credential = PhoneAuthProvider.credential(verificationCode, formattedPhone);
+    // 현재 로그인된 사용자 정보 백업
+    const currentUserEmail = currentUser.email;
+    const currentUserId = currentUser.uid;
 
-    await linkWithCredential(currentUser, credential);
+    console.log('📱 전화번호 인증 시작:', { currentUserId, currentUserEmail });
+
+    // 인증 코드 확인 (이 과정에서 새로운 전화번호 계정이 생성되거나 로그인됨)
+    const result = await confirmationResult.confirm(code);
+
+    // 인증된 전화번호 가져오기
+    const phoneNumber = result.user.phoneNumber;
+
+    if (!phoneNumber) {
+      throw new Error('전화번호를 확인할 수 없습니다');
+    }
+
+    console.log('✅ 전화번호 인증 성공:', phoneNumber);
+
+    // 원래 사용자의 Firestore에 전화번호 저장
+    const userRef = doc(firestore, 'users', currentUserId);
+    await setDoc(userRef, {
+      phoneNumber: phoneNumber,
+      phoneVerified: true,
+      phoneVerifiedAt: Timestamp.now(),
+      updatedAt: Timestamp.now()
+    }, { merge: true });
+
+    console.log('✅ Firestore 저장 완료:', currentUserId);
+
+    // 전화번호 인증으로 생성된 임시 계정 삭제
+    if (result.user.uid !== currentUserId) {
+      console.log('🗑️ 임시 전화번호 계정 삭제:', result.user.uid);
+      try {
+        await result.user.delete();
+        console.log('✅ 임시 계정 삭제 완료');
+      } catch (deleteError) {
+        console.warn('⚠️ 임시 전화번호 계정 삭제 실패 (무시):', deleteError);
+      }
+
+      // 원래 사용자로 다시 로그인 필요할 수 있음
+      // 하지만 signOut 후 재로그인하면 사용자 경험이 나빠지므로
+      // 페이지 새로고침으로 처리
+      console.log('ℹ️ 페이지를 새로고침하여 원래 계정으로 복원하세요');
+    }
 
     return {
       success: true,
-      message: '전화번호가 계정에 연결되었습니다'
+      message: '전화번호가 인증되었습니다'
     };
   } catch (error: any) {
-    console.error('전화번호 연결 실패:', error);
+    console.error('❌ 전화번호 연결 실패:', error);
+
+    // 에러 메시지 개선
+    let message = '전화번호 인증에 실패했습니다';
+    if (error.code === 'auth/code-expired') {
+      message = '인증 코드가 만료되었습니다. 다시 시도해주세요';
+    } else if (error.code === 'auth/invalid-verification-code') {
+      message = '인증 코드가 올바르지 않습니다';
+    } else if (error.code === 'auth/session-expired') {
+      message = '세션이 만료되었습니다. 다시 시도해주세요';
+    }
+
     return {
       success: false,
       error: error.message,
-      message: '전화번호 연결에 실패했습니다'
+      message
     };
   }
 };
@@ -237,5 +334,81 @@ export const clearRecaptcha = () => {
   }
 };
 
-export { database, ref, onValue, query, orderByChild, limitToLast, update, get, auth };
+/**
+ * MFA 해결 - SMS 인증 코드 전송
+ */
+export const resolveMFAWithPhone = async (error: any) => {
+  try {
+    if (!recaptchaVerifier) {
+      throw new Error('reCAPTCHA가 초기화되지 않았습니다');
+    }
+
+    const resolver = getMultiFactorResolver(auth, error);
+
+    // 전화번호 인증 팩터 찾기
+    const phoneInfoOptions = {
+      multiFactorHint: resolver.hints[0],
+      session: resolver.session
+    };
+
+    const phoneAuthProvider = new PhoneAuthProvider(auth);
+    const verificationId = await phoneAuthProvider.verifyPhoneNumber(phoneInfoOptions, recaptchaVerifier);
+
+    return {
+      success: true,
+      resolver,
+      verificationId,
+      message: 'MFA 인증 코드가 전송되었습니다'
+    };
+  } catch (error: any) {
+    console.error('MFA 해결 실패:', error);
+    return {
+      success: false,
+      error: error.message,
+      message: 'MFA 인증 코드 전송에 실패했습니다'
+    };
+  }
+};
+
+/**
+ * MFA 인증 코드 확인
+ */
+export const completeMFASignIn = async (resolver: any, verificationId: string, verificationCode: string) => {
+  try {
+    const cred = PhoneAuthProvider.credential(verificationId, verificationCode);
+    const multiFactorAssertion = PhoneMultiFactorGenerator.assertion(cred);
+
+    const userCredential = await resolver.resolveSignIn(multiFactorAssertion);
+
+    return {
+      success: true,
+      user: userCredential.user,
+      message: 'MFA 인증이 완료되었습니다'
+    };
+  } catch (error: any) {
+    console.error('MFA 인증 확인 실패:', error);
+    return {
+      success: false,
+      error: error.message,
+      message: 'MFA 인증 코드가 올바르지 않습니다'
+    };
+  }
+};
+
+export {
+  firestore,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+  orderBy,
+  limit,
+  Timestamp,
+  auth
+};
 export type { RecaptchaVerifier, ConfirmationResult };

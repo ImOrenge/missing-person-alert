@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { APIProvider, Map } from '@vis.gl/react-google-maps';
 import { useEmergencyStore } from '../stores/emergencyStore';
-import { useFirebaseData } from '../hooks/useFirebaseData';
 import MarkerWithInfo from './MarkerWithInfo';
 
 const KOREA_CENTER = { lat: 37.5665, lng: 126.9780 }; // 서울
@@ -14,7 +13,6 @@ export default function EmergencyMap() {
   const selectedPersonId = useEmergencyStore((state) => state.selectedPersonId);
   const hoveredPersonId = useEmergencyStore((state) => state.hoveredPersonId);
   const setSelectedPersonId = useEmergencyStore((state) => state.setSelectedPersonId);
-  const { isConnected } = useFirebaseData();
 
   const filteredPersons = getFilteredPersons();
 
@@ -38,21 +36,21 @@ export default function EmergencyMap() {
   }, []);
 
   // 앱 포커스 시 데이터 새로고침
-  React.useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        console.log('📱 앱이 다시 활성화됨 - 데이터 새로고침');
-        // WebSocket이 연결되어 있으면 자동으로 최신 데이터를 받아옴
-        window.location.reload();
-      }
-    };
+  // React.useEffect(() => {
+  //   const handleVisibilityChange = () => {
+  //     if (document.visibilityState === 'visible') {
+  //       console.log('📱 앱이 다시 활성화됨 - 데이터 새로고침');
+  //       // WebSocket이 연결되어 있으면 자동으로 최신 데이터를 받아옴
+  //       window.location.reload();
+  //     }
+  //   };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+  //   document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, []);
+  //   return () => {
+  //     document.removeEventListener('visibilitychange', handleVisibilityChange);
+  //   };
+  // }, []);
 
   if (!GOOGLE_MAPS_API_KEY) {
     return (

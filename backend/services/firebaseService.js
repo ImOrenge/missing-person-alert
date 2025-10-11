@@ -1,5 +1,5 @@
 const { initializeApp } = require('firebase/app');
-const { getDatabase, ref, get, push, update, remove, query, orderByChild, equalTo } = require('firebase/database');
+const { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, orderBy, limit: firestoreLimit, Timestamp } = require('firebase/firestore');
 const { getAuth } = require('firebase/auth');
 
 class FirebaseService {
@@ -17,9 +17,9 @@ class FirebaseService {
       };
 
       const app = initializeApp(firebaseConfig);
-      this.db = getDatabase(app);
+      this.db = getFirestore(app);
       this.auth = getAuth(app);
-      console.log('✅ Firebase 초기화 완료 (제보 서비스)');
+      console.log('✅ Firebase Firestore 초기화 완료');
     } catch (error) {
       console.error('❌ Firebase 초기화 실패:', error.message);
       this.db = null;
@@ -27,7 +27,64 @@ class FirebaseService {
   }
 
   /**
-   * 실종자 제보 저장
+   * 유저 정보 저장/업데이트 (Firestore)
+   */
+  async saveUser(uid, userData) {
+    if (!this.db) {
+      throw new Error('Firebase가 초기화되지 않았습니다');
+    }
+
+    try {
+      const userRef = doc(this.db, 'users', uid);
+      const userDoc = await getDoc(userRef);
+
+      const data = {
+        uid,
+        email: userData.email,
+        displayName: userData.displayName || null,
+        photoURL: userData.photoURL || null,
+        phoneNumber: userData.phoneNumber || null,
+        isPhoneVerified: userData.isPhoneVerified || false,
+        isAdmin: userData.isAdmin || false,
+        createdAt: userDoc.exists() ? userDoc.data().createdAt : Timestamp.now(),
+        updatedAt: Timestamp.now()
+      };
+
+      await setDoc(userRef, data, { merge: true });
+      console.log(`✅ 유저 정보 저장: ${uid} (${userData.email})`);
+
+      return { success: true, user: data };
+    } catch (error) {
+      console.error('❌ 유저 정보 저장 실패:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 유저 정보 조회 (Firestore)
+   */
+  async getUser(uid) {
+    if (!this.db) {
+      throw new Error('Firebase가 초기화되지 않았습니다');
+    }
+
+    try {
+      const userRef = doc(this.db, 'users', uid);
+      const userDoc = await getDoc(userRef);
+
+      if (!userDoc.exists()) {
+        return null;
+      }
+
+      return { id: userDoc.id, ...userDoc.data() };
+    } catch (error) {
+      console.error('❌ 유저 정보 조회 실패:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 실종자 제보 저장 (Firestore)
    */
   async saveReport(reportData) {
     if (!this.db) {
@@ -35,22 +92,23 @@ class FirebaseService {
     }
 
     try {
-      const reportsRef = ref(this.db, 'reports');
-      const newReportRef = push(reportsRef);
+      const reportId = `report_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const reportRef = doc(this.db, 'reports', reportId);
 
       const report = {
         ...reportData,
-        id: newReportRef.key,
-        createdAt: Date.now(),
+        id: reportId,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
         status: 'pending'
       };
 
-      await update(newReportRef, report);
-      console.log(`✅ 제보 저장 완료: ${newReportRef.key}`);
+      await setDoc(reportRef, report);
+      console.log(`✅ 제보 저장 완료: ${reportId}`);
 
       return {
         success: true,
-        reportId: newReportRef.key,
+        reportId: reportId,
         report
       };
     } catch (error) {
@@ -60,7 +118,7 @@ class FirebaseService {
   }
 
   /**
-   * 사용자별 제보 목록 조회
+   * 사용자별 제보 목록 조회 (Firestore)
    */
   async getUserReports(userId) {
     if (!this.db) {
@@ -68,29 +126,26 @@ class FirebaseService {
     }
 
     try {
-      const reportsRef = ref(this.db, 'reports');
-      const userReportsQuery = query(
+      const reportsRef = collection(this.db, 'reports');
+      const q = query(
         reportsRef,
-        orderByChild('userId'),
-        equalTo(userId)
+        where('userId', '==', userId),
+        orderBy('createdAt', 'desc')
       );
 
-      const snapshot = await get(userReportsQuery);
+      const snapshot = await getDocs(q);
 
-      if (!snapshot.exists()) {
+      if (snapshot.empty) {
         return [];
       }
 
       const reports = [];
-      snapshot.forEach((child) => {
+      snapshot.forEach((docSnap) => {
         reports.push({
-          id: child.key,
-          ...child.val()
+          id: docSnap.id,
+          ...docSnap.data()
         });
       });
-
-      // 최신순 정렬
-      reports.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
       return reports;
     } catch (error) {
@@ -100,7 +155,7 @@ class FirebaseService {
   }
 
   /**
-   * 제보 상세 조회
+   * 제보 상세 조회 (Firestore)
    */
   async getReport(reportId) {
     if (!this.db) {
@@ -108,16 +163,16 @@ class FirebaseService {
     }
 
     try {
-      const reportRef = ref(this.db, `reports/${reportId}`);
-      const snapshot = await get(reportRef);
+      const reportRef = doc(this.db, 'reports', reportId);
+      const reportDoc = await getDoc(reportRef);
 
-      if (!snapshot.exists()) {
+      if (!reportDoc.exists()) {
         return null;
       }
 
       return {
-        id: reportId,
-        ...snapshot.val()
+        id: reportDoc.id,
+        ...reportDoc.data()
       };
     } catch (error) {
       console.error('❌ 제보 조회 실패:', error);
@@ -126,7 +181,7 @@ class FirebaseService {
   }
 
   /**
-   * 제보 삭제
+   * 제보 삭제 (Firestore)
    */
   async deleteReport(reportId, userId) {
     if (!this.db) {
@@ -145,8 +200,8 @@ class FirebaseService {
         throw new Error('삭제 권한이 없습니다');
       }
 
-      const reportRef = ref(this.db, `reports/${reportId}`);
-      await remove(reportRef);
+      const reportRef = doc(this.db, 'reports', reportId);
+      await deleteDoc(reportRef);
 
       console.log(`✅ 제보 삭제 완료: ${reportId}`);
 
@@ -158,7 +213,7 @@ class FirebaseService {
   }
 
   /**
-   * 제보 업데이트
+   * 제보 업데이트 (Firestore)
    */
   async updateReport(reportId, userId, updates) {
     if (!this.db) {
@@ -177,10 +232,10 @@ class FirebaseService {
         throw new Error('수정 권한이 없습니다');
       }
 
-      const reportRef = ref(this.db, `reports/${reportId}`);
-      await update(reportRef, {
+      const reportRef = doc(this.db, 'reports', reportId);
+      await updateDoc(reportRef, {
         ...updates,
-        updatedAt: Date.now()
+        updatedAt: Timestamp.now()
       });
 
       console.log(`✅ 제보 업데이트 완료: ${reportId}`);
@@ -193,7 +248,7 @@ class FirebaseService {
   }
 
   /**
-   * 실종자 정보 저장 (API 데이터 또는 사용자 제보)
+   * 실종자 정보 저장 (API 데이터 또는 사용자 제보) - Firestore
    */
   async saveMissingPersons(persons) {
     if (!this.db) {
@@ -201,17 +256,16 @@ class FirebaseService {
     }
 
     try {
-      const missingPersonsRef = ref(this.db, 'missingPersons');
       let saved = 0;
       let duplicates = 0;
 
       for (const person of persons) {
         try {
           // ID 중복 확인
-          const personRef = ref(this.db, `missingPersons/${person.id}`);
-          const snapshot = await get(personRef);
+          const personRef = doc(this.db, 'missingPersons', person.id);
+          const personDoc = await getDoc(personRef);
 
-          if (snapshot.exists()) {
+          if (personDoc.exists()) {
             duplicates++;
             continue;
           }
@@ -219,10 +273,10 @@ class FirebaseService {
           // updatedAt 추가
           const personData = {
             ...person,
-            updatedAt: Date.now()
+            updatedAt: Timestamp.now()
           };
 
-          await update(personRef, personData);
+          await setDoc(personRef, personData);
           saved++;
         } catch (error) {
           console.error(`❌ 실종자 저장 실패 (${person.id}):`, error.message);
@@ -237,30 +291,33 @@ class FirebaseService {
   }
 
   /**
-   * 실종자 정보 조회 (최신순)
+   * 실종자 정보 조회 (최신순) - Firestore
    */
-  async getMissingPersons(limit = 100) {
+  async getMissingPersons(limitCount = 100) {
     if (!this.db) {
       throw new Error('Firebase가 초기화되지 않았습니다');
     }
 
     try {
-      const missingPersonsRef = ref(this.db, 'missingPersons');
-      const snapshot = await get(missingPersonsRef);
+      const missingPersonsRef = collection(this.db, 'missingPersons');
+      const q = query(
+        missingPersonsRef,
+        orderBy('updatedAt', 'desc'),
+        firestoreLimit(limitCount)
+      );
 
-      if (!snapshot.exists()) {
+      const snapshot = await getDocs(q);
+
+      if (snapshot.empty) {
         return [];
       }
 
       const persons = [];
-      snapshot.forEach((child) => {
-        persons.push(child.val());
+      snapshot.forEach((docSnap) => {
+        persons.push(docSnap.data());
       });
 
-      // updatedAt 기준 최신순 정렬
-      persons.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-
-      return persons.slice(0, limit);
+      return persons;
     } catch (error) {
       console.error('❌ 실종자 정보 조회 실패:', error);
       throw error;
@@ -268,7 +325,7 @@ class FirebaseService {
   }
 
   /**
-   * 특정 실종자 정보 조회
+   * 특정 실종자 정보 조회 - Firestore
    */
   async getMissingPerson(id) {
     if (!this.db) {
@@ -276,14 +333,14 @@ class FirebaseService {
     }
 
     try {
-      const personRef = ref(this.db, `missingPersons/${id}`);
-      const snapshot = await get(personRef);
+      const personRef = doc(this.db, 'missingPersons', id);
+      const personDoc = await getDoc(personRef);
 
-      if (!snapshot.exists()) {
+      if (!personDoc.exists()) {
         return null;
       }
 
-      return snapshot.val();
+      return personDoc.data();
     } catch (error) {
       console.error('❌ 실종자 정보 조회 실패:', error);
       throw error;
@@ -291,7 +348,7 @@ class FirebaseService {
   }
 
   /**
-   * 실종자 정보 삭제
+   * 실종자 정보 삭제 - Firestore
    */
   async deleteMissingPerson(id) {
     if (!this.db) {
@@ -299,8 +356,8 @@ class FirebaseService {
     }
 
     try {
-      const personRef = ref(this.db, `missingPersons/${id}`);
-      await remove(personRef);
+      const personRef = doc(this.db, 'missingPersons', id);
+      await deleteDoc(personRef);
       console.log(`✅ 실종자 정보 삭제: ${id}`);
       return { success: true };
     } catch (error) {

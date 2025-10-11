@@ -62,6 +62,14 @@ const verifyFirebaseToken = async (req, res, next) => {
     // 토큰 검증
     const decodedToken = await getAuth().verifyIdToken(token);
 
+    // 디버깅: 토큰 정보 로그
+    console.log('🔍 토큰 정보:', {
+      uid: decodedToken.uid,
+      email: decodedToken.email,
+      phone_number: decodedToken.phone_number,
+      firebase: decodedToken.firebase
+    });
+
     // 사용자 정보를 req 객체에 추가
     req.user = {
       uid: decodedToken.uid,
@@ -110,13 +118,36 @@ const verifyPhoneAuthenticated = async (req, res, next) => {
       });
     }
 
-    // 전화번호 인증 여부 확인
+    // 토큰에 전화번호가 없으면 Firebase에서 사용자 정보 조회
     if (!req.user.phoneNumber) {
-      return res.status(403).json({
-        success: false,
-        error: '전화번호 인증이 필요합니다',
-        code: 'PHONE_VERIFICATION_REQUIRED'
-      });
+      try {
+        const userRecord = await getAuth().getUser(req.user.uid);
+
+        console.log('🔍 Firebase 사용자 정보:', {
+          uid: userRecord.uid,
+          email: userRecord.email,
+          phoneNumber: userRecord.phoneNumber,
+          emailVerified: userRecord.emailVerified
+        });
+
+        // Firebase에서 조회한 전화번호 정보로 업데이트
+        if (userRecord.phoneNumber) {
+          req.user.phoneNumber = userRecord.phoneNumber;
+        } else {
+          return res.status(403).json({
+            success: false,
+            error: '전화번호 인증이 필요합니다',
+            code: 'PHONE_VERIFICATION_REQUIRED'
+          });
+        }
+      } catch (error) {
+        console.error('Firebase 사용자 조회 실패:', error.message);
+        return res.status(403).json({
+          success: false,
+          error: '전화번호 인증이 필요합니다',
+          code: 'PHONE_VERIFICATION_REQUIRED'
+        });
+      }
     }
 
     next();

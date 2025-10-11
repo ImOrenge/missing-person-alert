@@ -105,7 +105,10 @@ export default function ReportModal({ isOpen, onClose }: Props) {
 
       // API 호출
       const token = await user.getIdToken();
-      const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3000'}/api/reports`, {
+      const apiUrl = `${process.env.REACT_APP_API_URL || ''}/api/reports`;
+      console.log('📡 제보 등록:', apiUrl);
+
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

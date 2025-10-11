@@ -3,7 +3,7 @@ import { X, Phone, Lock, AlertTriangle } from 'lucide-react';
 import {
   initRecaptcha,
   sendPhoneVerificationCode,
-  verifyPhoneCode,
+  linkPhoneNumber,
   clearRecaptcha,
   type ConfirmationResult
 } from '../services/firebase';
@@ -33,21 +33,32 @@ export const PhoneAuthModal: React.FC<PhoneAuthModalProps> = ({ isOpen, onClose,
 
   useEffect(() => {
     if (isOpen) {
-      // reCAPTCHA 초기화
-      setTimeout(() => {
+      // reCAPTCHA 초기화 - 더 긴 지연시간으로 DOM 준비 보장
+      const timer = setTimeout(() => {
         try {
-          initRecaptcha('recaptcha-container');
-        } catch (error) {
-          console.error('reCAPTCHA 초기화 실패:', error);
-        }
-      }, 100);
-    }
+          console.log('🔄 reCAPTCHA 초기화 시도...');
+          const verifier = initRecaptcha('recaptcha-container');
 
-    return () => {
-      if (!isOpen) {
-        clearRecaptcha();
-      }
-    };
+          // reCAPTCHA 렌더링
+          verifier.render().then((widgetId: any) => {
+            console.log('✅ reCAPTCHA 렌더링 완료, widgetId:', widgetId);
+          }).catch((error: any) => {
+            console.error('❌ reCAPTCHA 렌더링 실패:', error);
+            toast.error('reCAPTCHA 초기화에 실패했습니다. 페이지를 새로고침해주세요.');
+          });
+        } catch (error) {
+          console.error('❌ reCAPTCHA 초기화 실패:', error);
+          toast.error('reCAPTCHA 초기화에 실패했습니다. 페이지를 새로고침해주세요.');
+        }
+      }, 300);
+
+      return () => {
+        clearTimeout(timer);
+      };
+    } else {
+      // 모달이 닫힐 때 정리
+      clearRecaptcha();
+    }
   }, [isOpen]);
 
   // 카운트다운 타이머
@@ -128,15 +139,21 @@ export const PhoneAuthModal: React.FC<PhoneAuthModalProps> = ({ isOpen, onClose,
 
     setLoading(true);
     try {
-      const result = await verifyPhoneCode(confirmationResult, verificationCode);
+      // 기존 계정에 전화번호 연결
+      const result = await linkPhoneNumber(confirmationResult, verificationCode);
 
       if (result.success) {
         // 인증 성공 시 시도 기록 초기화
         clearAuthAttempts(phoneNumber);
 
         toast.success(result.message);
-        onSuccess();
         handleClose();
+        onSuccess();
+
+        // 페이지 새로고침으로 원래 계정으로 복원
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
       } else {
         // 실패 시 시도 기록
         recordAuthAttempt(phoneNumber);

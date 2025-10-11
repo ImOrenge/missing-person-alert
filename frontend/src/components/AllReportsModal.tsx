@@ -32,14 +32,14 @@ export default function AllReportsModal({ isOpen, onClose }: Props) {
     try {
       setLoading(true);
       const token = await user.getIdToken();
-      const response = await fetch(
-        `${process.env.REACT_APP_API_URL || 'http://localhost:3000'}/api/reports/all?uid=${user.uid}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
+      const apiUrl = `${process.env.REACT_APP_API_URL || ''}/api/reports/all?uid=${user.uid}`;
+      console.log('📡 전체 제보 조회:', apiUrl);
+
+      const response = await fetch(apiUrl, {
+        headers: {
+          'Authorization': `Bearer ${token}`
         }
-      );
+      });
 
       const data = await response.json();
 

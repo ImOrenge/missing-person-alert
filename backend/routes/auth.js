@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const firebaseService = require('../services/firebaseService');
 
 /**
  * 인증 상태 확인 미들웨어
@@ -21,23 +22,32 @@ const authenticateToken = (req, res, next) => {
 /**
  * POST /api/auth/register
  * 사용자 회원가입 (이메일/비밀번호)
- * 클라이언트에서 Firebase Auth로 처리 후 결과만 전달받음
+ * 클라이언트에서 Firebase Auth로 처리 후 결과를 Firestore에 저장
  */
 router.post('/register', async (req, res) => {
   try {
-    const { uid, email, displayName } = req.body;
+    const { uid, email, displayName, photoURL, phoneNumber } = req.body;
 
     if (!uid || !email) {
       return res.status(400).json({ error: 'UID와 이메일은 필수입니다' });
     }
 
-    // 사용자 정보를 추가적으로 DB에 저장하거나 처리할 수 있음
-    console.log('✅ 회원가입 완료:', { uid, email, displayName });
+    // Firestore에 유저 정보 저장
+    const result = await firebaseService.saveUser(uid, {
+      email,
+      displayName,
+      photoURL,
+      phoneNumber,
+      isPhoneVerified: false,
+      isAdmin: false
+    });
+
+    console.log('✅ 회원가입 완료 및 Firestore 저장:', { uid, email, displayName });
 
     res.json({
       success: true,
       message: '회원가입이 완료되었습니다',
-      user: { uid, email, displayName }
+      user: result.user
     });
   } catch (error) {
     console.error('❌ 회원가입 실패:', error);
@@ -48,22 +58,35 @@ router.post('/register', async (req, res) => {
 /**
  * POST /api/auth/login
  * 사용자 로그인 (이메일/비밀번호 또는 Google)
- * 클라이언트에서 Firebase Auth로 처리 후 결과만 전달받음
+ * 클라이언트에서 Firebase Auth로 처리 후 결과를 Firestore에 저장/업데이트
  */
 router.post('/login', async (req, res) => {
   try {
-    const { uid, email, displayName, photoURL, provider } = req.body;
+    const { uid, email, displayName, photoURL, phoneNumber, provider } = req.body;
 
     if (!uid || !email) {
       return res.status(400).json({ error: 'UID와 이메일은 필수입니다' });
     }
 
-    console.log('✅ 로그인 성공:', { uid, email, displayName, provider });
+    // Firestore에서 기존 유저 정보 조회
+    const existingUser = await firebaseService.getUser(uid);
+
+    // Firestore에 유저 정보 저장/업데이트
+    const result = await firebaseService.saveUser(uid, {
+      email,
+      displayName,
+      photoURL,
+      phoneNumber,
+      isPhoneVerified: existingUser?.isPhoneVerified || false,
+      isAdmin: existingUser?.isAdmin || false
+    });
+
+    console.log('✅ 로그인 성공 및 Firestore 업데이트:', { uid, email, displayName, provider });
 
     res.json({
       success: true,
       message: '로그인이 완료되었습니다',
-      user: { uid, email, displayName, photoURL, provider }
+      user: result.user
     });
   } catch (error) {
     console.error('❌ 로그인 실패:', error);
@@ -90,16 +113,26 @@ router.post('/logout', async (req, res) => {
 });
 
 /**
- * GET /api/auth/user
- * 현재 로그인된 사용자 정보 조회 (인증 필요)
+ * GET /api/auth/user/:uid
+ * 사용자 정보 조회 (Firestore)
  */
-router.get('/user', authenticateToken, async (req, res) => {
+router.get('/user/:uid', async (req, res) => {
   try {
-    const { uid, email, displayName } = req.body;
+    const { uid } = req.params;
+
+    if (!uid) {
+      return res.status(400).json({ error: 'UID가 필요합니다' });
+    }
+
+    const user = await firebaseService.getUser(uid);
+
+    if (!user) {
+      return res.status(404).json({ error: '사용자를 찾을 수 없습니다' });
+    }
 
     res.json({
       success: true,
-      user: { uid, email, displayName }
+      user
     });
   } catch (error) {
     console.error('❌ 사용자 정보 조회 실패:', error);

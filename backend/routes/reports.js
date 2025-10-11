@@ -169,12 +169,13 @@ router.get('/:id', async (req, res) => {
 
 /**
  * DELETE /api/reports/:id
- * 제보 삭제 (본인만 가능)
+ * 제보 삭제 (본인 또는 관리자만 가능)
  */
 router.delete('/:id', verifyFirebaseToken, async (req, res) => {
   try {
     const { id } = req.params;
     const uid = req.user.uid;
+    const email = req.user.email;
 
     // 제보 정보 조회
     const person = await firebaseService.getMissingPerson(id);
@@ -183,15 +184,19 @@ router.delete('/:id', verifyFirebaseToken, async (req, res) => {
       return res.status(404).json({ error: '제보를 찾을 수 없습니다' });
     }
 
-    // 본인 확인
-    if (person.reportedBy && person.reportedBy.uid !== uid) {
+    // 관리자 확인
+    const { hasAdminAccess } = require('../utils/adminUtils');
+    const isAdmin = hasAdminAccess(email, uid);
+
+    // 본인 확인 또는 관리자 권한 확인
+    if (!isAdmin && person.reportedBy && person.reportedBy.uid !== uid) {
       return res.status(403).json({ error: '본인이 제보한 내용만 삭제할 수 있습니다' });
     }
 
     // 삭제 (Firebase에서 제거)
     await firebaseService.deleteMissingPerson(id);
 
-    console.log(`✅ 제보 삭제: ${id} (제보자: ${uid})`);
+    console.log(`✅ 제보 삭제: ${id} (${isAdmin ? '관리자' : '제보자'}: ${uid})`);
 
     res.json({
       success: true,
