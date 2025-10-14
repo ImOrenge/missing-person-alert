@@ -10,6 +10,125 @@ service cloud.firestore {
       );
     }
 
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function commentOwnerUid() {
+      return request.method == 'create'
+        ? request.resource.data.userId
+        : resource.data.userId;
+    }
+
+    function isCommentOwner() {
+      return isAuthenticated() && commentOwnerUid() == request.auth.uid;
+    }
+
+    function validateCommentBase(data) {
+      return data.keys().hasOnly([
+        'commentId',
+        'missingPersonId',
+        'userId',
+        'nickname',
+        'isAnonymous',
+        'content',
+        'type',
+        'createdAt',
+        'updatedAt',
+        'likes',
+        'likedBy',
+        'isEdited',
+        'isDeleted',
+        'reported',
+        'reportCount',
+        'reportedBy',
+        'isHidden'
+      ]) &&
+        data.commentId is string && data.commentId.size() > 0 &&
+        data.missingPersonId is string && data.missingPersonId.size() > 0 &&
+        data.userId is string && data.userId.size() > 0 &&
+        data.nickname is string && data.nickname.size() > 0 && data.nickname.size() <= 40 &&
+        data.isAnonymous is bool &&
+        data.content is string && data.content.size() >= 10 && data.content.size() <= 500 &&
+        data.type in ['sighting', 'question', 'support'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp &&
+        data.likes is int && data.likes >= 0 &&
+        data.likedBy is list && data.likedBy.size() >= 0 &&
+        data.isEdited is bool &&
+        data.isDeleted is bool &&
+        data.reported is bool &&
+        data.reportCount is int && data.reportCount >= 0 &&
+        data.reportedBy is list && data.reportedBy.size() >= 0 &&
+        data.isHidden is bool;
+    }
+
+    function validateCommentCreate(data) {
+      return validateCommentBase(data) &&
+        data.userId == request.auth.uid &&
+        data.commentId == commentId &&
+        data.likes == 0 &&
+        data.likedBy.size() == 0 &&
+        data.isEdited == false &&
+        data.isDeleted == false &&
+        data.reported == false &&
+        data.reportCount == 0 &&
+        data.reportedBy.size() == 0 &&
+        data.isHidden == false;
+    }
+
+    function validateCommentUpdate(data) {
+      return validateCommentBase(data) &&
+        data.commentId == resource.data.commentId &&
+        data.userId == resource.data.userId &&
+        data.missingPersonId == resource.data.missingPersonId &&
+        data.createdAt == resource.data.createdAt &&
+        data.likes == resource.data.likes &&
+        data.likedBy == resource.data.likedBy &&
+        data.reported == resource.data.reported &&
+        data.reportCount == resource.data.reportCount &&
+        data.reportedBy == resource.data.reportedBy &&
+        data.isHidden == resource.data.isHidden &&
+        data.type == resource.data.type;
+    }
+
+    function validateReport(data) {
+      return data.keys().hasOnly([
+        'reportId',
+        'commentId',
+        'reportedBy',
+        'reason',
+        'description',
+        'createdAt',
+        'status'
+      ]) &&
+        data.reportId is string && data.reportId.size() > 0 && data.reportId == reportId &&
+        data.commentId is string && data.commentId.size() > 0 &&
+        data.reportedBy is string && data.reportedBy == request.auth.uid &&
+        data.reason in ['spam', 'inappropriate', 'false', 'other'] &&
+        (data.description == null || (data.description is string && data.description.size() <= 500)) &&
+        data.createdAt is timestamp &&
+        data.status in ['pending', 'resolved', 'dismissed'] &&
+        data.status == 'pending';
+    }
+
+    function validateNotification(data) {
+      return data.keys().hasOnly([
+        'notificationId',
+        'userId',
+        'commentId',
+        'type',
+        'isRead',
+        'createdAt'
+      ]) &&
+        data.notificationId is string && data.notificationId.size() > 0 && data.notificationId == notificationId &&
+        data.userId is string && data.userId.size() > 0 &&
+        data.commentId is string && data.commentId.size() > 0 &&
+        data.type in ['reply', 'like', 'mention'] &&
+        data.isRead is bool && data.isRead == false &&
+        data.createdAt is timestamp;
+    }
+
     // 공지사항 컬렉션
     match /announcements/{announcementId} {
       // 모든 사용자가 읽기 가능
@@ -29,6 +148,32 @@ service cloud.firestore {
 
       // 삭제는 관리자만 가능
       allow delete: if isAdmin();
+    }
+
+    // 실종자 댓글 컬렉션
+    match /missingPersonComments/{commentId} {
+      allow read: if true;
+
+      allow create: if isAuthenticated() && validateCommentCreate(request.resource.data);
+
+      allow update: if isCommentOwner() && validateCommentUpdate(request.resource.data);
+
+      allow delete: if isCommentOwner() || isAdmin();
+    }
+
+    // 댓글 신고 컬렉션
+    match /commentReports/{reportId} {
+      allow create: if isAuthenticated() && validateReport(request.resource.data);
+      allow read, update, delete: if isAdmin();
+    }
+
+    // 댓글 알림 컬렉션
+    match /commentNotifications/{notificationId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow create: if isAuthenticated() &&
+        validateNotification(request.resource.data) &&
+        request.resource.data.userId == request.auth.uid;
+      allow update, delete: if request.auth != null && request.auth.uid == resource.data.userId;
     }
 
     // 나머지 모든 문서는 기본적으로 차단

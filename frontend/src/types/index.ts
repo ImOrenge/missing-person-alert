@@ -74,3 +74,15 @@ export interface WebSocketMessage {
   message?: string;
   timestamp: string;
 }
+
+export type {
+  MissingPersonComment,
+  CommentReport,
+  CommentNotification
+} from './comment';
+export type {
+  CommentType,
+  CommentReportReason,
+  CommentReportStatus,
+  CommentNotificationType
+} from './comment';
