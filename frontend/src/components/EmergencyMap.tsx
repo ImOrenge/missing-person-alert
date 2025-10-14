@@ -1,5 +1,5 @@
 import React from 'react';
-import { APIProvider, Map } from '@vis.gl/react-google-maps';
+import { APIProvider, Map, useMap } from '@vis.gl/react-google-maps';
 import { useEmergencyStore } from '../stores/emergencyStore';
 import MarkerWithInfo from './MarkerWithInfo';
 
@@ -7,12 +7,74 @@ const KOREA_CENTER = { lat: 37.5665, lng: 126.9780 }; // 서울
 const GOOGLE_MAPS_API_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY || '';
 const MAP_ID = process.env.REACT_APP_MAP_ID || '';
 
-export default function EmergencyMap() {
+// 마커 애니메이션을 처리하는 내부 컴포넌트
+function MapContent() {
+  const map = useMap();
   const getFilteredPersons = useEmergencyStore((state) => state.getFilteredPersons);
-  const missingPersons = useEmergencyStore((state) => state.missingPersons);
   const selectedPersonId = useEmergencyStore((state) => state.selectedPersonId);
   const hoveredPersonId = useEmergencyStore((state) => state.hoveredPersonId);
   const setSelectedPersonId = useEmergencyStore((state) => state.setSelectedPersonId);
+
+  const filteredPersons = getFilteredPersons();
+
+  // hoveredPersonId 변경 시 해당 마커로 부드럽게 이동하고 확대
+  React.useEffect(() => {
+    if (!map || !hoveredPersonId) return;
+
+    const hoveredPerson = filteredPersons.find(p => p.id === hoveredPersonId);
+    if (!hoveredPerson) return;
+
+    // 부드러운 애니메이션으로 마커 위치로 이동하며 확대
+    map.panTo(hoveredPerson.location);
+
+    // 현재 줌 레벨 확인
+    const currentZoom = map.getZoom() || 7;
+
+    // 줌 레벨이 13 미만이면 확대
+    if (currentZoom < 13) {
+      map.setZoom(13);
+    }
+  }, [hoveredPersonId, map, filteredPersons]);
+
+  // hoveredPersonId가 null로 변경되면 원래 줌으로 복귀
+  React.useEffect(() => {
+    if (!map || hoveredPersonId !== null) return;
+
+    // 약간의 지연 후 원래 줌 레벨로 부드럽게 복귀
+    const timer = setTimeout(() => {
+      const currentZoom = map.getZoom() || 7;
+      if (currentZoom > 7) {
+        map.setZoom(Math.max(7, currentZoom - 3));
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [hoveredPersonId, map]);
+
+  return (
+    <>
+      {filteredPersons.map((person) => {
+        const isSelected = selectedPersonId === person.id;
+        const isHovered = hoveredPersonId === person.id;
+
+        return (
+          <MarkerWithInfo
+            key={person.id}
+            person={person}
+            isSelected={isSelected}
+            isHighlighted={isHovered}
+            onClick={() => setSelectedPersonId(person.id)}
+            onClose={() => setSelectedPersonId(null)}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+export default function EmergencyMap() {
+  const missingPersons = useEmergencyStore((state) => state.missingPersons);
+  const getFilteredPersons = useEmergencyStore((state) => state.getFilteredPersons);
 
   const filteredPersons = getFilteredPersons();
 
@@ -86,21 +148,7 @@ export default function EmergencyMap() {
           fullscreenControl={true}
           className="h-full w-full"
         >
-          {filteredPersons.map((person) => {
-            const isSelected = selectedPersonId === person.id;
-            const isHovered = hoveredPersonId === person.id;
-
-            return (
-              <MarkerWithInfo
-                key={person.id}
-                person={person}
-                isSelected={isSelected}
-                isHighlighted={isHovered}
-                onClick={() => setSelectedPersonId(person.id)}
-                onClose={() => setSelectedPersonId(null)}
-              />
-            );
-          })}
+          <MapContent />
         </Map>
       </APIProvider>
 

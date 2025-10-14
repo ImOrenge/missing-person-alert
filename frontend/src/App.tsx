@@ -169,7 +169,91 @@ function App() {
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-gray-50">
       {/* 상단 헤더 */}
       <header className="bg-gradient-to-r from-red-600 to-red-700 text-white shadow-lg z-50">
-        <div className="flex items-center justify-between px-4 py-3">
+        {/* 모바일: 두 줄로 분리 */}
+        <div className="md:hidden">
+          {/* 첫 번째 줄: 타이틀과 메뉴 토글 */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-red-500">
+            <div className="flex items-center gap-2 flex-1">
+              <button
+                onClick={() => setShowSidebar(!showSidebar)}
+                className="p-2 hover:bg-red-700 rounded-lg transition-colors"
+              >
+                {showSidebar ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
+              </button>
+              <h1 className="text-lg font-bold truncate">🚨 실시간 실종자 알림</h1>
+              <span className="px-2 py-0.5 bg-red-800 rounded-full text-xs font-semibold whitespace-nowrap">
+                {missingPersons.length}명
+              </span>
+            </div>
+          </div>
+
+          {/* 두 번째 줄: 버튼들 */}
+          <div className="flex items-center justify-between px-4 py-2">
+            <div className="flex items-center gap-2">
+              {/* 알림 토글 */}
+              <button
+                onClick={() => setNotifications(!notifications)}
+                className="p-2 hover:bg-red-700 rounded-lg transition-colors"
+                title={notifications ? '알림 끄기' : '알림 켜기'}
+              >
+                {notifications ? <Bell size={18} /> : <BellOff size={18} />}
+              </button>
+
+              {/* 연결 상태 */}
+              <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full ${isConnected ? 'bg-green-500' : 'bg-gray-500'}`}>
+                <div className={`w-1.5 h-1.5 rounded-full bg-white ${isConnected ? 'animate-pulse' : ''}`} />
+                <span className="text-xs font-medium">{isConnected ? '연결' : '끊김'}</span>
+              </div>
+            </div>
+
+            {/* 로그인/로그아웃 */}
+            {currentUser ? (
+              <div className="flex items-center gap-1.5">
+                {isAdmin && (
+                  <button
+                    onClick={() => setShowAdminDashboard(true)}
+                    className="p-2 hover:bg-red-700 rounded-lg transition-colors bg-yellow-500 hover:bg-yellow-600"
+                    title="관리자"
+                  >
+                    <Shield size={18} />
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowMyReportsModal(true)}
+                  className="p-2 hover:bg-red-700 rounded-lg transition-colors"
+                  title="내 제보"
+                >
+                  <FileText size={18} />
+                </button>
+                <button
+                  onClick={() => setShowUserProfile(true)}
+                  className="p-2 hover:bg-red-700 rounded-lg transition-colors"
+                  title="프로필"
+                >
+                  <UserIcon size={18} />
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="p-2 hover:bg-red-700 rounded-lg transition-colors"
+                  title="로그아웃"
+                >
+                  <LogOut size={18} />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowLoginModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-800 hover:bg-red-900 rounded-lg transition-colors"
+              >
+                <LogIn size={16} />
+                <span className="text-sm">로그인</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* 데스크톱: 한 줄 */}
+        <div className="hidden md:flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setShowSidebar(!showSidebar)}
@@ -178,7 +262,7 @@ function App() {
               {showSidebar ? <ChevronLeft size={24} /> : <ChevronRight size={24} />}
             </button>
             <h1 className="text-xl md:text-2xl font-bold">🚨 실시간 실종자 알림</h1>
-            <span className="hidden md:inline-block px-3 py-1 bg-red-800 rounded-full text-sm">
+            <span className="px-3 py-1 bg-red-800 rounded-full text-sm">
               {missingPersons.length}명
             </span>
           </div>
@@ -196,7 +280,7 @@ function App() {
             {/* 연결 상태 */}
             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${isConnected ? 'bg-green-500' : 'bg-gray-500'}`}>
               <div className={`w-2 h-2 rounded-full bg-white ${isConnected ? 'animate-pulse' : ''}`} />
-              <span className="text-sm font-medium hidden sm:inline">{isConnected ? '연결됨' : '연결 끊김'}</span>
+              <span className="text-sm font-medium">{isConnected ? '연결됨' : '연결 끊김'}</span>
             </div>
 
             {/* 로그인/로그아웃 */}
@@ -225,7 +309,7 @@ function App() {
                 >
                   <UserIcon size={20} />
                 </button>
-                <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-red-800 rounded-full cursor-pointer" onClick={() => setShowUserProfile(true)}>
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-red-800 rounded-full cursor-pointer" onClick={() => setShowUserProfile(true)}>
                   {isAdmin && <Shield size={16} color="#fbbf24" />}
                   <UserCircle size={18} />
                   <span className="text-sm">{currentUser.displayName || currentUser.email}</span>
@@ -244,7 +328,7 @@ function App() {
                 className="flex items-center gap-2 px-3 py-1.5 bg-red-800 hover:bg-red-900 rounded-lg transition-colors"
               >
                 <LogIn size={18} />
-                <span className="hidden sm:inline text-sm">로그인</span>
+                <span className="text-sm">로그인</span>
               </button>
             )}
           </div>
@@ -252,7 +336,7 @@ function App() {
       </header>
 
       {/* 메인 콘텐츠 */}
-      <div className="flex flex-1 overflow-hidden pb-10">
+      <div className="flex flex-1 overflow-hidden pb-10 relative">
         {/* 사이드바 */}
         {showSidebar && (
           <Sidebar
@@ -264,14 +348,14 @@ function App() {
         {/* 지도 */}
         <div className="flex-1 relative">
           <EmergencyMap />
-
-          {/* 필터 패널 (오버레이) */}
-          {showFilters && (
-            <div className="absolute top-0 left-0 right-0 z-10 bg-white shadow-lg">
-              <FilterPanel onClose={() => setShowFilters(false)} />
-            </div>
-          )}
         </div>
+
+        {/* 필터 패널 (오버레이 - 모바일은 전체 화면, 데스크톱은 일부) */}
+        {showFilters && (
+          <div className="absolute inset-0 md:inset-auto md:top-0 md:left-0 md:right-0 md:bottom-auto z-50 bg-white shadow-2xl md:shadow-lg overflow-y-auto">
+            <FilterPanel onClose={() => setShowFilters(false)} />
+          </div>
+        )}
       </div>
 
       {/* 제보하기 버튼 (로그인 시에만 표시) */}
