@@ -1,11 +1,11 @@
 /**
- * Google reCAPTCHA v3 유틸리티
+ * Google reCAPTCHA Enterprise 유틸리티
  * 자동입력 방지 및 봇 공격 차단
  */
 
 const RECAPTCHA_SITE_KEY = process.env.REACT_APP_RECAPTCHA_SITE_KEY ?? '';
-const RECAPTCHA_API_URL = 'https://www.google.com/recaptcha/api.js';
-const RECAPTCHA_SCRIPT_ID = 'recaptcha-v3-script';
+const RECAPTCHA_SCRIPT_URL = 'https://www.google.com/recaptcha/enterprise.js';
+const RECAPTCHA_SCRIPT_ID = 'recaptcha-enterprise-script';
 
 const assertSiteKey = (): string => {
   if (!RECAPTCHA_SITE_KEY) {
@@ -16,7 +16,7 @@ const assertSiteKey = (): string => {
 
 const ensureScriptElement = () => {
   const siteKey = assertSiteKey();
-  const desiredSrc = `${RECAPTCHA_API_URL}?render=${siteKey}`;
+  const desiredSrc = `${RECAPTCHA_SCRIPT_URL}?render=${siteKey}`;
 
   const currentScript = document.getElementById(RECAPTCHA_SCRIPT_ID) as HTMLScriptElement | null;
   if (currentScript) {
@@ -28,7 +28,7 @@ const ensureScriptElement = () => {
   }
 
   const staleScript = document.querySelector<HTMLScriptElement>(
-    `script[src^="${RECAPTCHA_API_URL}"]`
+    `script[src^="${RECAPTCHA_SCRIPT_URL}"]`
   );
   if (staleScript) {
     staleScript.remove();
@@ -44,7 +44,7 @@ const ensureScriptElement = () => {
 };
 
 /**
- * reCAPTCHA 스크립트 로드
+ * reCAPTCHA Enterprise 스크립트 로드
  * 필요한 경우 스크립트를 동적으로 로드하고 ready 상태를 확인합니다
  */
 export const loadRecaptchaScript = (): Promise<void> => {
@@ -62,9 +62,9 @@ export const loadRecaptchaScript = (): Promise<void> => {
     const checkReady = () => {
       attempts += 1;
 
-      if (window.grecaptcha?.ready) {
-        window.grecaptcha.ready(() => {
-          console.log('✅ reCAPTCHA v3 로드 완료');
+      if (window.grecaptcha?.enterprise?.ready) {
+        window.grecaptcha.enterprise.ready(() => {
+          console.log('✅ reCAPTCHA Enterprise 로드 완료');
           resolve();
         });
         return true;
@@ -92,28 +92,29 @@ export const loadRecaptchaScript = (): Promise<void> => {
 };
 
 /**
- * reCAPTCHA v3 토큰 생성
+ * reCAPTCHA Enterprise 토큰 생성
  * @param action 액션 이름 (예: 'LOGIN', 'REPORT_SUBMIT', 'SIGNUP')
  * @returns reCAPTCHA 토큰
  */
 export const executeRecaptcha = async (action: string): Promise<string> => {
   const siteKey = assertSiteKey();
 
-  if (!window.grecaptcha?.ready) {
+  if (!window.grecaptcha?.enterprise?.ready) {
     await loadRecaptchaScript();
   } else {
     await new Promise<void>((resolve) => {
-      window.grecaptcha?.ready(resolve);
+      window.grecaptcha?.enterprise?.ready(resolve);
     });
   }
 
   try {
-    if (!window.grecaptcha?.execute) {
+    const executor = window.grecaptcha?.enterprise?.execute ?? window.grecaptcha?.execute;
+    if (!executor) {
       throw new Error('reCAPTCHA execute 함수를 찾을 수 없습니다');
     }
 
-    const token = await window.grecaptcha.execute(siteKey, { action });
-    console.log(`✅ reCAPTCHA v3 토큰 생성 완료 (action: ${action})`);
+    const token = await executor(siteKey, { action });
+    console.log(`✅ reCAPTCHA Enterprise 토큰 생성 완료 (action: ${action})`);
     return token;
   } catch (error) {
     console.error('❌ reCAPTCHA 토큰 생성 실패:', error);
@@ -142,13 +143,17 @@ export const showRecaptchaBadge = () => {
 };
 
 /**
- * TypeScript 타입 정의 - reCAPTCHA v3
+ * TypeScript 타입 정의 - reCAPTCHA Enterprise
  */
 declare global {
   interface Window {
     grecaptcha?: {
-      ready: (callback: () => void) => void;
-      execute: (siteKey: string, options: { action: string }) => Promise<string>;
+      ready?: (callback: () => void) => void;
+      execute?: (siteKey: string, options: { action: string }) => Promise<string>;
+      enterprise?: {
+        ready: (callback: () => void) => void;
+        execute: (siteKey: string, options: { action: string }) => Promise<string>;
+      };
     };
   }
 }

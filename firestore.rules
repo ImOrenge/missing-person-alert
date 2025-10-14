@@ -5,6 +5,7 @@ service cloud.firestore {
     // 관리자 확인 함수
     function isAdmin() {
       return request.auth != null && (
+        request.auth.token.admin == true ||
         request.auth.token.email == 'jmgi1024@gmail.com' ||
         request.auth.uid == 'admin_uid_here'
       );
@@ -148,6 +149,13 @@ service cloud.firestore {
 
       // 삭제는 관리자만 가능
       allow delete: if isAdmin();
+    }
+
+    // 실종자 데이터 컬렉션
+    match /missingPersons/{personId} {
+      allow read: if true;
+
+      allow create, update, delete: if isAuthenticated();
     }
 
     // 실종자 댓글 컬렉션

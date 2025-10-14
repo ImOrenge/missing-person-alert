@@ -1,7 +1,9 @@
 const { getAuth } = require('firebase-admin/auth');
 const admin = require('firebase-admin');
-const axios = require('axios');
+const { RecaptchaEnterpriseServiceClient } = require('@google-cloud/recaptcha-enterprise');
 const path = require('path');
+
+const recaptchaClient = new RecaptchaEnterpriseServiceClient();
 
 // Firebase Admin 초기화 (한번만 실행)
 if (!admin.apps.length) {
@@ -204,8 +206,20 @@ const verifyAdmin = async (req, res, next) => {
     // 서비스 계정 키가 있는 경우: Firebase에서 사용자 정보 가져오기
     const userRecord = await getAuth().getUser(req.user.uid);
 
-    // 커스텀 클레임에서 관리자 권한 확인
-    if (!userRecord.customClaims || !userRecord.customClaims.admin) {
+    const adminEmails = (process.env.ADMIN_EMAILS || '')
+      .split(',')
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean);
+    const adminUids = (process.env.ADMIN_UIDS || '')
+      .split(',')
+      .map((uid) => uid.trim())
+      .filter(Boolean);
+
+    const hasCustomClaim = !!(userRecord.customClaims && userRecord.customClaims.admin);
+    const emailMatch = userRecord.email ? adminEmails.includes(userRecord.email.toLowerCase()) : false;
+    const uidMatch = adminUids.includes(userRecord.uid);
+
+    if (!hasCustomClaim && !emailMatch && !uidMatch) {
       return res.status(403).json({
         success: false,
         error: '관리자 권한이 필요합니다',
@@ -319,48 +333,49 @@ const verifyRecaptcha = async (req, res, next) => {
       });
     }
 
-    const secretKey = process.env.RECAPTCHA_SECRET_KEY;
-    if (!secretKey) {
-      console.error('❌ RECAPTCHA_SECRET_KEY가 설정되지 않았습니다');
+    const projectId = process.env.RECAPTCHA_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || 'missing-person-alram';
+    const siteKey = process.env.RECAPTCHA_SITE_KEY;
+
+    if (!siteKey) {
+      console.error('❌ RECAPTCHA_SITE_KEY가 설정되지 않았습니다');
       return res.status(500).json({
         success: false,
         error: '서버 설정 오류가 발생했습니다'
       });
     }
 
-    const remoteIp = req.ip;
-    const params = {
-      secret: secretKey,
-      response: recaptchaToken,
-      remoteip: remoteIp
+    const expectedAction = req.recaptchaAction || 'report_submit';
+
+    const request = {
+      parent: recaptchaClient.projectPath(projectId),
+      assessment: {
+        event: {
+          token: recaptchaToken,
+          siteKey,
+          expectedAction
+        }
+      }
     };
 
-    const verificationResponse = await axios.post(
-      'https://www.google.com/recaptcha/api/siteverify',
-      null,
-      { params }
-    );
+    const [response] = await recaptchaClient.createAssessment(request);
 
-    const verificationData = verificationResponse.data || {};
-
-    if (!verificationData.success) {
-      const errorCodes = verificationData['error-codes'] || [];
-      console.error('❌ reCAPTCHA 검증 실패:', errorCodes);
+    if (!response.tokenProperties?.valid) {
+      console.error('❌ reCAPTCHA 토큰 무효:', response.tokenProperties?.invalidReason);
       return res.status(400).json({
         success: false,
         error: 'reCAPTCHA 검증에 실패했습니다',
         code: 'RECAPTCHA_VERIFICATION_FAILED',
-        details: errorCodes
+        details: response.tokenProperties?.invalidReason
       });
     }
 
-    const expectedAction = req.recaptchaAction || 'report_submit';
-    const action = verificationData.action || 'unknown';
+    const action = response.tokenProperties?.action || 'unknown';
     if (action !== expectedAction) {
       console.warn(`⚠️ reCAPTCHA 액션 불일치: ${action} (예상: ${expectedAction})`);
     }
 
-    const score = typeof verificationData.score === 'number' ? verificationData.score : 0;
+    const score = typeof response.riskAnalysis?.score === 'number' ? response.riskAnalysis.score : 0;
+    const reasons = response.riskAnalysis?.reasons || [];
     const MIN_SCORE = parseFloat(process.env.RECAPTCHA_MIN_SCORE) || 0.5;
 
     if (score < MIN_SCORE) {
@@ -370,17 +385,17 @@ const verifyRecaptcha = async (req, res, next) => {
         error: '보안 검증에 실패했습니다. 다시 시도해주세요.',
         code: 'RECAPTCHA_SCORE_TOO_LOW',
         score,
-        reasons: verificationData['error-codes'] || []
+        reasons
       });
     }
 
-    console.log(`✅ reCAPTCHA v3 검증 성공 (점수: ${score}, 액션: ${action})`);
+    console.log(`✅ reCAPTCHA Enterprise 검증 성공 (점수: ${score}, 액션: ${action})`);
 
     req.recaptcha = {
       success: true,
       score,
       action,
-      reasons: verificationData['error-codes'] || []
+      reasons
     };
 
     next();
