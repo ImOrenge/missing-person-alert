@@ -12,6 +12,7 @@ import VerificationPromptModal from './components/VerificationPromptModal';
 import { PhoneAuthModal } from './components/PhoneAuthModal';
 import AnnouncementBanner from './components/AnnouncementBanner';
 import AnnouncementPopup from './components/AnnouncementPopup';
+import NotificationBell from './components/NotificationBell';
 import { useEmergencyStore } from './stores/emergencyStore';
 import { useApiData } from './hooks/useApiData';
 import { ToastContainer, toast } from 'react-toastify';
@@ -35,7 +36,7 @@ function App() {
   const [showPhoneAuth, setShowPhoneAuth] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [notifications, setNotifications] = useState(true);
+  const [alertsEnabled, setAlertsEnabled] = useState(true);
   const [currentAnnouncementIndex, setCurrentAnnouncementIndex] = useState(0);
   const [bannerAnnouncements, setBannerAnnouncements] = useState<Announcement[]>([]);
   const [popupAnnouncements, setPopupAnnouncements] = useState<Announcement[]>([]);
@@ -192,12 +193,13 @@ function App() {
             <div className="flex items-center gap-2">
               {/* 알림 토글 */}
               <button
-                onClick={() => setNotifications(!notifications)}
+                onClick={() => setAlertsEnabled(!alertsEnabled)}
                 className="p-2 hover:bg-red-700 rounded-lg transition-colors"
-                title={notifications ? '알림 끄기' : '알림 켜기'}
+                title={alertsEnabled ? '알림 끄기' : '알림 켜기'}
               >
-                {notifications ? <Bell size={18} /> : <BellOff size={18} />}
+                {alertsEnabled ? <Bell size={18} /> : <BellOff size={18} />}
               </button>
+              <NotificationBell />
 
               {/* 연결 상태 */}
               <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full ${isConnected ? 'bg-green-500' : 'bg-gray-500'}`}>
@@ -270,12 +272,13 @@ function App() {
           <div className="flex items-center gap-2">
             {/* 알림 토글 */}
             <button
-              onClick={() => setNotifications(!notifications)}
+              onClick={() => setAlertsEnabled(!alertsEnabled)}
               className="p-2 hover:bg-red-700 rounded-lg transition-colors"
-              title={notifications ? '알림 끄기' : '알림 켜기'}
+              title={alertsEnabled ? '알림 끄기' : '알림 켜기'}
             >
-              {notifications ? <Bell size={20} /> : <BellOff size={20} />}
+              {alertsEnabled ? <Bell size={20} /> : <BellOff size={20} />}
             </button>
+            <NotificationBell />
 
             {/* 연결 상태 */}
             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${isConnected ? 'bg-green-500' : 'bg-gray-500'}`}>

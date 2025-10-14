@@ -1,16 +1,17 @@
 import React, { useState } from 'react';
-import { X, Shield, Users, BarChart3, FileText, Bell } from 'lucide-react';
+import { X, Shield, Users, BarChart3, FileText, Bell, AlertTriangle } from 'lucide-react';
 import AllReportsTab from './AdminDashboard/AllReportsTab';
 import UserManagementTab from './AdminDashboard/UserManagementTab';
 import StatisticsTab from './AdminDashboard/StatisticsTab';
 import AnnouncementsTab from './AdminDashboard/AnnouncementsTab';
+import CommentReportsTab from './AdminDashboard/CommentReportsTab';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
 }
 
-type TabType = 'reports' | 'users' | 'statistics' | 'announcements';
+type TabType = 'reports' | 'users' | 'statistics' | 'announcements' | 'commentReports';
 
 export default function AdminDashboard({ isOpen, onClose }: Props) {
   const [activeTab, setActiveTab] = useState<TabType>('reports');
@@ -120,6 +121,12 @@ export default function AdminDashboard({ isOpen, onClose }: Props) {
             icon={<Bell size={18} />}
             label="공지사항"
           />
+          <TabButton
+            active={activeTab === 'commentReports'}
+            onClick={() => setActiveTab('commentReports')}
+            icon={<AlertTriangle size={18} />}
+            label="댓글 신고"
+          />
         </div>
 
         {/* 탭 콘텐츠 */}
@@ -133,6 +140,7 @@ export default function AdminDashboard({ isOpen, onClose }: Props) {
           {activeTab === 'users' && <UserManagementTab />}
           {activeTab === 'statistics' && <StatisticsTab />}
           {activeTab === 'announcements' && <AnnouncementsTab />}
+          {activeTab === 'commentReports' && <CommentReportsTab />}
         </div>
       </div>
     </div>

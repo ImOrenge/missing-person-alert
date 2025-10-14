@@ -284,7 +284,6 @@ export function generateWebShareData(options: ShareOptions): ShareData {
  * URL 공유를 위한 파라미터 생성
  */
 export function generateShareUrls(options: ShareOptions) {
-  const info = getBasicInfo(options.person);
   const text = encodeURIComponent(generateKakaoFormat(options));
   const url = encodeURIComponent(window.location.href);
   return {
