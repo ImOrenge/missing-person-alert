@@ -1,54 +1,102 @@
-import { useEffect, useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useEmergencyStore } from '../stores/emergencyStore';
-import { fetchMissingPersons } from '../services/apiService';
+import type { MissingPerson } from '../types';
+import { firestore, collection, query, orderBy, onSnapshot } from '../services/firebase';
 
-/**
- * 안전드림 API에서 직접 실종자 데이터를 가져오는 훅
- * 10분마다 자동으로 새로고침합니다
- */
 export function useApiData() {
-  const addMissingPersons = useEmergencyStore(state => state.addMissingPersons);
+  const setMissingPersons = useEmergencyStore(state => state.setMissingPersons);
   const setConnectionStatus = useEmergencyStore(state => state.setConnectionStatus);
-  const intervalRef = useRef<NodeJS.Timeout>();
+  const isConnected = useEmergencyStore(state => state.isConnected);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
 
-  const loadData = useCallback(async () => {
+  const startSubscription = useCallback(() => {
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+
     try {
-      console.log('🔄 실종자 데이터 로딩 시작...');
+      const ref = collection(firestore, 'missingPersons');
+      const q = query(ref, orderBy('updatedAt', 'desc'));
       setConnectionStatus(true);
 
-      const persons = await fetchMissingPersons();
+      unsubscribeRef.current = onSnapshot(
+        q,
+        (snapshot) => {
+          const normalizeTimestamp = (value: unknown): number => {
+            if (typeof value === 'number') return value;
+            if (value && typeof (value as any).toMillis === 'function') {
+              return (value as { toMillis: () => number }).toMillis();
+            }
+            if (value && typeof (value as any).seconds === 'number') {
+              return ((value as { seconds: number }).seconds) * 1000;
+            }
+            return Date.now();
+          };
 
-      if (persons.length > 0) {
-        addMissingPersons(persons);
-        console.log(`✅ ${persons.length}건 로드 완료`);
-      } else {
-        console.log('📭 데이터 없음');
-      }
+          const persons = snapshot.docs.map((docSnap) => {
+            const data = docSnap.data() as any;
+            const location = data.location && typeof data.location === 'object'
+              ? {
+                  lat: Number(data.location.lat) || 0,
+                  lng: Number(data.location.lng) || 0,
+                  address: data.location.address || '대한민국'
+                }
+              : { lat: 0, lng: 0, address: '대한민국' };
+
+            const person: MissingPerson = {
+              id: docSnap.id,
+              name: data.name ?? '이름 미상',
+              age: typeof data.age === 'number' ? data.age : Number(data.age) || 0,
+              gender: data.gender ?? 'U',
+              location,
+              photo: data.photo,
+              description: data.description ?? '',
+              missingDate: data.missingDate ?? '',
+              type: data.type ?? 'unknown',
+              status: data.status ?? 'active',
+              height: typeof data.height === 'number' ? data.height : undefined,
+              weight: typeof data.weight === 'number' ? data.weight : undefined,
+              clothes: data.clothes,
+              updatedAt: data.updatedAt ? normalizeTimestamp(data.updatedAt) : undefined,
+              source: data.source,
+              bodyType: data.bodyType,
+              faceShape: data.faceShape,
+              hairShape: data.hairShape,
+              hairColor: data.hairColor,
+              reportedBy: data.reportedBy
+            };
+
+            return person;
+          });
+
+          setMissingPersons(persons);
+          setConnectionStatus(true);
+        },
+        (error) => {
+          console.error('❌ 실시간 데이터 구독 실패:', error);
+          setConnectionStatus(false);
+        }
+      );
     } catch (error) {
-      console.error('❌ 데이터 로딩 실패:', error);
+      console.error('❌ 실시간 데이터 구독 설정 실패:', error);
       setConnectionStatus(false);
     }
-  }, [addMissingPersons, setConnectionStatus]);
+  }, [setMissingPersons, setConnectionStatus]);
 
   useEffect(() => {
-    // 초기 데이터 로드
-    loadData();
-
-    // 10분마다 자동 새로고침
-    intervalRef.current = setInterval(() => {
-      console.log('⏰ 10분 경과 - 자동 새로고침');
-      loadData();
-    }, 10 * 60 * 1000); // 10분
+    startSubscription();
 
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
       }
     };
-  }, [loadData]);
+  }, [startSubscription]);
 
   return {
-    isConnected: true,
-    refresh: loadData
+    isConnected,
+    refresh: startSubscription
   };
 }

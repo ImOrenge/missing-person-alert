@@ -16,6 +16,7 @@ interface EmergencyStore {
   // 액션
   addMissingPerson: (person: MissingPerson) => void;
   addMissingPersons: (persons: MissingPerson[]) => void;
+  setMissingPersons: (persons: MissingPerson[]) => void;
   addEmergencyMessage: (message: EmergencyMessage) => void;
   updateFilters: (filters: Partial<FilterState>) => void;
   setConnectionStatus: (status: boolean) => void;
@@ -118,6 +119,12 @@ export const useEmergencyStore = create<EmergencyStore>((set, get) => ({
         missingPersons: [...newPersons, ...state.missingPersons]
       };
     });
+  },
+
+  setMissingPersons: (persons) => {
+    set(() => ({
+      missingPersons: persons
+    }));
   },
 
   // 긴급재난문자 추가

@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, orderBy, limit, Timestamp } from 'firebase/firestore';
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, orderBy, limit, Timestamp, onSnapshot } from 'firebase/firestore';
 import {
   getAuth,
   signInWithEmailAndPassword,
@@ -397,6 +397,7 @@ export {
   where,
   orderBy,
   limit,
+  onSnapshot,
   Timestamp,
   auth
 };
