@@ -11,22 +11,17 @@ import UserProfileModal from './components/UserProfileModal';
 import VerificationPromptModal from './components/VerificationPromptModal';
 import { PhoneAuthModal } from './components/PhoneAuthModal';
 import AnnouncementBanner from './components/AnnouncementBanner';
+import AnnouncementPopup from './components/AnnouncementPopup';
 import { useEmergencyStore } from './stores/emergencyStore';
 import { useApiData } from './hooks/useApiData';
 import { ToastContainer, toast } from 'react-toastify';
 import { onAuthChange, logout as firebaseLogout } from './services/firebase';
 import { hasAdminAccess } from './utils/adminUtils';
 import { loadRecaptchaScript } from './utils/recaptcha';
+import { getBannerAnnouncements, getPopupAnnouncements } from './services/announcementService';
 import type { User } from 'firebase/auth';
+import type { Announcement } from './types/announcement';
 import 'react-toastify/dist/ReactToastify.css';
-
-const ANNOUNCEMENTS = [
-  { id: 1, text: '실종자를 발견하시면 즉시 112 또는 182(실종아동찾기센터)로 신고해주세요', type: 'info' as const },
-  { id: 2, text: '허위 신고 시 법적 책임을 질 수 있습니다', type: 'warning' as const },
-  { id: 3, text: '실시간 알림을 켜두시면 새로운 실종자 정보를 즉시 받아보실 수 있습니다', type: 'info' as const },
-  { id: 4, text: '실종자 정보는 경찰청 공공데이터를 기반으로 제공됩니다', type: 'info' as const },
-  { id: 5, text: '실종 골든타임은 48시간입니다. 신속한 제보가 생명을 살립니다', type: 'warning' as const }
-];
 
 function App() {
   const [showSidebar, setShowSidebar] = useState(true);
@@ -42,6 +37,9 @@ function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [notifications, setNotifications] = useState(true);
   const [currentAnnouncementIndex, setCurrentAnnouncementIndex] = useState(0);
+  const [bannerAnnouncements, setBannerAnnouncements] = useState<Announcement[]>([]);
+  const [popupAnnouncements, setPopupAnnouncements] = useState<Announcement[]>([]);
+  const [showPopup, setShowPopup] = useState(false);
 
   const { isConnected } = useApiData();
   const missingPersons = useEmergencyStore(state => state.missingPersons);
@@ -73,21 +71,61 @@ function App() {
         } else {
           toast.success(`환영합니다, ${user.displayName || user.email}님!`);
         }
+
+        // SNS 로그인 유저(전화번호 없음)는 프로필 모달 자동 열기
+        if (!user.phoneNumber) {
+          // 로그인 직후에만 (1초 후에 체크)
+          setTimeout(() => {
+            const isFirstLogin = sessionStorage.getItem('phone_prompt_shown') !== 'true';
+            if (isFirstLogin) {
+              setShowUserProfile(true);
+              sessionStorage.setItem('phone_prompt_shown', 'true');
+              toast.info('📱 실종자 제보를 위해 전화번호 인증이 필요합니다', { autoClose: 5000 });
+            }
+          }, 1000);
+        }
       } else {
         setIsAdmin(false);
+        // 로그아웃 시 세션 스토리지 초기화
+        sessionStorage.removeItem('phone_prompt_shown');
       }
     });
 
     return () => unsubscribe();
   }, []);
 
-  // 공지사항 자동 슬라이드
+  // Firestore에서 공지사항 불러오기
   useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentAnnouncementIndex((prev) => (prev + 1) % ANNOUNCEMENTS.length);
-    }, 5000);
+    const loadAnnouncements = async () => {
+      const [banners, popups] = await Promise.all([
+        getBannerAnnouncements(),
+        getPopupAnnouncements()
+      ]);
+      setBannerAnnouncements(banners);
+      setPopupAnnouncements(popups);
+
+      // 팝업 공지가 있으면 표시
+      if (popups.length > 0) {
+        setShowPopup(true);
+      }
+    };
+
+    loadAnnouncements();
+
+    // 5분마다 새로고침
+    const interval = setInterval(loadAnnouncements, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // 배너 공지사항 자동 슬라이드
+  useEffect(() => {
+    if (bannerAnnouncements.length === 0) return;
+
+    const interval = setInterval(() => {
+      setCurrentAnnouncementIndex((prev) => (prev + 1) % bannerAnnouncements.length);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [bannerAnnouncements.length]);
 
   const handleLogout = async () => {
     const result = await firebaseLogout();
@@ -107,7 +145,9 @@ function App() {
 
     // 전화번호 인증 확인
     if (!currentUser.phoneNumber) {
-      setShowVerificationPrompt(true);
+      // UserProfileModal을 띄워서 전화번호 인증 유도
+      setShowUserProfile(true);
+      toast.warning('📱 실종자 제보를 위해 먼저 전화번호 인증이 필요합니다', { autoClose: 5000 });
       return;
     }
 
@@ -297,13 +337,23 @@ function App() {
       />
 
       {/* 공지사항 배너 (하단) */}
-      <div className="fixed bottom-0 left-0 right-0 z-30">
-        <AnnouncementBanner
-          announcement={ANNOUNCEMENTS[currentAnnouncementIndex]}
-          onPrev={() => setCurrentAnnouncementIndex((prev) => (prev - 1 + ANNOUNCEMENTS.length) % ANNOUNCEMENTS.length)}
-          onNext={() => setCurrentAnnouncementIndex((prev) => (prev + 1) % ANNOUNCEMENTS.length)}
+      {bannerAnnouncements.length > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 z-30">
+          <AnnouncementBanner
+            announcement={bannerAnnouncements[currentAnnouncementIndex]}
+            onPrev={() => setCurrentAnnouncementIndex((prev) => (prev - 1 + bannerAnnouncements.length) % bannerAnnouncements.length)}
+            onNext={() => setCurrentAnnouncementIndex((prev) => (prev + 1) % bannerAnnouncements.length)}
+          />
+        </div>
+      )}
+
+      {/* 공지사항 팝업 */}
+      {showPopup && popupAnnouncements.length > 0 && (
+        <AnnouncementPopup
+          announcements={popupAnnouncements}
+          onClose={() => setShowPopup(false)}
         />
-      </div>
+      )}
     </div>
   );
 }

@@ -1,11 +1,6 @@
 import React from 'react';
 import { ChevronLeft, ChevronRight, Info, AlertTriangle } from 'lucide-react';
-
-interface Announcement {
-  id: number;
-  text: string;
-  type: 'info' | 'warning';
-}
+import type { Announcement } from '../types/announcement';
 
 interface Props {
   announcement: Announcement;

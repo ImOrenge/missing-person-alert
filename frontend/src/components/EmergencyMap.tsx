@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { APIProvider, Map } from '@vis.gl/react-google-maps';
 import { useEmergencyStore } from '../stores/emergencyStore';
 import MarkerWithInfo from './MarkerWithInfo';
@@ -104,6 +104,6 @@ export default function EmergencyMap() {
         </Map>
       </APIProvider>
 
-     </div>
-);
+    </div>
+  );
 }

@@ -537,6 +537,7 @@ export default function LoginModal({ isOpen, onClose }: Props) {
         setPendingRegistration(null);
       }}
       onSuccess={handlePhoneAuthSuccess}
+      mode="signup"
     />
     </>
   );

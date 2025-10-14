@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { X, Phone, Lock, AlertTriangle } from 'lucide-react';
+import { X, Phone, Lock } from 'lucide-react';
 import {
   initRecaptcha,
   sendPhoneVerificationCode,
   linkPhoneNumber,
+  verifyPhoneCode,
   clearRecaptcha,
   type ConfirmationResult
 } from '../services/firebase';
 import {
   validatePhoneNumber,
-  normalizePhoneNumber,
   canAttemptAuth,
   recordAuthAttempt,
   clearAuthAttempts,
@@ -21,9 +21,10 @@ interface PhoneAuthModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  mode?: 'signup' | 'link'; // signup: 회원가입 시 전화번호 인증만, link: 기존 계정에 연결
 }
 
-export const PhoneAuthModal: React.FC<PhoneAuthModalProps> = ({ isOpen, onClose, onSuccess }) => {
+export const PhoneAuthModal: React.FC<PhoneAuthModalProps> = ({ isOpen, onClose, onSuccess, mode = 'link' }) => {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
@@ -139,8 +140,15 @@ export const PhoneAuthModal: React.FC<PhoneAuthModalProps> = ({ isOpen, onClose,
 
     setLoading(true);
     try {
-      // 기존 계정에 전화번호 연결
-      const result = await linkPhoneNumber(confirmationResult, verificationCode);
+      let result;
+
+      if (mode === 'signup') {
+        // 회원가입 모드: 전화번호 인증만 확인 (계정 연결 안 함)
+        result = await verifyPhoneCode(confirmationResult, verificationCode);
+      } else {
+        // 계정 연결 모드: 기존 계정에 전화번호 연결
+        result = await linkPhoneNumber(confirmationResult, verificationCode);
+      }
 
       if (result.success) {
         // 인증 성공 시 시도 기록 초기화
@@ -150,10 +158,12 @@ export const PhoneAuthModal: React.FC<PhoneAuthModalProps> = ({ isOpen, onClose,
         handleClose();
         onSuccess();
 
-        // 페이지 새로고침으로 원래 계정으로 복원
-        setTimeout(() => {
-          window.location.reload();
-        }, 1000);
+        // 계정 연결 모드일 때만 페이지 새로고침
+        if (mode === 'link') {
+          setTimeout(() => {
+            window.location.reload();
+          }, 1000);
+        }
       } else {
         // 실패 시 시도 기록
         recordAuthAttempt(phoneNumber);

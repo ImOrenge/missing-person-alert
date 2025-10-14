@@ -287,8 +287,6 @@ export function generateShareUrls(options: ShareOptions) {
   const info = getBasicInfo(options.person);
   const text = encodeURIComponent(generateKakaoFormat(options));
   const url = encodeURIComponent(window.location.href);
-  const title = encodeURIComponent(`실종자 찾기: ${info.name}님`);
-
   return {
     // 카카오톡 (JavaScript SDK 필요)
     kakao: null, // SDK를 통해 직접 호출해야 함

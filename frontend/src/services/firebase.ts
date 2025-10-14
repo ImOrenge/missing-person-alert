@@ -10,7 +10,7 @@ import {
   onAuthStateChanged,
   User,
   RecaptchaVerifier,
-  signInWithPhoneNumber,
+  linkWithPhoneNumber,
   ConfirmationResult,
   getMultiFactorResolver,
   PhoneAuthProvider,
@@ -196,10 +196,15 @@ export const sendPhoneVerificationCode = async (phoneNumber: string) => {
       throw new Error('reCAPTCHA가 초기화되지 않았습니다');
     }
 
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      throw new Error('로그인된 사용자가 없습니다');
+    }
+
     // 국제 전화번호 형식 확인 (예: +82 10-1234-5678)
     const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+82${phoneNumber.replace(/^0/, '')}`;
 
-    const confirmationResult = await signInWithPhoneNumber(auth, formattedPhone, recaptchaVerifier);
+    const confirmationResult = await linkWithPhoneNumber(currentUser, formattedPhone, recaptchaVerifier);
 
     return {
       success: true,
@@ -260,11 +265,11 @@ export const linkPhoneNumber = async (confirmationResult: ConfirmationResult, co
 
     console.log('📱 전화번호 인증 시작:', { currentUserId, currentUserEmail });
 
-    // 인증 코드 확인 (이 과정에서 새로운 전화번호 계정이 생성되거나 로그인됨)
     const result = await confirmationResult.confirm(code);
 
-    // 인증된 전화번호 가져오기
-    const phoneNumber = result.user.phoneNumber;
+    await currentUser.reload();
+    const linkedUser = auth.currentUser;
+    const phoneNumber = linkedUser?.phoneNumber || result.user.phoneNumber;
 
     if (!phoneNumber) {
       throw new Error('전화번호를 확인할 수 없습니다');
@@ -282,22 +287,6 @@ export const linkPhoneNumber = async (confirmationResult: ConfirmationResult, co
     }, { merge: true });
 
     console.log('✅ Firestore 저장 완료:', currentUserId);
-
-    // 전화번호 인증으로 생성된 임시 계정 삭제
-    if (result.user.uid !== currentUserId) {
-      console.log('🗑️ 임시 전화번호 계정 삭제:', result.user.uid);
-      try {
-        await result.user.delete();
-        console.log('✅ 임시 계정 삭제 완료');
-      } catch (deleteError) {
-        console.warn('⚠️ 임시 전화번호 계정 삭제 실패 (무시):', deleteError);
-      }
-
-      // 원래 사용자로 다시 로그인 필요할 수 있음
-      // 하지만 signOut 후 재로그인하면 사용자 경험이 나빠지므로
-      // 페이지 새로고침으로 처리
-      console.log('ℹ️ 페이지를 새로고침하여 원래 계정으로 복원하세요');
-    }
 
     return {
       success: true,

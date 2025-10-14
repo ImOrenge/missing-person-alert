@@ -6,7 +6,6 @@ import {
   useAdvancedMarkerRef
 } from '@vis.gl/react-google-maps';
 import { MissingPerson } from '../types';
-import { toast } from 'react-toastify';
 import ShareModal from './ShareModal';
 
 interface Props {

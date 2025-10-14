@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Phone, Shield, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Phone, Shield, AlertTriangle, CheckCircle } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;

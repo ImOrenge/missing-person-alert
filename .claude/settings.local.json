@@ -19,7 +19,11 @@
       "Bash(firebase functions:config:set:*)",
       "Bash(del:*)",
       "Bash(del \"c:\\missing person\\frontend\\src\\hooks\\useFirebaseData.ts\")",
-      "Bash(tasklist)"
+      "Bash(tasklist)",
+      "Bash(dir backend)",
+      "Bash(dir functions)",
+      "Bash(dir:*)",
+      "Bash(git rm:*)"
     ],
     "deny": [],
     "ask": []

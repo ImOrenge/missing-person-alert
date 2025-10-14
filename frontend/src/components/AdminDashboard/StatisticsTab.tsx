@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { BarChart3, TrendingUp, Users, FileText, MapPin, Calendar, RefreshCw, Clock } from 'lucide-react';
 import { getAuth } from 'firebase/auth';
 import { toast } from 'react-toastify';
@@ -42,11 +42,7 @@ export default function StatisticsTab() {
   const [loading, setLoading] = useState(false);
   const [timeRange, setTimeRange] = useState<'day' | 'week' | 'month'>('week');
 
-  useEffect(() => {
-    loadStatistics();
-  }, [timeRange]);
-
-  const loadStatistics = async () => {
+  const loadStatistics = useCallback(async () => {
     const auth = getAuth();
     const user = auth.currentUser;
 
@@ -79,7 +75,11 @@ export default function StatisticsTab() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [timeRange]);
+
+  useEffect(() => {
+    loadStatistics();
+  }, [loadStatistics]);
 
   if (loading) {
     return (

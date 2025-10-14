@@ -2,6 +2,36 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // 관리자 확인 함수
+    function isAdmin() {
+      return request.auth != null && (
+        request.auth.token.email == 'jmgi1024@gmail.com' ||
+        request.auth.uid == 'admin_uid_here'
+      );
+    }
+
+    // 공지사항 컬렉션
+    match /announcements/{announcementId} {
+      // 모든 사용자가 읽기 가능
+      allow read: if true;
+
+      // 관리자만 생성, 수정, 삭제 가능
+      allow create, update, delete: if isAdmin();
+    }
+
+    // 사용자 정보 컬렉션
+    match /users/{userId} {
+      // 본인의 정보만 읽기 가능
+      allow read: if request.auth != null && request.auth.uid == userId;
+
+      // 본인의 정보만 생성/수정 가능
+      allow create, update: if request.auth != null && request.auth.uid == userId;
+
+      // 삭제는 관리자만 가능
+      allow delete: if isAdmin();
+    }
+
+    // 나머지 모든 문서는 기본적으로 차단
     match /{document=**} {
       allow read, write: if false;
     }
