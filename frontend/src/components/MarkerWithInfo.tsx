@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AdvancedMarker,
   Pin,
@@ -7,6 +7,7 @@ import {
 } from '@vis.gl/react-google-maps';
 import { MissingPerson } from '../types';
 import ShareModal from './ShareModal';
+import CommentsPanel from './MissingPersonComments/CommentsPanel';
 
 interface Props {
   person: MissingPerson;
@@ -20,17 +21,17 @@ interface Props {
 function getColorByType(type: string): string {
   switch (type) {
     case 'missing_child':
-      return '#e74c3c'; // 빨강 (아동)
+      return '#e74c3c';
     case 'runaway':
-      return '#3498db'; // 파랑 (가출)
+      return '#3498db';
     case 'disabled':
-      return '#f39c12'; // 주황 (장애인)
+      return '#f39c12';
     case 'dementia':
-      return '#9b59b6'; // 보라 (치매)
+      return '#9b59b6';
     case 'facility':
-      return '#27ae60'; // 녹색 (시설보호자)
+      return '#27ae60';
     case 'unknown':
-      return '#7f8c8d'; // 회색 (신원불상)
+      return '#7f8c8d';
     default:
       return '#95a5a6';
   }
@@ -60,19 +61,17 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
   const [markerRef, marker] = useAdvancedMarkerRef();
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+  const [activeTab, setActiveTab] = useState<'details' | 'comments'>('details');
 
-  // window resize 이벤트 감지
-  React.useEffect(() => {
+  useEffect(() => {
     const handleResize = () => setWindowWidth(window.innerWidth);
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // 강조 상태에 따라 스케일과 테두리 조정
   const scale = isHighlighted || isSelected ? 1.5 : 1.2;
-  const borderColor = isHighlighted ? '#FFD700' : '#000'; // 호버 시 금색 테두리
+  const borderColor = isHighlighted ? '#FFD700' : '#000';
 
-  // 반응형 스타일 값
   const isMobile = windowWidth < 640;
   const isVerySmall = windowWidth < 400;
 
@@ -89,10 +88,12 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
           transform: isHighlighted || isSelected ? 'scale(1.1)' : 'scale(1)'
         }}
       >
-        <div style={{
-          transition: 'all 0.3s ease-in-out',
-          filter: isHighlighted ? 'drop-shadow(0 0 8px rgba(255, 215, 0, 0.8))' : 'none'
-        }}>
+        <div
+          style={{
+            transition: 'all 0.3s ease-in-out',
+            filter: isHighlighted ? 'drop-shadow(0 0 8px rgba(255, 215, 0, 0.8))' : 'none'
+          }}
+        >
           <Pin
             background={getColorByType(person.type)}
             glyphColor="#fff"
@@ -105,15 +106,18 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
       {isSelected && marker && (
         <InfoWindow
           anchor={marker}
-          onCloseClick={onClose}
+          onCloseClick={() => {
+            setActiveTab('details');
+            onClose();
+          }}
           maxWidth={isMobile ? windowWidth - 40 : 380}
         >
           <div
             className="info-window-content"
             style={{
               width: '100%',
-              maxWidth: isMobile ? `${windowWidth - 60}px` : '350px',
-              minWidth: isMobile ? 'auto' : '250px',
+              maxWidth: isMobile ? `${windowWidth - 60}px` : '360px',
+              minWidth: isMobile ? 'auto' : '260px',
               padding: isMobile ? '8px' : '12px',
               fontSize: isMobile ? '12px' : '14px',
               boxSizing: 'border-box'
@@ -130,145 +134,200 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
                   borderRadius: isMobile ? '6px' : '8px',
                   marginBottom: isMobile ? '8px' : '10px'
                 }}
-                onError={(e) => {
-                  // 이미지 로드 실패 시 숨기기
-                  (e.target as HTMLImageElement).style.display = 'none';
+                onError={(event) => {
+                  (event.target as HTMLImageElement).style.display = 'none';
                 }}
               />
             )}
 
-            <h3 style={{
-              margin: isMobile ? '6px 0' : '10px 0',
-              fontSize: isMobile ? '15px' : '18px',
-              fontWeight: 'bold',
-              lineHeight: '1.3'
-            }}>
+            <h3
+              style={{
+                margin: isMobile ? '6px 0' : '10px 0',
+                fontSize: isMobile ? '15px' : '18px',
+                fontWeight: 'bold',
+                lineHeight: '1.3'
+              }}
+            >
               {person.name}
             </h3>
 
-            <div style={{
-              fontSize: isMobile ? '11px' : '14px',
-              lineHeight: isMobile ? '1.4' : '1.6'
-            }}>
-              <p style={{ margin: isMobile ? '3px 0' : '5px 0' }}>
-                <strong>나이:</strong> {person.age}세
-              </p>
-              <p style={{ margin: isMobile ? '3px 0' : '5px 0' }}>
-                <strong>성별:</strong> {person.gender === 'M' ? '남성' : person.gender === 'F' ? '여성' : '미상'}
-              </p>
-              {person.height && (
-                <p style={{ margin: isMobile ? '3px 0' : '5px 0' }}>
-                  <strong>키:</strong> {person.height}cm
-                </p>
-              )}
-              {person.weight && (
-                <p style={{ margin: isMobile ? '3px 0' : '5px 0' }}>
-                  <strong>몸무게:</strong> {person.weight}kg
-                </p>
-              )}
-              <p style={{
-                margin: isMobile ? '3px 0' : '5px 0',
-                wordBreak: 'break-word'
-              }}>
-                <strong>실종 장소:</strong> {person.location.address}
-              </p>
-              <p style={{
-                margin: isMobile ? '3px 0' : '5px 0',
-                wordBreak: 'break-word'
-              }}>
-                <strong>실종 일시:</strong>{' '}
-                {(() => {
-                  const date = new Date(person.missingDate);
-                  if (isNaN(date.getTime())) {
-                    return person.missingDate;
-                  }
-                  return date.toLocaleDateString('ko-KR', {
-                    year: 'numeric',
-                    month: isMobile ? 'short' : 'long',
-                    day: 'numeric'
-                  });
-                })()}
-              </p>
-              <p style={{ margin: isMobile ? '3px 0' : '5px 0' }}>
-                <strong>유형:</strong> {getTypeLabel(person.type)}
-              </p>
-              {person.clothes && (
-                <p style={{
-                  margin: isMobile ? '3px 0' : '5px 0',
-                  wordBreak: 'break-word'
-                }}>
-                  <strong>옷차림:</strong> {person.clothes}
-                </p>
-              )}
-              {person.bodyType && (
-                <p style={{ margin: isMobile ? '3px 0' : '5px 0' }}>
-                  <strong>체격:</strong> {person.bodyType}
-                </p>
-              )}
-              {person.hairColor && (
-                <p style={{ margin: isMobile ? '3px 0' : '5px 0' }}>
-                  <strong>머리색:</strong> {person.hairColor}
-                </p>
-              )}
-              {person.description && (
-                <p style={{
-                  margin: isMobile ? '3px 0' : '5px 0',
-                  wordBreak: 'break-word'
-                }}>
-                  <strong>특징:</strong> {person.description}
-                </p>
-              )}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+              <button
+                onClick={() => setActiveTab('details')}
+                style={{
+                  flex: 1,
+                  padding: isMobile ? '8px' : '10px',
+                  borderRadius: '8px',
+                  border: activeTab === 'details' ? 'none' : '1px solid #dcdde1',
+                  backgroundColor: activeTab === 'details' ? '#3498db' : 'white',
+                  color: activeTab === 'details' ? 'white' : '#7f8c8d',
+                  fontSize: isMobile ? '12px' : '14px',
+                  fontWeight: activeTab === 'details' ? 'bold' : 'normal',
+                  cursor: 'pointer'
+                }}
+              >
+                상세 정보
+              </button>
+              <button
+                onClick={() => setActiveTab('comments')}
+                style={{
+                  flex: 1,
+                  padding: isMobile ? '8px' : '10px',
+                  borderRadius: '8px',
+                  border: activeTab === 'comments' ? 'none' : '1px solid #dcdde1',
+                  backgroundColor: activeTab === 'comments' ? '#e74c3c' : 'white',
+                  color: activeTab === 'comments' ? 'white' : '#7f8c8d',
+                  fontSize: isMobile ? '12px' : '14px',
+                  fontWeight: activeTab === 'comments' ? 'bold' : 'normal',
+                  cursor: 'pointer'
+                }}
+              >
+                근황 공유
+              </button>
             </div>
 
-            <div style={{
-              marginTop: isMobile ? '10px' : '15px',
-              display: 'flex',
-              gap: isMobile ? '6px' : '10px',
-              flexDirection: isVerySmall ? 'column' : 'row'
-            }}>
-              <button
-                onClick={() => window.open('tel:112')}
-                style={{
-                  flex: 1,
-                  padding: isMobile ? '8px' : '10px',
-                  backgroundColor: '#e74c3c',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: isMobile ? '4px' : '5px',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontSize: isMobile ? '12px' : '14px'
-                }}
-              >
-                112 신고
-              </button>
-              <button
-                onClick={() => setIsShareModalOpen(true)}
-                style={{
-                  flex: 1,
-                  padding: isMobile ? '8px' : '10px',
-                  backgroundColor: '#3498db',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: isMobile ? '4px' : '5px',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontSize: isMobile ? '12px' : '14px'
-                }}
-              >
-                공유하기
-              </button>
-            </div>
+            {activeTab === 'details' ? (
+              <>
+                <div
+                  style={{
+                    fontSize: isMobile ? '11px' : '14px',
+                    lineHeight: isMobile ? '1.4' : '1.6'
+                  }}
+                >
+                  <p style={{ margin: isMobile ? '3px 0' : '5px 0' }}>
+                    <strong>나이:</strong> {person.age}세
+                  </p>
+                  <p style={{ margin: isMobile ? '3px 0' : '5px 0' }}>
+                    <strong>성별:</strong> {person.gender === 'M' ? '남성' : person.gender === 'F' ? '여성' : '미상'}
+                  </p>
+                  {person.height && (
+                    <p style={{ margin: isMobile ? '3px 0' : '5px 0' }}>
+                      <strong>키:</strong> {person.height}cm
+                    </p>
+                  )}
+                  {person.weight && (
+                    <p style={{ margin: isMobile ? '3px 0' : '5px 0' }}>
+                      <strong>몸무게:</strong> {person.weight}kg
+                    </p>
+                  )}
+                  <p
+                    style={{
+                      margin: isMobile ? '3px 0' : '5px 0',
+                      wordBreak: 'break-word'
+                    }}
+                  >
+                    <strong>실종 장소:</strong> {person.location.address}
+                  </p>
+                  <p
+                    style={{
+                      margin: isMobile ? '3px 0' : '5px 0',
+                      wordBreak: 'break-word'
+                    }}
+                  >
+                    <strong>실종 일시:</strong>{' '}
+                    {(() => {
+                      const date = new Date(person.missingDate);
+                      if (isNaN(date.getTime())) {
+                        return person.missingDate;
+                      }
+                      return date.toLocaleDateString('ko-KR', {
+                        year: 'numeric',
+                        month: isMobile ? 'short' : 'long',
+                        day: 'numeric'
+                      });
+                    })()}
+                  </p>
+                  <p style={{ margin: isMobile ? '3px 0' : '5px 0' }}>
+                    <strong>유형:</strong> {getTypeLabel(person.type)}
+                  </p>
+                  {person.clothes && (
+                    <p
+                      style={{
+                        margin: isMobile ? '3px 0' : '5px 0',
+                        wordBreak: 'break-word'
+                      }}
+                    >
+                      <strong>옷차림:</strong> {person.clothes}
+                    </p>
+                  )}
+                  {person.bodyType && (
+                    <p style={{ margin: isMobile ? '3px 0' : '5px 0' }}>
+                      <strong>체격:</strong> {person.bodyType}
+                    </p>
+                  )}
+                  {person.hairColor && (
+                    <p style={{ margin: isMobile ? '3px 0' : '5px 0' }}>
+                      <strong>머리색:</strong> {person.hairColor}
+                    </p>
+                  )}
+                  {person.description && (
+                    <p
+                      style={{
+                        margin: isMobile ? '3px 0' : '5px 0',
+                        wordBreak: 'break-word'
+                      }}
+                    >
+                      <strong>특징:</strong> {person.description}
+                    </p>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    marginTop: isMobile ? '10px' : '15px',
+                    display: 'flex',
+                    gap: isMobile ? '6px' : '10px',
+                    flexDirection: isVerySmall ? 'column' : 'row'
+                  }}
+                >
+                  <button
+                    onClick={() => window.open('tel:112')}
+                    style={{
+                      flex: 1,
+                      padding: isMobile ? '8px' : '10px',
+                      backgroundColor: '#e74c3c',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: isMobile ? '4px' : '5px',
+                      cursor: 'pointer',
+                      fontWeight: 'bold',
+                      fontSize: isMobile ? '12px' : '14px'
+                    }}
+                  >
+                    112 신고
+                  </button>
+                  <button
+                    onClick={() => setIsShareModalOpen(true)}
+                    style={{
+                      flex: 1,
+                      padding: isMobile ? '8px' : '10px',
+                      backgroundColor: '#3498db',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: isMobile ? '4px' : '5px',
+                      cursor: 'pointer',
+                      fontWeight: 'bold',
+                      fontSize: isMobile ? '12px' : '14px'
+                    }}
+                  >
+                    정보 공유
+                  </button>
+                </div>
+              </>
+            ) : (
+              <CommentsPanel missingPersonId={person.id} />
+            )}
           </div>
         </InfoWindow>
       )}
 
-      {/* SNS 공유 모달 */}
-      <ShareModal
-        person={person}
-        isOpen={isShareModalOpen}
-        onClose={() => setIsShareModalOpen(false)}
-      />
+      {isShareModalOpen && (
+        <ShareModal
+          person={person}
+          isOpen={isShareModalOpen}
+          onClose={() => setIsShareModalOpen(false)}
+        />
+      )}
     </>
   );
 });
