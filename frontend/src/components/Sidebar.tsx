@@ -111,6 +111,8 @@ export default function Sidebar({ onShowFilters, showFilters, onClose }: Props) 
         ) : (
           <div className="divide-y divide-gray-100">
             {filteredPersons.map((person) => {
+              const primaryPhoto = person.photos && person.photos.length > 0 ? person.photos[0] : person.photo;
+              const hasPhoto = Boolean(primaryPhoto);
               const isSelected = selectedPersonId === person.id;
               const isHovered = hoveredPersonId === person.id;
               const isHighlighted = isSelected || isHovered;
@@ -133,9 +135,9 @@ export default function Sidebar({ onShowFilters, showFilters, onClose }: Props) 
                 <div className="flex gap-3">
                   {/* 사진 */}
                   <div className="flex-shrink-0">
-                    {person.photo ? (
+                    {hasPhoto && (
                       <img
-                        src={person.photo}
+                        src={primaryPhoto as string}
                         alt={person.name}
                         className="w-16 h-16 rounded-lg object-cover"
                         onError={(e) => {
@@ -146,10 +148,10 @@ export default function Sidebar({ onShowFilters, showFilters, onClose }: Props) 
                           }
                         }}
                       />
-                    ) : null}
+                    )}
                     <div
                       className="w-16 h-16 rounded-lg bg-gray-200 flex items-center justify-center"
-                      style={{ display: person.photo ? 'none' : 'flex' }}
+                      style={{ display: hasPhoto ? 'none' : 'flex' }}
                     >
                       <User size={32} className="text-gray-400" />
                     </div>

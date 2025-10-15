@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { MissingPerson } from '../types';
 import {
   SNSType,
@@ -67,6 +67,10 @@ const ShareModal: React.FC<ShareModalProps> = ({ person, isOpen, onClose }) => {
   const [selectedSNS, setSelectedSNS] = useState<SNSType | null>(null);
   const [previewText, setPreviewText] = useState('');
   const [copied, setCopied] = useState(false);
+  const primaryPhoto = useMemo(
+    () => (person.photos && person.photos.length > 0 ? person.photos[0] : person.photo),
+    [person.photos, person.photo]
+  );
 
   if (!isOpen) return null;
 
@@ -81,9 +85,9 @@ const ShareModal: React.FC<ShareModalProps> = ({ person, isOpen, onClose }) => {
   // 클립보드 복사 (텍스트 + 이미지)
   const handleCopy = async () => {
     try {
-      if (person.photo) {
+      if (primaryPhoto) {
         // 이미지가 있으면 텍스트와 함께 공유
-        await shareWithImage(previewText, person.photo, person.name);
+        await shareWithImage(previewText, primaryPhoto, person.name);
         setCopied(true);
       } else {
         // 텍스트만 복사
@@ -162,9 +166,9 @@ const ShareModal: React.FC<ShareModalProps> = ({ person, isOpen, onClose }) => {
         {/* 실종자 정보 */}
         <div className="p-4 bg-gray-50 border-b">
           <div className="flex items-center gap-3">
-            {person.photo && (
+            {primaryPhoto && (
               <img
-                src={person.photo}
+                src={primaryPhoto}
                 alt={person.name}
                 className="w-14 h-14 rounded-lg object-cover"
                 onError={(e) => {
@@ -247,7 +251,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ person, isOpen, onClose }) => {
                 </pre>
               </div>
 
-              {person.photo && (
+              {primaryPhoto && (
                 <div className="text-xs text-gray-500 text-center">
                   💡 이미지가 함께 복사됩니다
                 </div>

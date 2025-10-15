@@ -73,6 +73,13 @@ const MissingPersonSchema = {
     nullable: true,
     description: '실종자 사진 URL'
   },
+  photos: {
+    type: 'array',
+    required: false,
+    nullable: true,
+    itemsType: 'string',
+    description: '실종자 사진 URL 배열 (여러 장 지원)'
+  },
   description: {
     type: 'string',
     required: false,
@@ -228,6 +235,20 @@ function validateField(fieldName, value, schema) {
     }
   }
 
+  // 배열 검증
+  if (schema.type === 'array') {
+    if (schema.itemsType) {
+      value.forEach((item, index) => {
+        const itemType = Array.isArray(item) ? 'array' : typeof item;
+        if (itemType !== schema.itemsType) {
+          errors.push(`${fieldName}[${index}]의 타입이 잘못되었습니다. 예상: ${schema.itemsType}, 실제: ${itemType}`);
+        } else if (schema.itemsType === 'string' && typeof item === 'string' && !item.trim()) {
+          errors.push(`${fieldName}[${index}]은(는) 비어 있을 수 없습니다`);
+        }
+      });
+    }
+  }
+
   // 객체 검증 (중첩 스키마)
   if (schema.type === 'object' && schema.schema) {
     Object.keys(schema.schema).forEach(key => {
@@ -301,6 +322,21 @@ function normalizeMissingPerson(person) {
   // updatedAt이 없으면 현재 시간으로 설정
   if (!normalized.updatedAt) {
     normalized.updatedAt = Date.now();
+  }
+
+  // 사진 배열 정규화
+  if (Array.isArray(normalized.photos)) {
+    normalized.photos = normalized.photos
+      .filter((url) => typeof url === 'string' && url.trim().length > 0)
+      .map((url) => url.trim());
+  } else if (typeof normalized.photo === 'string' && normalized.photo.trim()) {
+    normalized.photos = [normalized.photo.trim()];
+  } else {
+    normalized.photos = [];
+  }
+
+  if (!normalized.photo && normalized.photos.length > 0) {
+    normalized.photo = normalized.photos[0];
   }
 
   return normalized;

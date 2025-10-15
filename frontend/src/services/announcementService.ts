@@ -112,7 +112,7 @@ export const createAnnouncement = async (input: CreateAnnouncementInput): Promis
     const announcementsRef = collection(firestore, ANNOUNCEMENTS_COLLECTION);
     const newDocRef = doc(announcementsRef);
 
-    const announcement: Omit<Announcement, 'id'> = {
+    const announcement: Record<string, any> = {
       text: input.text,
       type: input.type,
       displayType: input.displayType ?? 'banner',
@@ -125,7 +125,13 @@ export const createAnnouncement = async (input: CreateAnnouncementInput): Promis
       popupButtonText: input.popupButtonText
     };
 
-    await setDoc(newDocRef, announcement);
+    Object.keys(announcement).forEach((key) => {
+      if (announcement[key] === undefined) {
+        delete announcement[key];
+      }
+    });
+
+    await setDoc(newDocRef, announcement as Omit<Announcement, 'id'>);
 
     return { success: true, id: newDocRef.id };
   } catch (error: any) {
@@ -146,10 +152,16 @@ export const updateAnnouncement = async (id: string, input: UpdateAnnouncementIn
 
     const docRef = doc(firestore, ANNOUNCEMENTS_COLLECTION, id);
 
-    const updateData: any = {
+    const updateData: Record<string, any> = {
       ...input,
       updatedAt: Timestamp.now()
     };
+
+    Object.keys(updateData).forEach((key) => {
+      if (updateData[key] === undefined) {
+        delete updateData[key];
+      }
+    });
 
     await updateDoc(docRef, updateData);
 

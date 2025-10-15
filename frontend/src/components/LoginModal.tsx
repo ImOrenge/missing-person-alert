@@ -17,6 +17,36 @@ interface Props {
   onClose: () => void;
 }
 
+const PRIVACY_POLICY = `
+1. 수집하는 개인정보 항목
+- 필수: 이름, 이메일, 비밀번호, 닉네임
+- 선택: 전화번호, 주소
+- 서비스 이용 과정에서 자동으로 생성되는 정보(접속 로그, IP 등)
+
+2. 개인정보의 수집·이용 목적
+- 실종자 제보 등록 및 관리, 이용자 식별 및 본인 확인
+- 비상 메시지 및 서비스 공지 발송
+- 이용자 문의 대응 및 커뮤니티 질서 유지
+- 서비스 품질 향상 및 보안 강화를 위한 분석
+
+3. 개인정보의 보유 및 이용 기간
+- 회원 탈퇴 시 즉시 삭제
+- 관련 법령에 따라 보존이 필요한 경우 해당 기간 동안 안전하게 보관
+
+4. 개인정보의 제3자 제공
+- 원칙적으로 제공하지 않으며, 법령에 근거가 있거나 이용자의 별도 동의를 받은 경우에 한해 제공
+
+5. 개인정보 처리의 위탁
+- 서비스 운영에 필요한 범위에서 위탁할 수 있으며, 위탁 사실은 별도로 고지
+
+6. 이용자의 권리
+- 언제든지 개인정보 조회·수정·삭제를 요청할 수 있습니다.
+- 개인정보 처리에 대한 동의를 거부할 수 있으며, 이 경우 회원가입 및 일부 기능 이용이 제한될 수 있습니다.
+
+7. 문의처
+- 개인정보 보호 책임자: missingperson.help@gmail.com
+`;
+
 export default function LoginModal({ isOpen, onClose }: Props) {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
@@ -42,6 +72,8 @@ export default function LoginModal({ isOpen, onClose }: Props) {
   const [mfaResolver, setMfaResolver] = useState<any>(null);
   const [mfaVerificationId, setMfaVerificationId] = useState('');
   const [mfaCode, setMfaCode] = useState('');
+  const [agreePrivacy, setAgreePrivacy] = useState(false);
+  const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
 
   // 모달 닫힐 때 정리
   useEffect(() => {
@@ -51,6 +83,9 @@ export default function LoginModal({ isOpen, onClose }: Props) {
       setMfaResolver(null);
       setMfaVerificationId('');
       setMfaCode('');
+      setIsSignUp(false);
+      setAgreePrivacy(false);
+      setShowPrivacyPolicy(false);
     }
   }, [isOpen]);
 
@@ -77,6 +112,12 @@ export default function LoginModal({ isOpen, onClose }: Props) {
 
         if (!nickname.trim()) {
           toast.error('닉네임을 입력해주세요');
+          setLoading(false);
+          return;
+        }
+
+        if (!agreePrivacy) {
+          toast.error('개인정보 처리방침에 동의해주세요');
           setLoading(false);
           return;
         }
@@ -180,6 +221,7 @@ export default function LoginModal({ isOpen, onClose }: Props) {
         setNickname('');
         setAddress('');
         setPhoneNumber('');
+        setAgreePrivacy(false);
         onClose();
       } else {
         toast.error(result.error || '회원가입에 실패했습니다');
@@ -498,6 +540,29 @@ export default function LoginModal({ isOpen, onClose }: Props) {
             </div>
           )}
 
+          {isSignUp && (
+            <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
+              <label className="flex items-start gap-3 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 text-red-600 border-gray-300 rounded"
+                  checked={agreePrivacy}
+                  onChange={(e) => setAgreePrivacy(e.target.checked)}
+                />
+                <span>
+                  <span className="font-semibold text-gray-800">개인정보 처리방침</span>을 확인했고, 수집 및 이용에 동의합니다.
+                </span>
+              </label>
+              <button
+                type="button"
+                className="mt-2 text-xs text-red-600 hover:text-red-700 font-medium underline"
+                onClick={() => setShowPrivacyPolicy(true)}
+              >
+                개인정보 처리방침 전문 보기
+              </button>
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={loading}
@@ -510,7 +575,11 @@ export default function LoginModal({ isOpen, onClose }: Props) {
 
         <div className="mt-4 text-center">
           <button
-            onClick={() => setIsSignUp(!isSignUp)}
+            onClick={() => {
+              setIsSignUp(!isSignUp);
+              setAgreePrivacy(false);
+              setShowPrivacyPolicy(false);
+            }}
             className="text-sm text-red-600 hover:text-red-700 font-medium"
           >
             {isSignUp ? '이미 계정이 있으신가요? 로그인' : '계정이 없으신가요? 회원가입'}
@@ -539,6 +608,50 @@ export default function LoginModal({ isOpen, onClose }: Props) {
       onSuccess={handlePhoneAuthSuccess}
       mode="signup"
     />
+
+    {showPrivacyPolicy && (
+      <div
+        className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4"
+        onClick={() => setShowPrivacyPolicy(false)}
+      >
+        <div
+          className="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-6"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-900">개인정보 처리방침</h3>
+            <button
+              onClick={() => setShowPrivacyPolicy(false)}
+              className="text-gray-400 hover:text-gray-600"
+            >
+              <X size={20} />
+            </button>
+          </div>
+          <div className="max-h-[60vh] overflow-y-auto text-sm text-gray-700 whitespace-pre-wrap leading-relaxed border border-gray-200 rounded-lg px-4 py-3 bg-gray-50">
+            {PRIVACY_POLICY.trim()}
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              type="button"
+              className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-100"
+              onClick={() => setShowPrivacyPolicy(false)}
+            >
+              닫기
+            </button>
+            <button
+              type="button"
+              className="px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700"
+              onClick={() => {
+                setAgreePrivacy(true);
+                setShowPrivacyPolicy(false);
+              }}
+            >
+              동의하고 닫기
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     </>
   );
 }

@@ -2,6 +2,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const NodeGeocoder = require('node-geocoder');
 const firebaseService = require('./firebaseService');
+const storageService = require('./storageService');
 
 class APIPoller {
   constructor(wsManager) {
@@ -11,7 +12,8 @@ class APIPoller {
     // Geocoder 설정 (Google Maps API 또는 무료 대안 사용)
     this.geocoder = NodeGeocoder({
       provider: 'openstreetmap', // 무료 서비스
-      formatter: null
+      formatter: null,
+      language: 'ko'
     });
 
     // 주소-좌표 캐시 (반복 조회 방지)
@@ -158,13 +160,14 @@ class APIPoller {
 
       // Firebase에 저장
       if (transformedItems.length > 0) {
-        const saveResult = await firebaseService.saveMissingPersons(transformedItems);
+        const { created = 0, updated = 0 } = await firebaseService.saveMissingPersons(transformedItems);
+        const totalChanges = created + updated;
 
-        if (saveResult.saved > 0) {
-          console.log(`💾 ${saveResult.saved}건 저장 (중복 ${saveResult.duplicates}건 제외)`);
+        if (totalChanges > 0) {
+          console.log(`💾 신규 ${created}건, 갱신 ${updated}건 처리`);
 
           // Firebase에서 최근 저장된 데이터 조회 후 WebSocket 전송
-          const recentlySaved = await firebaseService.getMissingPersons(saveResult.saved);
+          const recentlySaved = await firebaseService.getMissingPersons(totalChanges);
 
           if (recentlySaved.length > 0) {
             this.wsManager.broadcast('NEW_MISSING_PERSON', recentlySaved);
@@ -173,7 +176,7 @@ class APIPoller {
 
           this.lastFetchTime = new Date();
         } else {
-          console.log(`⏭️  모두 중복 (${saveResult.duplicates}건)`);
+          console.log('⏭️  저장할 신규/갱신 데이터 없음');
         }
       }
 
@@ -250,13 +253,17 @@ class APIPoller {
       ? `https://www.safe182.go.kr/api/lcm/imgView.do?msspsnIdntfccd=${apiData.msspsnIdntfccd}`
       : null;
 
+    const photos = await storageService.ensurePhotos(id, photo ? [photo] : []);
+    const primaryPhoto = photos.length > 0 ? photos[0] : photo || undefined;
+
     return {
       id,
       name: apiData.nm || '미상',
       age: age,
       gender,
       location,
-      photo,
+      photo: primaryPhoto,
+      photos,
       description: apiData.alldressingDscd || '특이사항 없음',
       missingDate,
       type,
@@ -283,27 +290,129 @@ class APIPoller {
   async geocodeAddress(address) {
     try {
       // 캐시 확인
-      if (this.locationCache.has(address)) {
-        return this.locationCache.get(address);
+      const raw = typeof address === 'string' ? address : '';
+      const normalizedInput = raw.replace(/\s+/g, ' ').trim();
+      const cacheKey = normalizedInput || raw;
+
+      if (this.locationCache.has(cacheKey)) {
+        return this.locationCache.get(cacheKey);
       }
 
       // 주소가 너무 짧거나 미상인 경우 기본값 반환
-      if (!address || address === '주소 미상' || address.length < 3) {
+      if (!normalizedInput || normalizedInput === '주소 미상' || normalizedInput.length < 3) {
         return { lat: 37.5665, lng: 126.9780, address: '서울특별시' };
       }
 
-      // 한국 주요 도시/지역 좌표 매핑 (fallback)
-      const location = this.getKoreanCityCoordinates(address);
+      // 1차: Google Geocoding API (정확 좌표)
+      const googleLocation = await this.geocodeUsingGoogle(normalizedInput);
+      if (googleLocation) {
+        this.locationCache.set(cacheKey, googleLocation);
+        return googleLocation;
+      }
 
-      // 캐시에 저장
-      this.locationCache.set(address, location);
+      // 2차: OSM 기반 지오코딩 시도
+      const geocodeResults = await this.geocoder.geocode(normalizedInput);
 
-      return location;
+      if (Array.isArray(geocodeResults) && geocodeResults.length > 0) {
+        const primary = geocodeResults[0];
+        if (primary && typeof primary.latitude === 'number' && typeof primary.longitude === 'number') {
+          const preciseLocation = {
+            lat: primary.latitude,
+            lng: primary.longitude,
+            address: primary.formattedAddress || normalizedInput
+          };
+          this.locationCache.set(cacheKey, preciseLocation);
+          return preciseLocation;
+        }
+      }
+
+      // 3차: 주소 구성요소 축약 (구/군, 시/도만 사용)
+      const simplifiedAddress = this.extractAdministrativeArea(normalizedInput);
+      if (simplifiedAddress && simplifiedAddress !== normalizedInput) {
+        const simplifiedResults = await this.geocoder.geocode(simplifiedAddress);
+        if (Array.isArray(simplifiedResults) && simplifiedResults.length > 0) {
+          const primary = simplifiedResults[0];
+          if (primary && typeof primary.latitude === 'number' && typeof primary.longitude === 'number') {
+            const simplifiedLocation = {
+              lat: primary.latitude,
+              lng: primary.longitude,
+              address: primary.formattedAddress || simplifiedAddress
+            };
+            this.locationCache.set(cacheKey, simplifiedLocation);
+            return simplifiedLocation;
+          }
+        }
+      }
+
+      // 4차: 한국 주요 도시/지역 좌표 매핑 (fallback)
+      const fallbackLocation = this.getKoreanCityCoordinates(normalizedInput);
+      this.locationCache.set(cacheKey, fallbackLocation);
+      return fallbackLocation;
 
     } catch (error) {
       console.error(`  ⚠️ Geocoding 오류 (${address}):`, error.message);
       return { lat: 37.5665, lng: 126.9780, address: address };
     }
+  }
+
+  async geocodeUsingGoogle(address) {
+    const apiKey = process.env.GOOGLE_GEOCODING_API_KEY;
+    if (!apiKey) {
+      return null;
+    }
+
+    try {
+      const response = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
+        params: {
+          address,
+          key: apiKey,
+          region: 'kr',
+          language: 'ko'
+        },
+        timeout: 10000
+      });
+
+      const data = response.data;
+      if (!data || data.status !== 'OK' || !Array.isArray(data.results) || data.results.length === 0) {
+        if (data && data.error_message) {
+          console.warn(`  ⚠️ Google Geocoding 오류 (${address}): ${data.error_message}`);
+        }
+        return null;
+      }
+
+      const bestMatch = data.results[0];
+      if (!bestMatch.geometry || !bestMatch.geometry.location) {
+        return null;
+      }
+
+      const preciseLocation = {
+        lat: bestMatch.geometry.location.lat,
+        lng: bestMatch.geometry.location.lng,
+        address: bestMatch.formatted_address || address
+      };
+
+      return preciseLocation;
+    } catch (error) {
+      console.warn(`  ⚠️ Google Geocoding 요청 실패 (${address}):`, error.message);
+      return null;
+    }
+  }
+
+  /**
+   * 주소에서 시/도 + 구/군 등 행정구역 텍스트만 추출
+   */
+  extractAdministrativeArea(address) {
+    if (!address) {
+      return null;
+    }
+
+    const match = address.match(/([가-힣]+(?:특별시|광역시|특별자치시|특별자치도|도))?\s*([가-힣]+(?:시|군|구))/);
+    if (match) {
+      const [, siDo, siGunGu] = match;
+      return [siDo, siGunGu].filter(Boolean).join(' ');
+    }
+
+    return null;
   }
 
   /**

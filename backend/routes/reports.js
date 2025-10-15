@@ -27,9 +27,26 @@ router.post('/', verifyFirebaseToken, verifyPhoneAuthenticated, verifyRecaptcha,
     // 제보자 UID (req.user에서 가져옴)
     const reporterUid = req.user.uid;
 
-    // 주소를 좌표로 변환
-    const apiPoller = new APIPoller(null);
-    const location = apiPoller.getKoreanCityCoordinates(person.location.address);
+    // 주소를 좌표로 변환 (사용자 입력 좌표 우선)
+    const requestedLocation = person.location || {};
+    const normalizedAddress = typeof requestedLocation.address === 'string' && requestedLocation.address.trim().length > 0
+      ? requestedLocation.address.trim()
+      : '주소 미상';
+    const rawLat = typeof requestedLocation.lat === 'number' ? requestedLocation.lat : Number(requestedLocation.lat);
+    const rawLng = typeof requestedLocation.lng === 'number' ? requestedLocation.lng : Number(requestedLocation.lng);
+    const hasCoordinates = Number.isFinite(rawLat) && Number.isFinite(rawLng);
+
+    let location;
+    if (hasCoordinates) {
+      location = {
+        lat: rawLat,
+        lng: rawLng,
+        address: normalizedAddress
+      };
+    } else {
+      const apiPoller = new APIPoller(null);
+      location = apiPoller.getKoreanCityCoordinates(normalizedAddress);
+    }
 
     // 실종자 데이터 생성
     const reportData = {
@@ -58,9 +75,9 @@ router.post('/', verifyFirebaseToken, verifyPhoneAuthenticated, verifyRecaptcha,
     }
 
     // Firebase에 저장
-    const saveResult = await firebaseService.saveMissingPersons([normalized]);
+    const { created = 0, updated = 0 } = await firebaseService.saveMissingPersons([normalized]);
 
-    if (saveResult.saved > 0) {
+    if (created > 0) {
       console.log(`✅ 사용자 제보 저장: ${normalized.name} (제보자 UID: ${reporterUid}, reCAPTCHA 점수: ${req.recaptcha.score})`);
 
       // WebSocket으로 실시간 전송 (wsManager가 있다면)
@@ -76,7 +93,7 @@ router.post('/', verifyFirebaseToken, verifyPhoneAuthenticated, verifyRecaptcha,
     } else {
       res.status(409).json({
         error: '이미 등록된 실종자 정보입니다',
-        duplicates: saveResult.duplicates
+        duplicates: updated
       });
     }
   } catch (error) {

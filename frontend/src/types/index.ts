@@ -19,6 +19,7 @@ export interface MissingPerson {
     address: string;
   };
   photo?: string;
+  photos?: string[];
   description: string;
   missingDate: string;
   type: MissingPersonType;

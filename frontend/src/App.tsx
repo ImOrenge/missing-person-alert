@@ -41,7 +41,6 @@ function App() {
   const [bannerAnnouncements, setBannerAnnouncements] = useState<Announcement[]>([]);
   const [popupAnnouncements, setPopupAnnouncements] = useState<Announcement[]>([]);
   const [showPopup, setShowPopup] = useState(false);
-  const [isUserTyping, setIsUserTyping] = useState(false);
 
   const { isConnected } = useApiData();
   const missingPersons = useEmergencyStore(state => state.missingPersons);
@@ -119,38 +118,25 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // 사용자 입력 감지
+  // 배너 공지사항 자동 슬라이드 (입력 필드에 포커스가 없을 때만)
   useEffect(() => {
-    const handleFocus = () => setIsUserTyping(true);
-    const handleBlur = () => setIsUserTyping(false);
-
-    // 모든 input, textarea 요소에 이벤트 리스너 추가
-    document.addEventListener('focusin', (e) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        setIsUserTyping(true);
-      }
-    });
-    document.addEventListener('focusout', (e) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        setIsUserTyping(false);
-      }
-    });
-
-    return () => {
-      document.removeEventListener('focusin', handleFocus);
-      document.removeEventListener('focusout', handleBlur);
-    };
-  }, []);
-
-  // 배너 공지사항 자동 슬라이드 (사용자가 입력 중이 아닐 때만)
-  useEffect(() => {
-    if (bannerAnnouncements.length === 0 || isUserTyping) return;
+    if (bannerAnnouncements.length === 0) return;
 
     const interval = setInterval(() => {
+      const activeElement = document.activeElement;
+      const isTyping =
+        activeElement instanceof HTMLInputElement ||
+        activeElement instanceof HTMLTextAreaElement ||
+        (activeElement instanceof HTMLElement && activeElement.getAttribute('contenteditable') === 'true');
+
+      if (isTyping) {
+        return;
+      }
+
       setCurrentAnnouncementIndex((prev) => (prev + 1) % bannerAnnouncements.length);
     }, 5000);
     return () => clearInterval(interval);
-  }, [bannerAnnouncements.length, isUserTyping]);
+  }, [bannerAnnouncements.length]);
 
   const handleLogout = async () => {
     const result = await firebaseLogout();

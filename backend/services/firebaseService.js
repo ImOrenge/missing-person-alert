@@ -256,8 +256,8 @@ class FirebaseService {
     }
 
     try {
-      let saved = 0;
-      let duplicates = 0;
+      let created = 0;
+      let updated = 0;
 
       for (const person of persons) {
         try {
@@ -265,25 +265,25 @@ class FirebaseService {
           const personRef = doc(this.db, 'missingPersons', person.id);
           const personDoc = await getDoc(personRef);
 
-          if (personDoc.exists()) {
-            duplicates++;
-            continue;
-          }
-
           // updatedAt 추가
           const personData = {
             ...person,
             updatedAt: Timestamp.now()
           };
 
-          await setDoc(personRef, personData);
-          saved++;
+          if (personDoc.exists()) {
+            await setDoc(personRef, personData, { merge: true });
+            updated++;
+          } else {
+            await setDoc(personRef, personData);
+            created++;
+          }
         } catch (error) {
           console.error(`❌ 실종자 저장 실패 (${person.id}):`, error.message);
         }
       }
 
-      return { saved, duplicates };
+      return { created, updated };
     } catch (error) {
       console.error('❌ 실종자 정보 저장 실패:', error);
       throw error;

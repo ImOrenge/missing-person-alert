@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AdvancedMarker,
   Pin,
   InfoWindow,
   useAdvancedMarkerRef
 } from '@vis.gl/react-google-maps';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { MissingPerson } from '../types';
 import ShareModal from './ShareModal';
 import CommentsPanel from './MissingPersonComments/CommentsPanel';
@@ -62,6 +63,8 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
   const [activeTab, setActiveTab] = useState<'details' | 'comments'>('details');
+  const [activePhotoIndex, setActivePhotoIndex] = useState(0);
+  const [hiddenPhotoIndexes, setHiddenPhotoIndexes] = useState<number[]>([]);
 
   useEffect(() => {
     const handleResize = () => setWindowWidth(window.innerWidth);
@@ -74,6 +77,51 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
 
   const isMobile = windowWidth < 640;
   const isVerySmall = windowWidth < 400;
+
+  const photoEntries = useMemo(() => {
+    const basePhotos = Array.isArray(person.photos) && person.photos.length > 0
+      ? person.photos
+      : person.photo
+      ? [person.photo]
+      : [];
+
+    return basePhotos
+      .map((url, index) => ({ url, index }))
+      .filter(({ index }) => !hiddenPhotoIndexes.includes(index));
+  }, [person.photos, person.photo, hiddenPhotoIndexes]);
+
+  useEffect(() => {
+    setActivePhotoIndex(0);
+    setHiddenPhotoIndexes([]);
+  }, [person.id, person.photos?.length, person.photo]);
+
+  useEffect(() => {
+    if (activePhotoIndex >= photoEntries.length) {
+      setActivePhotoIndex(photoEntries.length > 0 ? photoEntries.length - 1 : 0);
+    }
+  }, [activePhotoIndex, photoEntries.length]);
+
+  const currentPhoto = photoEntries[activePhotoIndex];
+
+  const handlePhotoError = (originalIndex: number) => {
+    setHiddenPhotoIndexes(prev => (prev.includes(originalIndex) ? prev : [...prev, originalIndex]));
+  };
+
+  const showPhotoNavigation = photoEntries.length > 1;
+
+  const handlePrevPhoto = () => {
+    setActivePhotoIndex((prev) => {
+      if (photoEntries.length === 0) return 0;
+      return prev === 0 ? photoEntries.length - 1 : prev - 1;
+    });
+  };
+
+  const handleNextPhoto = () => {
+    setActivePhotoIndex((prev) => {
+      if (photoEntries.length === 0) return 0;
+      return prev === photoEntries.length - 1 ? 0 : prev + 1;
+    });
+  };
 
   return (
     <>
@@ -123,21 +171,111 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
               boxSizing: 'border-box'
             }}
           >
-            {person.photo && (
-              <img
-                src={person.photo}
-                alt={person.name}
+            {currentPhoto ? (
+              <div
+                style={{
+                  position: 'relative',
+                  width: '100%',
+                  marginBottom: isMobile ? '8px' : '10px',
+                  borderRadius: isMobile ? '6px' : '8px',
+                  overflow: 'hidden'
+                }}
+              >
+                <img
+                  src={currentPhoto.url}
+                  alt={`${person.name} 사진 ${activePhotoIndex + 1}`}
+                  style={{
+                    width: '100%',
+                    maxHeight: isMobile ? '140px' : '220px',
+                    objectFit: 'cover',
+                    display: 'block'
+                  }}
+                  onError={() => handlePhotoError(currentPhoto.index)}
+                />
+
+                {showPhotoNavigation && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handlePrevPhoto}
+                      style={{
+                        position: 'absolute',
+                        top: '50%',
+                        left: '8px',
+                        transform: 'translateY(-50%)',
+                        backgroundColor: 'rgba(0, 0, 0, 0.45)',
+                        color: 'white',
+                        border: 'none',
+                        width: isMobile ? '26px' : '32px',
+                        height: isMobile ? '26px' : '32px',
+                        borderRadius: '9999px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                      aria-label="이전 사진"
+                    >
+                      <ChevronLeft size={isMobile ? 16 : 20} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleNextPhoto}
+                      style={{
+                        position: 'absolute',
+                        top: '50%',
+                        right: '8px',
+                        transform: 'translateY(-50%)',
+                        backgroundColor: 'rgba(0, 0, 0, 0.45)',
+                        color: 'white',
+                        border: 'none',
+                        width: isMobile ? '26px' : '32px',
+                        height: isMobile ? '26px' : '32px',
+                        borderRadius: '9999px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                      aria-label="다음 사진"
+                    >
+                      <ChevronRight size={isMobile ? 16 : 20} />
+                    </button>
+                  </>
+                )}
+
+                <div
+                  style={{
+                    position: 'absolute',
+                    bottom: '6px',
+                    right: '8px',
+                    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+                    color: 'white',
+                    padding: '2px 8px',
+                    borderRadius: '12px',
+                    fontSize: isMobile ? '10px' : '12px'
+                  }}
+                >
+                  {activePhotoIndex + 1} / {photoEntries.length}
+                </div>
+              </div>
+            ) : (
+              <div
                 style={{
                   width: '100%',
-                  maxHeight: isMobile ? '120px' : '200px',
-                  objectFit: 'cover',
+                  maxHeight: isMobile ? '140px' : '220px',
                   borderRadius: isMobile ? '6px' : '8px',
-                  marginBottom: isMobile ? '8px' : '10px'
+                  marginBottom: isMobile ? '8px' : '10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: '#f4f6f8',
+                  color: '#7f8c8d',
+                  fontSize: isMobile ? '11px' : '13px'
                 }}
-                onError={(event) => {
-                  (event.target as HTMLImageElement).style.display = 'none';
-                }}
-              />
+              >
+                등록된 사진이 없습니다
+              </div>
             )}
 
             <h3

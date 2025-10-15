@@ -44,13 +44,26 @@ export function useApiData() {
                 }
               : { lat: 0, lng: 0, address: '대한민국' };
 
+            const photos = Array.isArray(data.photos)
+              ? data.photos.filter((url: unknown) => typeof url === 'string' && url.trim().length > 0)
+              : data.photo
+              ? [data.photo]
+              : [];
+            const primaryPhoto =
+              photos.length > 0
+                ? photos[0]
+                : typeof data.photo === 'string' && data.photo.trim()
+                ? data.photo
+                : undefined;
+
             const person: MissingPerson = {
               id: docSnap.id,
               name: data.name ?? '이름 미상',
               age: typeof data.age === 'number' ? data.age : Number(data.age) || 0,
               gender: data.gender ?? 'U',
               location,
-              photo: data.photo,
+              photo: primaryPhoto,
+              photos,
               description: data.description ?? '',
               missingDate: data.missingDate ?? '',
               type: data.type ?? 'unknown',
