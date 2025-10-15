@@ -41,6 +41,7 @@ function App() {
   const [bannerAnnouncements, setBannerAnnouncements] = useState<Announcement[]>([]);
   const [popupAnnouncements, setPopupAnnouncements] = useState<Announcement[]>([]);
   const [showPopup, setShowPopup] = useState(false);
+  const [isUserTyping, setIsUserTyping] = useState(false);
 
   const { isConnected } = useApiData();
   const missingPersons = useEmergencyStore(state => state.missingPersons);
@@ -118,15 +119,38 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // 배너 공지사항 자동 슬라이드
+  // 사용자 입력 감지
   useEffect(() => {
-    if (bannerAnnouncements.length === 0) return;
+    const handleFocus = () => setIsUserTyping(true);
+    const handleBlur = () => setIsUserTyping(false);
+
+    // 모든 input, textarea 요소에 이벤트 리스너 추가
+    document.addEventListener('focusin', (e) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        setIsUserTyping(true);
+      }
+    });
+    document.addEventListener('focusout', (e) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        setIsUserTyping(false);
+      }
+    });
+
+    return () => {
+      document.removeEventListener('focusin', handleFocus);
+      document.removeEventListener('focusout', handleBlur);
+    };
+  }, []);
+
+  // 배너 공지사항 자동 슬라이드 (사용자가 입력 중이 아닐 때만)
+  useEffect(() => {
+    if (bannerAnnouncements.length === 0 || isUserTyping) return;
 
     const interval = setInterval(() => {
       setCurrentAnnouncementIndex((prev) => (prev + 1) % bannerAnnouncements.length);
     }, 5000);
     return () => clearInterval(interval);
-  }, [bannerAnnouncements.length]);
+  }, [bannerAnnouncements.length, isUserTyping]);
 
   const handleLogout = async () => {
     const result = await firebaseLogout();
@@ -353,11 +377,19 @@ function App() {
           <EmergencyMap />
         </div>
 
-        {/* 필터 패널 (오버레이 - 모바일은 전체 화면, 데스크톱은 일부) */}
+        {/* 필터 패널 (오버레이 - 모바일은 전체 화면, 데스크톱은 적당한 크기) */}
         {showFilters && (
-          <div className="absolute inset-0 md:inset-auto md:top-0 md:left-0 md:right-0 md:bottom-auto z-50 bg-white shadow-2xl md:shadow-lg overflow-y-auto">
-            <FilterPanel onClose={() => setShowFilters(false)} />
-          </div>
+          <>
+            {/* 배경 오버레이 (데스크톱에서만 표시) */}
+            <div
+              className="hidden md:block absolute inset-0 bg-black bg-opacity-30 z-40"
+              onClick={() => setShowFilters(false)}
+            />
+            {/* 필터 패널 */}
+            <div className="absolute inset-0 md:inset-auto md:top-4 md:left-1/2 md:-translate-x-1/2 md:w-[600px] md:max-h-[calc(100vh-8rem)] md:rounded-xl z-50 bg-white shadow-2xl overflow-y-auto">
+              <FilterPanel onClose={() => setShowFilters(false)} />
+            </div>
+          </>
         )}
       </div>
 

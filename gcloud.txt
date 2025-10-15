@@ -1,0 +1,2 @@
+cloud recaptcha keys update 6Le1BuQrAAAAANWJsC0nfapV6okXrhCYRvTNw74F \
+    --update-web-settings-allowed-domains=missing-person-alram.web.app,missing-person-alram.firebase.com,api-oueta2xr6q-du.a.run.app

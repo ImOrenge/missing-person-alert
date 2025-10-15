@@ -72,9 +72,29 @@ const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000; // 5분
 
 const isAdminUser = (user?: admin.auth.DecodedIdToken | null): boolean => {
   if (!user) return false;
+
+  // Custom claim으로 admin 체크
   if ((user as any).admin === true) return true;
-  const adminEmails = process.env.ADMIN_EMAILS?.split(",").map((email) => email.trim()) || [];
-  return !!(user.email && adminEmails.includes(user.email));
+
+  // 하드코딩된 관리자 이메일 (임시)
+  const hardcodedAdminEmails = ["jmgi1024@gmail.com"];
+  if (user.email && hardcodedAdminEmails.includes(user.email)) {
+    logger.info(`Admin access granted for: ${user.email}`);
+    return true;
+  }
+
+  // 환경변수에서 admin 이메일 목록 가져오기
+  const adminEmailsEnv = process.env.ADMIN_EMAILS;
+  if (adminEmailsEnv) {
+    const adminEmails = adminEmailsEnv.split(",").map((email) => email.trim());
+    if (user.email && adminEmails.includes(user.email)) {
+      logger.info(`Admin access granted via env for: ${user.email}`);
+      return true;
+    }
+  }
+
+  logger.warn(`Admin access denied for: ${user.email || "no email"}`);
+  return false;
 };
 
 const authenticate = async (req: AuthedRequest, res: Response, next: NextFunction) => {
@@ -680,10 +700,396 @@ app.get("/api/safe182/photo/:id", async (req: Request, res: Response) => {
   }
 });
 
-// TODO: 다른 라우트들도 필요시 추가
-// - /api/reports (제보 등록)
-// - /api/reports/my (내 제보 조회)
-// - /api/admin/* (관리자 기능)
+// Admin endpoints
+app.get("/api/admin/users", requireAdmin, async (req: AuthedRequest, res: Response) => {
+  try {
+    // Firebase Auth에서 모든 사용자 가져오기
+    const listUsersResult = await admin.auth().listUsers();
+
+    // Firestore에서 각 사용자의 제보 수 가져오기
+    const usersWithStats = await Promise.all(
+      listUsersResult.users.map(async (userRecord) => {
+        const reportsSnapshot = await db
+          .collection("missing_persons")
+          .where("reportedBy.uid", "==", userRecord.uid)
+          .get();
+
+        return {
+          uid: userRecord.uid,
+          email: userRecord.email || null,
+          phoneNumber: userRecord.phoneNumber || null,
+          displayName: userRecord.displayName || null,
+          createdAt: userRecord.metadata.creationTime,
+          lastSignInTime: userRecord.metadata.lastSignInTime || null,
+          disabled: userRecord.disabled || false,
+          reportCount: reportsSnapshot.size,
+          isAdmin: isAdminUser(req.user),
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      users: usersWithStats,
+      total: usersWithStats.length,
+    });
+  } catch (error: any) {
+    logger.error("유저 목록 조회 실패", error);
+    res.status(500).json({
+      success: false,
+      error: "유저 목록 조회 중 오류가 발생했습니다",
+    });
+  }
+});
+
+app.post("/api/admin/users/:uid/toggle-status", requireAdmin, async (req: AuthedRequest, res: Response) => {
+  try {
+    const {uid} = req.params;
+    const {disable} = req.body;
+
+    // Firebase Auth에서 사용자 상태 업데이트
+    await admin.auth().updateUser(uid, {
+      disabled: disable,
+    });
+
+    res.json({
+      success: true,
+      message: `사용자가 ${disable ? "비활성화" : "활성화"}되었습니다`,
+    });
+  } catch (error: any) {
+    logger.error("사용자 상태 변경 실패", error);
+    res.status(500).json({
+      success: false,
+      error: "사용자 상태 변경 중 오류가 발생했습니다",
+    });
+  }
+});
+
+app.get("/api/admin/statistics", requireAdmin, async (req: AuthedRequest, res: Response) => {
+  try {
+    const {range = "week"} = req.query;
+
+    // 시간 범위 계산
+    const now = new Date();
+    let startDate: Date;
+
+    switch (range) {
+      case "day":
+        startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        break;
+      case "week":
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case "month":
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        break;
+      default:
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    }
+
+    // 전체 제보 가져오기
+    const reportsSnapshot = await db.collection("missing_persons").get();
+    const allReports = reportsSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    // 제보 통계
+    const userReports = allReports.filter((r: any) => r.source === "user_report");
+    const apiReports = allReports.filter((r: any) => r.source !== "user_report");
+    const activeReports = allReports.filter((r: any) => r.status === "active");
+    const resolvedReports = allReports.filter((r: any) => r.status === "resolved");
+
+    // 오늘, 이번 주, 이번 달 제보
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const monthStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const todayReports = allReports.filter(
+      (r: any) => r.reportedBy?.reportedAt && new Date(r.reportedBy.reportedAt) >= todayStart
+    );
+    const weekReports = allReports.filter(
+      (r: any) => r.reportedBy?.reportedAt && new Date(r.reportedBy.reportedAt) >= weekStart
+    );
+    const monthReports = allReports.filter(
+      (r: any) => r.reportedBy?.reportedAt && new Date(r.reportedBy.reportedAt) >= monthStart
+    );
+
+    // 사용자 통계
+    const listUsersResult = await admin.auth().listUsers();
+    const allUsers = listUsersResult.users;
+    const activeUsers = allUsers.filter((u) => !u.disabled);
+
+    const usersWithReports = new Set(
+      allReports.filter((r: any) => r.reportedBy?.uid).map((r: any) => r.reportedBy.uid)
+    );
+
+    const todayUsers = allUsers.filter((u) => new Date(u.metadata.creationTime) >= todayStart);
+    const weekUsers = allUsers.filter((u) => new Date(u.metadata.creationTime) >= weekStart);
+
+    // 지역별 제보 통계
+    const locationCounts: {[key: string]: number} = {};
+    allReports.forEach((report: any) => {
+      if (report.location?.address) {
+        // 주소에서 시/도 추출
+        const match = report.location.address.match(/^([가-힣]+(?:특별시|광역시|특별자치시|도|특별자치도))/);
+        const region = match ? match[1] : "기타";
+        locationCounts[region] = (locationCounts[region] || 0) + 1;
+      }
+    });
+
+    const locations = Object.entries(locationCounts)
+      .map(([name, count]) => ({name, count}))
+      .sort((a, b) => b.count - a.count);
+
+    // 최근 활동
+    const recentActivity: any[] = [];
+
+    // 최근 제보 추가
+    const recentReports = allReports
+      .filter((r: any) => r.reportedBy?.reportedAt)
+      .sort((a: any, b: any) => new Date(b.reportedBy.reportedAt).getTime() - new Date(a.reportedBy.reportedAt).getTime())
+      .slice(0, 5);
+
+    recentReports.forEach((report: any) => {
+      recentActivity.push({
+        type: "report",
+        description: `${report.name} (${report.age}세) 실종자 제보`,
+        timestamp: report.reportedBy.reportedAt,
+      });
+    });
+
+    // 최근 가입 사용자 추가
+    const recentUsers = allUsers
+      .sort((a, b) => new Date(b.metadata.creationTime).getTime() - new Date(a.metadata.creationTime).getTime())
+      .slice(0, 5);
+
+    recentUsers.forEach((user) => {
+      recentActivity.push({
+        type: "user",
+        description: `${user.displayName || user.email || "사용자"} 가입`,
+        timestamp: user.metadata.creationTime,
+      });
+    });
+
+    // 시간순 정렬
+    recentActivity.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    res.json({
+      success: true,
+      statistics: {
+        reports: {
+          total: allReports.length,
+          userReports: userReports.length,
+          apiReports: apiReports.length,
+          activeReports: activeReports.length,
+          resolvedReports: resolvedReports.length,
+          todayReports: todayReports.length,
+          weekReports: weekReports.length,
+          monthReports: monthReports.length,
+        },
+        users: {
+          total: allUsers.length,
+          active: activeUsers.length,
+          withReports: usersWithReports.size,
+          todayRegistered: todayUsers.length,
+          weekRegistered: weekUsers.length,
+        },
+        locations,
+        recentActivity: recentActivity.slice(0, 10),
+      },
+    });
+  } catch (error: any) {
+    logger.error("통계 조회 실패", error);
+    res.status(500).json({
+      success: false,
+      error: "통계 조회 중 오류가 발생했습니다",
+    });
+  }
+});
+
+// Reports endpoints
+app.post(
+  "/api/reports",
+  authenticate,
+  ensureRecaptcha,
+  rateLimit((req) => req.user?.uid ?? "anonymous"),
+  async (req: AuthedRequest, res: Response) => {
+    try {
+      const {person, uid} = req.body || {};
+      const userId = req.user?.uid;
+
+      if (!userId) {
+        return res.status(401).json({success: false, error: "인증이 필요합니다"});
+      }
+
+      // 요청한 uid와 인증된 uid가 일치하는지 확인
+      if (uid !== userId) {
+        return res.status(403).json({success: false, error: "권한이 없습니다"});
+      }
+
+      // 필수 필드 검증
+      if (!person?.name || !person?.age || !person?.location?.address) {
+        return res.status(400).json({
+          success: false,
+          error: "이름, 나이, 실종 장소는 필수 입력 항목입니다",
+        });
+      }
+
+      // 사용자 정보 가져오기
+      const userRecord = await admin.auth().getUser(userId);
+
+      // Firestore에 저장할 데이터 구성
+      const docRef = db.collection("missing_persons").doc();
+      const now = admin.firestore.Timestamp.now();
+
+      const report = {
+        id: docRef.id,
+        name: person.name,
+        age: person.age,
+        gender: person.gender || "M",
+        location: {
+          lat: person.location.lat || 37.5665,
+          lng: person.location.lng || 126.9780,
+          address: person.location.address,
+        },
+        photo: person.photo || null,
+        description: person.description || "특이사항 없음",
+        missingDate: new Date().toISOString(),
+        type: person.type || "missing_child",
+        status: "active",
+        source: "user_report",
+        reportedBy: {
+          uid: userId,
+          email: userRecord.email || null,
+          phoneNumber: userRecord.phoneNumber || null,
+          displayName: userRecord.displayName || null,
+          reportedAt: now.toDate().toISOString(),
+        },
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      // Firestore에 저장
+      await docRef.set(report);
+
+      logger.info(`제보 등록 성공: ${report.id} by ${userId}`);
+
+      res.status(201).json({
+        success: true,
+        report,
+        message: "실종자 제보가 성공적으로 등록되었습니다",
+      });
+    } catch (error: any) {
+      logger.error("제보 등록 실패", error);
+      res.status(500).json({
+        success: false,
+        error: "제보 등록 중 오류가 발생했습니다",
+      });
+    }
+  }
+);
+
+app.get("/api/reports/my", authenticate, async (req: AuthedRequest, res: Response) => {
+  try {
+    const userId = req.user?.uid;
+
+    if (!userId) {
+      return res.status(401).json({success: false, error: "인증이 필요합니다"});
+    }
+
+    // 사용자의 제보 조회
+    const reportsSnapshot = await db
+      .collection("missing_persons")
+      .where("reportedBy.uid", "==", userId)
+      .orderBy("createdAt", "desc")
+      .get();
+
+    const reports = reportsSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    res.json({
+      success: true,
+      reports,
+      total: reports.length,
+    });
+  } catch (error: any) {
+    logger.error("내 제보 조회 실패", error);
+    res.status(500).json({
+      success: false,
+      error: "제보 조회 중 오류가 발생했습니다",
+    });
+  }
+});
+
+app.get("/api/reports/all", authenticate, async (req: AuthedRequest, res: Response) => {
+  try {
+    // Check if user is admin
+    if (!isAdminUser(req.user)) {
+      return res.status(403).json({success: false, error: "관리자 권한이 필요합니다"});
+    }
+
+    const reportsSnapshot = await db.collection("missing_persons").get();
+    const reports = reportsSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    res.json({
+      success: true,
+      reports,
+      total: reports.length,
+    });
+  } catch (error: any) {
+    logger.error("전체 제보 조회 실패", error);
+    res.status(500).json({
+      success: false,
+      error: "전체 제보 조회 중 오류가 발생했습니다",
+    });
+  }
+});
+
+app.delete("/api/reports/:reportId", authenticate, async (req: AuthedRequest, res: Response) => {
+  try {
+    const {reportId} = req.params;
+    const userId = req.user?.uid;
+
+    if (!userId) {
+      return res.status(401).json({success: false, error: "인증이 필요합니다"});
+    }
+
+    const docRef = db.collection("missing_persons").doc(reportId);
+    const docSnap = await docRef.get();
+
+    if (!docSnap.exists) {
+      return res.status(404).json({success: false, error: "제보를 찾을 수 없습니다"});
+    }
+
+    const reportData = docSnap.data();
+    const isOwner = reportData?.reportedBy?.uid === userId;
+    const isAdmin = isAdminUser(req.user);
+
+    // 본인 또는 관리자만 삭제 가능
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({success: false, error: "삭제 권한이 없습니다"});
+    }
+
+    await docRef.delete();
+
+    res.json({
+      success: true,
+      message: "제보가 삭제되었습니다",
+    });
+  } catch (error: any) {
+    logger.error("제보 삭제 실패", error);
+    res.status(500).json({
+      success: false,
+      error: "제보 삭제 중 오류가 발생했습니다",
+    });
+  }
+});
 
 // Firebase Functions로 export
 export const api = onRequest({

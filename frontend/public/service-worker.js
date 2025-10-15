@@ -1,6 +1,6 @@
 /* eslint-disable no-restricted-globals */
 
-const CACHE_NAME = 'missing-person-alert-v1';
+const CACHE_NAME = 'missing-person-alert-v2';
 const urlsToCache = [
   '/',
   '/index.html',
@@ -37,6 +37,19 @@ self.addEventListener('activate', (event) => {
 
 // Fetch 이벤트
 self.addEventListener('fetch', (event) => {
+  // Firestore, Firebase, 외부 API 요청은 Service Worker를 거치지 않도록 함
+  const url = new URL(event.request.url);
+  const shouldBypass =
+    url.hostname.includes('firestore.googleapis.com') ||
+    url.hostname.includes('firebase.googleapis.com') ||
+    url.hostname.includes('googleapis.com') ||
+    url.hostname.includes('firebaseio.com') ||
+    event.request.method !== 'GET';
+
+  if (shouldBypass) {
+    return; // Service Worker를 거치지 않고 바로 네트워크 요청
+  }
+
   event.respondWith(
     caches.match(event.request).then((response) => {
       // 캐시에 있으면 캐시에서 반환
@@ -58,6 +71,9 @@ self.addEventListener('fetch', (event) => {
         });
 
         return response;
+      }).catch((error) => {
+        console.error('Fetch failed:', error);
+        throw error;
       });
     })
   );
