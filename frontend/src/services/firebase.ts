@@ -14,21 +14,14 @@ import {
   ConfirmationResult,
   getMultiFactorResolver,
   PhoneAuthProvider,
-  PhoneMultiFactorGenerator
+  PhoneMultiFactorGenerator,
+  deleteUser
 } from 'firebase/auth';
-
-const firebaseConfig = {
-  apiKey: "AIzaSyCt5K-CIK7AUc6N1bbP4sK5NmJ29g8TG9M",
-  authDomain: "missing-person-alram.firebaseapp.com",
-  projectId: "missing-person-alram",
-  storageBucket: "missing-person-alram.firebasestorage.app",
-  messagingSenderId: "558387804013",
-  appId: "1:558387804013:web:1d85bc6e03e17e80a5cc64",
-  measurementId: "G-DNE8F851CX"
-};
+import { firebaseConfig } from './firebaseConfig';
 
 // Firebase 초기화
 const app = initializeApp(firebaseConfig);
+export const firebaseApp = app;
 const firestore = getFirestore(app);
 const auth = getAuth(app);
 
@@ -128,6 +121,43 @@ export const logout = async () => {
     return {
       success: false,
       error: error.message
+    };
+  }
+};
+
+export const deleteCurrentAccount = async (): Promise<{ success: boolean; requiresRecentLogin?: boolean; message?: string }> => {
+  const currentUser = auth.currentUser;
+
+  if (!currentUser) {
+    return { success: false, message: '로그인된 사용자가 없습니다' };
+  }
+
+  const uid = currentUser.uid;
+
+  try {
+    await deleteUser(currentUser);
+
+    try {
+      await deleteDoc(doc(firestore, 'users', uid));
+    } catch (firestoreError) {
+      console.warn('Firestore 사용자 문서 삭제 중 오류:', firestoreError);
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('계정 삭제 실패:', error);
+
+    if (error.code === 'auth/requires-recent-login') {
+      return {
+        success: false,
+        requiresRecentLogin: true,
+        message: '보안을 위해 최근에 다시 로그인해야 합니다'
+      };
+    }
+
+    return {
+      success: false,
+      message: error.message || '계정을 삭제할 수 없습니다'
     };
   }
 };

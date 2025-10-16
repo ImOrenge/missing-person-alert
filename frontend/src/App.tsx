@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Bell, BellOff, ChevronLeft, ChevronRight, LogIn, LogOut, UserCircle, Plus, FileText, Shield, User as UserIcon } from 'lucide-react';
 import EmergencyMap from './components/EmergencyMap';
 import Sidebar from './components/Sidebar';
@@ -11,6 +11,7 @@ import UserProfileModal from './components/UserProfileModal';
 import VerificationPromptModal from './components/VerificationPromptModal';
 import { PhoneAuthModal } from './components/PhoneAuthModal';
 import AnnouncementBanner from './components/AnnouncementBanner';
+import NewMissingPersonBanner from './components/NewMissingPersonBanner';
 import AnnouncementPopup from './components/AnnouncementPopup';
 import NotificationBell from './components/NotificationBell';
 import { useEmergencyStore } from './stores/emergencyStore';
@@ -23,6 +24,11 @@ import { getBannerAnnouncements, getPopupAnnouncements } from './services/announ
 import type { User } from 'firebase/auth';
 import type { Announcement } from './types/announcement';
 import 'react-toastify/dist/ReactToastify.css';
+import { isAnnouncementPopupClosedForCurrentSession } from './utils/announcementStorage';
+import { usePresenceTracking } from './hooks/usePresenceTracking';
+import { requestNotificationPermission, retrieveFcmToken, onForegroundMessage } from './services/firebaseMessaging';
+
+const PUSH_PROMPT_STORAGE_KEY = 'mp_push_prompt_shown';
 
 function App() {
   const [showSidebar, setShowSidebar] = useState(true);
@@ -41,9 +47,52 @@ function App() {
   const [bannerAnnouncements, setBannerAnnouncements] = useState<Announcement[]>([]);
   const [popupAnnouncements, setPopupAnnouncements] = useState<Announcement[]>([]);
   const [showPopup, setShowPopup] = useState(false);
+  const pushPromptToastRef = useRef<React.ReactText | null>(null);
 
   const { isConnected } = useApiData();
   const missingPersons = useEmergencyStore(state => state.missingPersons);
+
+  usePresenceTracking(currentUser);
+
+  const enablePushNotifications = useCallback(async () => {
+    try {
+      const permission = await requestNotificationPermission();
+
+      if (permission !== 'granted') {
+        toast.warning('알림 권한이 허용되지 않았습니다');
+        return;
+      }
+
+      const token = await retrieveFcmToken();
+      if (token) {
+        console.log('[FCM] 발급된 토큰:', token);
+        toast.success('푸시 알림이 활성화되었습니다', { autoClose: 4000 });
+      } else {
+        toast.error('푸시 토큰을 가져오지 못했습니다');
+      }
+    } catch (error: any) {
+      console.error('푸시 알림 설정 실패:', error);
+      toast.error(error?.message || '푸시 알림 설정 중 오류가 발생했습니다');
+    } finally {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(PUSH_PROMPT_STORAGE_KEY, 'true');
+      }
+      if (pushPromptToastRef.current) {
+        toast.dismiss(pushPromptToastRef.current);
+        pushPromptToastRef.current = null;
+      }
+    }
+  }, []);
+
+  const dismissPushPrompt = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(PUSH_PROMPT_STORAGE_KEY, 'true');
+    }
+    if (pushPromptToastRef.current) {
+      toast.dismiss(pushPromptToastRef.current);
+      pushPromptToastRef.current = null;
+    }
+  }, []);
 
   // reCAPTCHA 전역 초기화
   useEffect(() => {
@@ -95,6 +144,124 @@ function App() {
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+
+    onForegroundMessage((payload) => {
+      console.log('[FCM] foreground 메시지 수신:', payload);
+      const notification = (payload as any)?.notification;
+      if (notification?.title || notification?.body) {
+        toast.info(
+          <div>
+            <div style={{ fontWeight: 600 }}>{notification.title ?? '실시간 실종자 알림'}</div>
+            {notification.body && (
+              <div style={{ fontSize: '13px', marginTop: '4px' }}>{notification.body}</div>
+            )}
+          </div>,
+          { position: 'bottom-right' }
+        );
+      }
+    }).then((fn) => {
+      unsubscribe = fn;
+    });
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser) {
+      if (pushPromptToastRef.current) {
+        toast.dismiss(pushPromptToastRef.current);
+        pushPromptToastRef.current = null;
+      }
+      return;
+    }
+
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      return;
+    }
+
+    const permission = Notification.permission;
+    if (permission === 'granted') {
+      window.localStorage.setItem(PUSH_PROMPT_STORAGE_KEY, 'true');
+      retrieveFcmToken().then((token) => {
+        if (token) {
+          console.log('[FCM] 기존 토큰:', token);
+        }
+      });
+      return;
+    }
+
+    if (permission === 'denied') {
+      window.localStorage.setItem(PUSH_PROMPT_STORAGE_KEY, 'true');
+      return;
+    }
+
+    const alreadyPrompted = window.localStorage.getItem(PUSH_PROMPT_STORAGE_KEY) === 'true';
+    if (alreadyPrompted) {
+      return;
+    }
+
+    if (!pushPromptToastRef.current || !toast.isActive(pushPromptToastRef.current)) {
+      pushPromptToastRef.current = toast.info(
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <span style={{ fontSize: '14px', color: '#1f2937' }}>
+            실시간 실종자 속보를 푸시 알림으로 받아보시겠어요?
+          </span>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+            <button
+              onClick={dismissPushPrompt}
+              style={{
+                padding: '6px 12px',
+                fontSize: '12px',
+                borderRadius: '6px',
+                border: '1px solid #d1d5db',
+                backgroundColor: '#fff',
+                color: '#4b5563',
+                cursor: 'pointer'
+              }}
+            >
+              나중에
+            </button>
+            <button
+              onClick={enablePushNotifications}
+              style={{
+                padding: '6px 14px',
+                fontSize: '12px',
+                borderRadius: '6px',
+                border: 'none',
+                backgroundColor: '#dc2626',
+                color: '#fff',
+                cursor: 'pointer',
+                fontWeight: 600
+              }}
+            >
+              알림 활성화
+            </button>
+          </div>
+        </div>,
+        {
+          position: 'bottom-right',
+          autoClose: false,
+          closeOnClick: false,
+          closeButton: true,
+          pauseOnFocusLoss: false
+        }
+      );
+    }
+
+    return () => {
+      if (pushPromptToastRef.current) {
+        toast.dismiss(pushPromptToastRef.current);
+        pushPromptToastRef.current = null;
+      }
+    };
+  }, [currentUser, enablePushNotifications, dismissPushPrompt]);
+
   // Firestore에서 공지사항 불러오기
   useEffect(() => {
     const loadAnnouncements = async () => {
@@ -105,10 +272,8 @@ function App() {
       setBannerAnnouncements(banners);
       setPopupAnnouncements(popups);
 
-      // 팝업 공지가 있으면 표시
-      if (popups.length > 0) {
-        setShowPopup(true);
-      }
+      const shouldShowPopup = popups.length > 0 && !isAnnouncementPopupClosedForCurrentSession();
+      setShowPopup(shouldShowPopup);
     };
 
     loadAnnouncements();
@@ -360,6 +525,7 @@ function App() {
 
         {/* 지도 */}
         <div className="flex-1 relative">
+          <NewMissingPersonBanner />
           <EmergencyMap />
         </div>
 
