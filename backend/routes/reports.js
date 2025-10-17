@@ -11,6 +11,7 @@ const {
   optionalAuth,
   verifyRecaptcha
 } = require('../middleware/authMiddleware');
+const { sendMissingPersonAlert } = require('../services/pushNotificationService');
 
 /**
  * POST /api/reports
@@ -83,6 +84,16 @@ router.post('/', verifyFirebaseToken, verifyPhoneAuthenticated, verifyRecaptcha,
       // WebSocket으로 실시간 전송 (wsManager가 있다면)
       if (global.wsManager) {
         global.wsManager.broadcast('NEW_MISSING_PERSON', [normalized]);
+      }
+
+      // 푸시 알림 발송
+      try {
+        const stats = await sendMissingPersonAlert(normalized);
+        console.log(
+          `📣 실종자 푸시 알림 발송 결과: 총 ${stats.totalTokens}개 토큰 대상, 성공 ${stats.successCount}, 실패 ${stats.failureCount}`
+        );
+      } catch (pushError) {
+        console.error('❌ 실종자 푸시 알림 발송 실패:', pushError);
       }
 
       res.json({
