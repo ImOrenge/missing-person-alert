@@ -1,9 +1,13 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const nodeCron = require('node-cron');
+const WebSocketManager = require('./services/websocketManager');
+const APIPoller = require('./services/apiPoller');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const WS_PORT = process.env.WS_PORT || 8080;
 
 // CORS 설정
 const corsOptions = {
@@ -66,6 +70,25 @@ app.use('/api/admin', adminRouter);
 app.use('/api', apiRouter);
 
 console.log('✅ 실종자 제보 API 서버 시작');
+
+// WebSocket & 주기적 API Poller 초기화
+const wsManager = new WebSocketManager(WS_PORT);
+const apiPoller = new APIPoller(wsManager);
+global.wsManager = wsManager;
+
+const pollIntervalMinutes = Number(process.env.API_POLL_INTERVAL_MINUTES || '5');
+const cronExpression = `*/${pollIntervalMinutes} * * * *`;
+
+nodeCron.schedule(cronExpression, async () => {
+  try {
+    console.log(`⏱️  주기적 API 업데이트 시작 - ${pollIntervalMinutes}분 주기`);
+    await apiPoller.pollMissingPersonsAPI();
+  } catch (error) {
+    console.error('❌ 주기적 API 업데이트 실패:', error.message);
+  }
+}, {
+  timezone: 'Asia/Seoul'
+});
 
 // REST API 엔드포인트
 
