@@ -26,10 +26,9 @@ import type { Announcement } from './types/announcement';
 import 'react-toastify/dist/ReactToastify.css';
 import { isAnnouncementPopupClosedForCurrentSession } from './utils/announcementStorage';
 import { usePresenceTracking } from './hooks/usePresenceTracking';
-import { requestNotificationPermission, retrieveFcmToken, onForegroundMessage } from './services/firebaseMessaging';
-import { syncUserFcmToken, detachFcmToken, getLocalTokenState } from './services/userTokenService';
-
-const PUSH_PROMPT_STORAGE_KEY = 'mp_push_prompt_shown';
+import { onForegroundMessage } from './services/firebaseMessaging';
+import { detachFcmToken, getLocalTokenState } from './services/userTokenService';
+import { usePushNotifications, PUSH_PROMPT_STORAGE_KEY } from './hooks/usePushNotifications';
 
 function App() {
   const [showSidebar, setShowSidebar] = useState(true);
@@ -55,29 +54,19 @@ function App() {
 
   usePresenceTracking(currentUser);
 
-  const enablePushNotifications = useCallback(async () => {
+  const { status: pushStatus, enablePush, syncExistingToken } = usePushNotifications(currentUser);
+
+  const handleEnablePush = useCallback(async () => {
     try {
-      if (!currentUser) {
-        toast.info('로그인 후 푸시 알림을 설정할 수 있습니다');
-        return;
+      const result = await enablePush();
+      if (result.status === 'enabled') {
+        if (result.token) {
+          console.log('[FCM] 발급된 토큰:', result.token);
+        }
+        toast.success('푸시 알림이 활성화되었습니다', { autoClose: 4000 });
+      } else if (result.status === 'blocked') {
+        toast.warning('브라우저 알림이 차단되어 있습니다. 설정에서 허용한 뒤 다시 시도해주세요.');
       }
-
-      const permission = await requestNotificationPermission();
-
-      if (permission !== 'granted') {
-        toast.warning('알림 권한이 허용되지 않았습니다');
-        return;
-      }
-
-      const token = await retrieveFcmToken();
-      if (!token) {
-        toast.error('푸시 토큰을 가져오지 못했습니다');
-        return;
-      }
-
-      console.log('[FCM] 발급된 토큰:', token);
-      await syncUserFcmToken(currentUser.uid, token);
-      toast.success('푸시 알림이 활성화되었습니다', { autoClose: 4000 });
     } catch (error: any) {
       console.error('푸시 알림 설정 실패:', error);
       toast.error(error?.message || '푸시 알림 설정 중 오류가 발생했습니다');
@@ -90,7 +79,7 @@ function App() {
         pushPromptToastRef.current = null;
       }
     }
-  }, [currentUser]);
+  }, [enablePush]);
 
   const dismissPushPrompt = useCallback(() => {
     if (typeof window !== 'undefined') {
@@ -193,32 +182,26 @@ function App() {
       return;
     }
 
-    const permission = Notification.permission;
-    if (permission === 'granted') {
+    if (pushStatus === 'enabled') {
       window.localStorage.setItem(PUSH_PROMPT_STORAGE_KEY, 'true');
-      retrieveFcmToken()
-        .then(async (token) => {
-          if (!token) {
-            return;
-          }
-
-          console.log('[FCM] 기존 토큰:', token);
-          if (currentUser) {
-            try {
-              await syncUserFcmToken(currentUser.uid, token);
-            } catch (error) {
-              console.error('푸시 토큰 동기화 실패:', error);
-            }
+      syncExistingToken()
+        .then((result) => {
+          if (result.synced && result.token) {
+            console.log('[FCM] 기존 토큰:', result.token);
           }
         })
         .catch((error) => {
-          console.error('FCM 토큰 로드 실패:', error);
+          console.error('FCM 토큰 동기화 실패:', error);
         });
       return;
     }
 
-    if (permission === 'denied') {
+    if (pushStatus === 'blocked' || pushStatus === 'off') {
       window.localStorage.setItem(PUSH_PROMPT_STORAGE_KEY, 'true');
+      return;
+    }
+
+    if (pushStatus !== 'prompt') {
       return;
     }
 
@@ -249,7 +232,7 @@ function App() {
               나중에
             </button>
             <button
-              onClick={enablePushNotifications}
+              onClick={handleEnablePush}
               style={{
                 padding: '6px 14px',
                 fontSize: '12px',
@@ -281,7 +264,7 @@ function App() {
         pushPromptToastRef.current = null;
       }
     };
-  }, [currentUser, enablePushNotifications, dismissPushPrompt]);
+  }, [currentUser, pushStatus, syncExistingToken, dismissPushPrompt, handleEnablePush]);
 
   // Firestore에서 공지사항 불러오기
   useEffect(() => {
