@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Bell, BellOff, ChevronLeft, ChevronRight, LogIn, LogOut, UserCircle, Plus, FileText, Shield, User as UserIcon } from 'lucide-react';
+import { Bell, BellOff, ChevronLeft, ChevronRight, LogIn, LogOut, UserCircle, Plus, FileText, Shield, User as UserIcon, Menu } from 'lucide-react';
 import EmergencyMap from './components/EmergencyMap';
 import Sidebar from './components/Sidebar';
 import FilterPanel from './components/FilterPanel';
@@ -15,7 +15,6 @@ import NewMissingPersonBanner from './components/NewMissingPersonBanner';
 import AnnouncementPopup from './components/AnnouncementPopup';
 import NotificationBell from './components/NotificationBell';
 import { useEmergencyStore } from './stores/emergencyStore';
-import { useApiData } from './hooks/useApiData';
 import { ToastContainer, toast } from 'react-toastify';
 import { onAuthChange, logout as firebaseLogout } from './services/firebase';
 import { hasAdminAccess } from './utils/adminUtils';
@@ -48,8 +47,8 @@ function App() {
   const [popupAnnouncements, setPopupAnnouncements] = useState<Announcement[]>([]);
   const [showPopup, setShowPopup] = useState(false);
   const pushPromptToastRef = useRef<React.ReactText | null>(null);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
 
-  const { isConnected } = useApiData();
   const missingPersons = useEmergencyStore(state => state.missingPersons);
 
   usePresenceTracking(currentUser);
@@ -362,7 +361,7 @@ function App() {
       {/* 상단 헤더 */}
       <header className="bg-gradient-to-r from-red-600 to-red-700 text-white shadow-lg z-50">
         {/* 모바일: 두 줄로 분리 */}
-        <div className="md:hidden">
+        <div className="md:hidden relative">
           {/* 첫 번째 줄: 타이틀과 메뉴 토글 */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-red-500">
             <div className="flex items-center gap-2 flex-1">
@@ -377,65 +376,34 @@ function App() {
                 {missingPersons.length}명
               </span>
             </div>
+            <button
+              onClick={() => setShowMobileMenu(prev => !prev)}
+              className="ml-3 p-2 hover:bg-red-700 rounded-lg transition-colors"
+              aria-label="메뉴 열기"
+            >
+              <Menu size={20} />
+            </button>
           </div>
 
           {/* 두 번째 줄: 버튼들 */}
-          <div className="flex items-center justify-between px-4 py-2">
-            <div className="flex items-center gap-2">
-              {/* 알림 토글 */}
-              <button
-                onClick={() => setAlertsEnabled(!alertsEnabled)}
-                className="p-2 hover:bg-red-700 rounded-lg transition-colors"
-                title={alertsEnabled ? '알림 끄기' : '알림 켜기'}
-              >
-                {alertsEnabled ? <Bell size={18} /> : <BellOff size={18} />}
-              </button>
-              <NotificationBell />
-
-              {/* 연결 상태 */}
-              <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full ${isConnected ? 'bg-green-500' : 'bg-gray-500'}`}>
-                <div className={`w-1.5 h-1.5 rounded-full bg-white ${isConnected ? 'animate-pulse' : ''}`} />
-                <span className="text-xs font-medium">{isConnected ? '연결' : '끊김'}</span>
-              </div>
-            </div>
-
-            {/* 로그인/로그아웃 */}
+          <div className="flex items-center justify-end px-4 py-2">
             {currentUser ? (
-              <div className="flex items-center gap-1.5">
-                {isAdmin && (
-                  <button
-                    onClick={() => setShowAdminDashboard(true)}
-                    className="p-2 hover:bg-red-700 rounded-lg transition-colors bg-yellow-500 hover:bg-yellow-600"
-                    title="관리자"
-                  >
-                    <Shield size={18} />
-                  </button>
-                )}
-                <button
-                  onClick={() => setShowMyReportsModal(true)}
-                  className="p-2 hover:bg-red-700 rounded-lg transition-colors"
-                  title="내 제보"
-                >
-                  <FileText size={18} />
-                </button>
-                <button
-                  onClick={() => setShowUserProfile(true)}
-                  className="p-2 hover:bg-red-700 rounded-lg transition-colors"
-                  title="프로필"
-                >
-                  <UserIcon size={18} />
-                </button>
-                <button
-                  onClick={handleLogout}
-                  className="p-2 hover:bg-red-700 rounded-lg transition-colors"
-                  title="로그아웃"
-                >
-                  <LogOut size={18} />
-                </button>
-              </div>
+              <button
+                onClick={async () => {
+                  setShowMobileMenu(false);
+                  await handleLogout();
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-800 hover:bg-red-900 rounded-lg transition-colors"
+              >
+                <LogOut size={16} />
+                <span className="text-sm">로그아웃</span>
+              </button>
             ) : (
               <button
-                onClick={() => setShowLoginModal(true)}
+                onClick={() => {
+                  setShowMobileMenu(false);
+                  setShowLoginModal(true);
+                }}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-red-800 hover:bg-red-900 rounded-lg transition-colors"
               >
                 <LogIn size={16} />
@@ -443,6 +411,98 @@ function App() {
               </button>
             )}
           </div>
+
+          {showMobileMenu && (
+            <>
+              <div
+                className="fixed inset-0 bg-black/40 z-40"
+                onClick={() => setShowMobileMenu(false)}
+              />
+              <div className="absolute right-4 top-full mt-2 z-50 w-72 bg-white text-gray-800 rounded-xl shadow-2xl overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-200">
+                  <p className="text-sm font-semibold text-gray-700">빠른 메뉴</p>
+                  <p className="text-xs text-gray-500 mt-1">자주 사용되는 기능을 모았습니다.</p>
+                </div>
+                <div className="py-2">
+                  <button
+                    onClick={() => {
+                      setAlertsEnabled(!alertsEnabled);
+                      setShowMobileMenu(false);
+                    }}
+                    className="w-full flex items-center justify-between px-4 py-2 hover:bg-gray-100 transition-colors"
+                  >
+                    <span className="flex items-center gap-3 text-sm">
+                      {alertsEnabled ? <Bell size={18} className="text-red-500" /> : <BellOff size={18} className="text-gray-500" />}
+                      <span>{alertsEnabled ? '실시간 알림 끄기' : '실시간 알림 켜기'}</span>
+                    </span>
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${alertsEnabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                      {alertsEnabled ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
+
+                  <div className="px-4 py-2 border-t border-gray-200">
+                    <span className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                      <NotificationBell />
+                      알림 센터
+                    </span>
+                  </div>
+
+                  <div className="mt-2 border-t border-gray-200">
+                    {currentUser ? (
+                      <div className="flex flex-col">
+                        <button
+                          onClick={() => {
+                            setShowMyReportsModal(true);
+                            setShowMobileMenu(false);
+                          }}
+                          className="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
+                        >
+                          <FileText size={18} />
+                          내 제보 보기
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowUserProfile(true);
+                            setShowMobileMenu(false);
+                          }}
+                          className="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
+                        >
+                          <UserIcon size={18} />
+                          프로필 관리
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowMobileMenu(false);
+                            handleReportClick();
+                          }}
+                          className="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
+                        >
+                          <Plus size={18} />
+                          실종 제보하기
+                        </button>
+                        {isAdmin && (
+                          <button
+                            onClick={() => {
+                              setShowAdminDashboard(true);
+                              setShowMobileMenu(false);
+                            }}
+                            className="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
+                          >
+                            <Shield size={18} />
+                            관리자 대시보드
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="px-4 py-2 text-xs text-gray-500">
+                        로그인 후 제보, 알림 설정 등 모든 기능을 이용할 수 있습니다.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* 데스크톱: 한 줄 */}
@@ -470,12 +530,6 @@ function App() {
               {alertsEnabled ? <Bell size={20} /> : <BellOff size={20} />}
             </button>
             <NotificationBell />
-
-            {/* 연결 상태 */}
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${isConnected ? 'bg-green-500' : 'bg-gray-500'}`}>
-              <div className={`w-2 h-2 rounded-full bg-white ${isConnected ? 'animate-pulse' : ''}`} />
-              <span className="text-sm font-medium">{isConnected ? '연결됨' : '연결 끊김'}</span>
-            </div>
 
             {/* 로그인/로그아웃 */}
             {currentUser ? (
