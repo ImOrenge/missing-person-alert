@@ -339,6 +339,7 @@ const LocationSearchModal: React.FC<LocationSearchModalProps> = ({ isOpen, onClo
 
 export default function ReportModal({ isOpen, onClose }: Props) {
   const addMissingPerson = useEmergencyStore((state) => state.addMissingPerson);
+  const enqueueNewPersonAlert = useEmergencyStore((state) => state.enqueueNewPersonAlert);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRecaptchaReady, setIsRecaptchaReady] = useState(false);
 
@@ -493,8 +494,9 @@ export default function ReportModal({ isOpen, onClose }: Props) {
         throw new Error(data.error || '제보 등록에 실패했습니다');
       }
 
-      // 로컬 스토어에도 추가
+      // 로컬 스토어에도 추가 및 실시간 알림 큐에 등록
       addMissingPerson(data.report);
+      enqueueNewPersonAlert([data.report]);
 
       // 성공 알림
       toast.success('실종자 제보가 성공적으로 등록되었습니다');
