@@ -22,10 +22,10 @@
 - [x] 토큰 저장 실패, 권한 거부 UI 처리
 
 ### 2. 사용자 토큰 저장 로직
-- [ ] Firestore 구조 설계 (`userTokens/{uid}.tokens[token]=true`)
-- [ ] 로그인/회원가입/재로그인 시 토큰 갱신
-- [ ] 로그아웃/계정 삭제 시 토큰 제거
-- [ ] 중복 토큰 및 만료 토큰 정리 로직 마련
+- [x] Firestore 구조 설계 (`userTokens/{uid}.tokens[token]=true`)
+- [x] 로그인/회원가입/재로그인 시 토큰 갱신
+- [x] 로그아웃/계정 삭제 시 토큰 제거
+- [x] 중복 토큰 및 만료 토큰 정리 로직 마련
 
 ### 3. 백엔드 발송 파이프라인
 - [ ] Firebase Admin SDK 설정

@@ -27,6 +27,7 @@ import 'react-toastify/dist/ReactToastify.css';
 import { isAnnouncementPopupClosedForCurrentSession } from './utils/announcementStorage';
 import { usePresenceTracking } from './hooks/usePresenceTracking';
 import { requestNotificationPermission, retrieveFcmToken, onForegroundMessage } from './services/firebaseMessaging';
+import { syncUserFcmToken, detachFcmToken, getLocalTokenState } from './services/userTokenService';
 
 const PUSH_PROMPT_STORAGE_KEY = 'mp_push_prompt_shown';
 
@@ -56,6 +57,11 @@ function App() {
 
   const enablePushNotifications = useCallback(async () => {
     try {
+      if (!currentUser) {
+        toast.info('로그인 후 푸시 알림을 설정할 수 있습니다');
+        return;
+      }
+
       const permission = await requestNotificationPermission();
 
       if (permission !== 'granted') {
@@ -64,12 +70,14 @@ function App() {
       }
 
       const token = await retrieveFcmToken();
-      if (token) {
-        console.log('[FCM] 발급된 토큰:', token);
-        toast.success('푸시 알림이 활성화되었습니다', { autoClose: 4000 });
-      } else {
+      if (!token) {
         toast.error('푸시 토큰을 가져오지 못했습니다');
+        return;
       }
+
+      console.log('[FCM] 발급된 토큰:', token);
+      await syncUserFcmToken(currentUser.uid, token);
+      toast.success('푸시 알림이 활성화되었습니다', { autoClose: 4000 });
     } catch (error: any) {
       console.error('푸시 알림 설정 실패:', error);
       toast.error(error?.message || '푸시 알림 설정 중 오류가 발생했습니다');
@@ -82,7 +90,7 @@ function App() {
         pushPromptToastRef.current = null;
       }
     }
-  }, []);
+  }, [currentUser]);
 
   const dismissPushPrompt = useCallback(() => {
     if (typeof window !== 'undefined') {
@@ -188,11 +196,24 @@ function App() {
     const permission = Notification.permission;
     if (permission === 'granted') {
       window.localStorage.setItem(PUSH_PROMPT_STORAGE_KEY, 'true');
-      retrieveFcmToken().then((token) => {
-        if (token) {
+      retrieveFcmToken()
+        .then(async (token) => {
+          if (!token) {
+            return;
+          }
+
           console.log('[FCM] 기존 토큰:', token);
-        }
-      });
+          if (currentUser) {
+            try {
+              await syncUserFcmToken(currentUser.uid, token);
+            } catch (error) {
+              console.error('푸시 토큰 동기화 실패:', error);
+            }
+          }
+        })
+        .catch((error) => {
+          console.error('FCM 토큰 로드 실패:', error);
+        });
       return;
     }
 
@@ -304,6 +325,18 @@ function App() {
   }, [bannerAnnouncements.length]);
 
   const handleLogout = async () => {
+    if (currentUser) {
+      const localTokenState = getLocalTokenState();
+      const tokenToDetach = localTokenState?.token ?? null;
+      if (tokenToDetach) {
+        try {
+          await detachFcmToken(currentUser.uid, tokenToDetach);
+        } catch (error) {
+          console.warn('푸시 토큰 해제 실패 (무시 가능):', error);
+        }
+      }
+    }
+
     const result = await firebaseLogout();
     if (result.success) {
       setCurrentUser(null);

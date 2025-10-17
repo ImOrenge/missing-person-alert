@@ -130,6 +130,61 @@ service cloud.firestore {
         data.createdAt is timestamp;
     }
 
+    function validateActiveSession(data, sessionId) {
+      return data.keys().hasOnly([
+        'sessionId',
+        'lastActive',
+        'createdAt',
+        'updatedAt',
+        'isActive',
+        'userId',
+        'userEmail',
+        'displayName',
+        'userAgent',
+        'platform'
+      ]) &&
+        data.sessionId is string && data.sessionId == sessionId &&
+        data.lastActive is int && data.lastActive > 0 &&
+        (!('createdAt' in data) || (data.createdAt is int && data.createdAt > 0)) &&
+        (!('updatedAt' in data) || (data.updatedAt is int && data.updatedAt > 0)) &&
+        (!('isActive' in data) || data.isActive is bool) &&
+        (!('userId' in data) || data.userId == null || data.userId is string) &&
+        (!('userEmail' in data) || data.userEmail == null || data.userEmail is string) &&
+        (!('displayName' in data) || data.displayName == null || data.displayName is string) &&
+        (!('userAgent' in data) || data.userAgent == null || (data.userAgent is string && data.userAgent.size() <= 500)) &&
+        (!('platform' in data) || data.platform == null || (data.platform is string && data.platform.size() <= 100));
+    }
+
+    function validateUserTokenEntry(entry) {
+      return entry.keys().hasOnly([
+        'token',
+        'createdAt',
+        'lastSeenAt',
+        'userAgent',
+        'platform'
+      ]) &&
+        entry.token is string && entry.token.size() > 0 &&
+        entry.createdAt is timestamp &&
+        entry.lastSeenAt is timestamp &&
+        (!('userAgent' in entry) || entry.userAgent == null || (entry.userAgent is string && entry.userAgent.size() <= 500)) &&
+        (!('platform' in entry) || entry.platform == null || (entry.platform is string && entry.platform.size() <= 50));
+    }
+
+    function validateUserTokenDoc(data, userId) {
+      return data.keys().hasOnly([
+        'userId',
+        'tokens',
+        'updatedAt',
+        'lastPrunedAt'
+      ]) &&
+        data.userId is string && data.userId == userId &&
+        data.updatedAt is timestamp &&
+        (!('lastPrunedAt' in data) || data.lastPrunedAt is timestamp) &&
+        data.tokens is map &&
+        data.tokens.size() <= 20 &&
+        data.tokens.values().all(entry => entry is map && validateUserTokenEntry(entry));
+    }
+
     // 공지사항 컬렉션
     match /announcements/{announcementId} {
       // 모든 사용자가 읽기 가능
@@ -137,6 +192,18 @@ service cloud.firestore {
 
       // 관리자만 생성, 수정, 삭제 가능
       allow create, update, delete: if isAdmin();
+    }
+
+    // 사용자별 푸시 토큰
+    match /userTokens/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null &&
+        request.auth.uid == userId &&
+        validateUserTokenDoc(request.resource.data, userId);
+      allow update: if request.auth != null &&
+        request.auth.uid == userId &&
+        validateUserTokenDoc(request.resource.data, userId);
+      allow delete: if request.auth != null && request.auth.uid == userId;
     }
 
     // 사용자 정보 컬렉션
@@ -182,6 +249,12 @@ service cloud.firestore {
         validateNotification(request.resource.data) &&
         request.resource.data.userId == request.auth.uid;
       allow update, delete: if request.auth != null && request.auth.uid == resource.data.userId;
+    }
+
+    // 실시간 접속 세션 정보
+    match /activeSessions/{sessionId} {
+      allow read, delete: if isAdmin();
+      allow create, update: if validateActiveSession(request.resource.data, sessionId);
     }
 
     // 나머지 모든 문서는 기본적으로 차단

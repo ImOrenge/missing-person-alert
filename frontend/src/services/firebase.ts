@@ -135,6 +135,17 @@ export const deleteCurrentAccount = async (): Promise<{ success: boolean; requir
   const uid = currentUser.uid;
 
   try {
+    try {
+      const { getLocalTokenState, detachFcmToken } = await import('./userTokenService');
+      const tokenState = getLocalTokenState();
+      const token = tokenState?.token;
+      if (token) {
+        await detachFcmToken(uid, token);
+      }
+    } catch (detachError) {
+      console.warn('계정 삭제 전 푸시 토큰 정리 실패 (무시 가능):', detachError);
+    }
+
     await deleteUser(currentUser);
 
     try {
