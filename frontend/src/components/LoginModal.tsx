@@ -18,33 +18,52 @@ interface Props {
 }
 
 const PRIVACY_POLICY = `
+[최종 업데이트: 2025-10-16]
+실종자 실시간 알림 시스템(“서비스”)은 이용자의 개인정보를 안전하게 보호하기 위해 다음과 같이 처리합니다.
+
 1. 수집하는 개인정보 항목
-- 필수: 이름, 이메일, 비밀번호, 닉네임
-- 선택: 전화번호, 주소
-- 서비스 이용 과정에서 자동으로 생성되는 정보(접속 로그, IP 등)
+ - 회원 가입·로그인: 이메일, 비밀번호, 닉네임/이름 (필수), 전화번호·프로필 이미지(선택)
+ - 전화번호 인증: 휴대전화 번호, 인증 코드
+ - 실종자 제보: 제보자 이름, 연락처, 제보 내용과 위치, 첨부 자료
+ - 서비스 이용 기록: 기기/브라우저 정보, 접속 로그, IP, 쿠키, 세션 ID
+ - 실시간 접속 통계: 익명 세션 ID, 마지막 접속 시각, 사용자 에이전트 정보
 
-2. 개인정보의 수집·이용 목적
-- 실종자 제보 등록 및 관리, 이용자 식별 및 본인 확인
-- 비상 메시지 및 서비스 공지 발송
-- 이용자 문의 대응 및 커뮤니티 질서 유지
-- 서비스 품질 향상 및 보안 강화를 위한 분석
+2. 개인정보 이용 목적
+ - 회원 식별, 본인 확인, 계정 관리
+ - 실종자 제보 등록·관리 및 실시간 알림 제공
+ - 서비스 품질 향상, 보안 모니터링, 통계 작성
+ - 관련 법령 준수 및 민원 처리
 
-3. 개인정보의 보유 및 이용 기간
-- 회원 탈퇴 시 즉시 삭제
-- 관련 법령에 따라 보존이 필요한 경우 해당 기간 동안 안전하게 보관
+3. 보유 및 이용 기간
+ - 회원 탈퇴 시 즉시 파기(탈퇴 후 30일간 최소 정보 임시 보관 가능)
+ - 제보 기록: 처리 완료 후 3년 (법령상 필요한 경우 그 기간 동안 보관)
+ - 접속 로그 등 자동 수집 정보: 최대 6개월
+ - 기타 법령에 따라 별도 보관이 필요한 경우 해당 기간 준수
 
-4. 개인정보의 제3자 제공
-- 원칙적으로 제공하지 않으며, 법령에 근거가 있거나 이용자의 별도 동의를 받은 경우에 한해 제공
+4. 제3자 제공 및 위탁
+ - 이용자 동의 또는 법령 근거가 있는 경우를 제외하고 제3자에게 제공하지 않습니다.
+ - 서비스 운영을 위해 Google Firebase 등에게 인증·데이터 저장·알림 발송을 위탁하며, 위탁업체는 개인정보보호법을 준수하도록 관리·감독합니다.
 
-5. 개인정보 처리의 위탁
-- 서비스 운영에 필요한 범위에서 위탁할 수 있으며, 위탁 사실은 별도로 고지
+5. 개인정보 파기 절차 및 방법
+ - 목적 달성·보유 기간 만료 시 지체 없이 삭제
+ - 전자 파일은 복구 불가능한 방법으로 영구 삭제하고, 문서는 분쇄 또는 소각 처리
 
 6. 이용자의 권리
-- 언제든지 개인정보 조회·수정·삭제를 요청할 수 있습니다.
-- 개인정보 처리에 대한 동의를 거부할 수 있으며, 이 경우 회원가입 및 일부 기능 이용이 제한될 수 있습니다.
+ - 언제든지 개인정보 열람·정정·삭제·처리정지·동의 철회를 요청할 수 있습니다.
+ - 요청은 고객센터(이메일/전화)로 가능하며, 법령상 제한이 없는 범위에서 지체 없이 조치합니다.
 
-7. 문의처
-- 개인정보 보호 책임자: missingperson.help@gmail.com
+7. 자동 수집 장치 관련 안내
+ - 서비스 이용 편의를 위해 쿠키 등을 사용할 수 있으며, 브라우저 설정에서 저장을 거부할 수 있습니다.
+
+8. 개인정보 보호책임자
+ - 성명: 장민기 
+ - 이메일: jmgi1024@gmail.com
+ - 연락처: 010-6350-0913(평일 10:00~18:00)
+ - 주소: 인천광역시 계양구 효서로 381
+
+9. 기타
+ - 개인정보 침해 신고: 개인정보침해신고센터(118), 대검찰청 사이버수사과(1301), 경찰청 사이버범죄 신고시스템(182)
+ - 본 방침은 서비스 및 법령 변경 시 7일 전 공지 후 개정되며, 중대한 변경은 30일 전 사전 안내합니다.
 `;
 
 export default function LoginModal({ isOpen, onClose }: Props) {
@@ -65,6 +84,10 @@ export default function LoginModal({ isOpen, onClose }: Props) {
     nickname: string;
     address: string;
     phoneNumber: string;
+    agreements: {
+      privacy: boolean;
+      pushNotification: boolean;
+    };
   } | null>(null);
 
   // MFA 상태
@@ -73,6 +96,7 @@ export default function LoginModal({ isOpen, onClose }: Props) {
   const [mfaVerificationId, setMfaVerificationId] = useState('');
   const [mfaCode, setMfaCode] = useState('');
   const [agreePrivacy, setAgreePrivacy] = useState(false);
+  const [agreePushUsage, setAgreePushUsage] = useState(false);
   const [showPrivacyPolicy, setShowPrivacyPolicy] = useState(false);
 
   // 모달 닫힐 때 정리
@@ -85,6 +109,7 @@ export default function LoginModal({ isOpen, onClose }: Props) {
       setMfaCode('');
       setIsSignUp(false);
       setAgreePrivacy(false);
+      setAgreePushUsage(false);
       setShowPrivacyPolicy(false);
     }
   }, [isOpen]);
@@ -123,7 +148,18 @@ export default function LoginModal({ isOpen, onClose }: Props) {
         }
 
         // 전화번호 인증 먼저 진행
-        setPendingRegistration({ email, password, name, nickname, address, phoneNumber });
+        setPendingRegistration({
+          email,
+          password,
+          name,
+          nickname,
+          address,
+          phoneNumber,
+          agreements: {
+            privacy: true,
+            pushNotification: agreePushUsage
+          }
+        });
         setShowPhoneAuth(true);
         setLoading(false);
       } else {
@@ -207,6 +243,16 @@ export default function LoginModal({ isOpen, onClose }: Props) {
           address: pendingRegistration.address || '',
           phoneNumber: pendingRegistration.phoneNumber || '',
           email: pendingRegistration.email,
+          agreements: {
+            privacy: {
+              agreed: pendingRegistration.agreements.privacy,
+              agreedAt: Timestamp.now()
+            },
+            pushNotification: {
+              agreed: pendingRegistration.agreements.pushNotification,
+              agreedAt: pendingRegistration.agreements.pushNotification ? Timestamp.now() : null
+            }
+          },
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now()
         });
@@ -222,6 +268,7 @@ export default function LoginModal({ isOpen, onClose }: Props) {
         setAddress('');
         setPhoneNumber('');
         setAgreePrivacy(false);
+        setAgreePushUsage(false);
         onClose();
       } else {
         toast.error(result.error || '회원가입에 실패했습니다');
@@ -541,25 +588,47 @@ export default function LoginModal({ isOpen, onClose }: Props) {
           )}
 
           {isSignUp && (
-            <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
-              <label className="flex items-start gap-3 text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  className="mt-1 h-4 w-4 text-red-600 border-gray-300 rounded"
-                  checked={agreePrivacy}
-                  onChange={(e) => setAgreePrivacy(e.target.checked)}
-                />
-                <span>
-                  <span className="font-semibold text-gray-800">개인정보 처리방침</span>을 확인했고, 수집 및 이용에 동의합니다.
-                </span>
-              </label>
-              <button
-                type="button"
-                className="mt-2 text-xs text-red-600 hover:text-red-700 font-medium underline"
-                onClick={() => setShowPrivacyPolicy(true)}
-              >
-                개인정보 처리방침 전문 보기
-              </button>
+            <div className="space-y-3 bg-gray-50 border border-gray-200 rounded-lg px-4 py-4">
+              <div>
+                <label className="flex items-start gap-3 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 text-red-600 border-gray-300 rounded"
+                    checked={agreePrivacy}
+                    onChange={(e) => setAgreePrivacy(e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-semibold text-gray-800">개인정보 처리방침</span>을 확인했고, 수집 및 이용에 동의합니다.
+                    <span className="block text-xs text-gray-500 mt-1">
+                      필수 동의 · 서비스 이용을 위한 기본 정보 수집
+                    </span>
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  className="mt-2 text-xs text-red-600 hover:text-red-700 font-medium underline"
+                  onClick={() => setShowPrivacyPolicy(true)}
+                >
+                  개인정보 처리방침 전문 보기
+                </button>
+              </div>
+
+              <div className="border-t border-gray-200 pt-3">
+                <label className="flex items-start gap-3 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 text-red-600 border-gray-300 rounded"
+                    checked={agreePushUsage}
+                    onChange={(e) => setAgreePushUsage(e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-semibold text-gray-800">실종자 속보 웹푸시 수신 및 토큰 활용에 동의합니다.</span>
+                    <span className="block text-xs text-gray-500 mt-1">
+                      선택 동의 · 동의 시 실시간 속보 알림을 받으며, 기기 식별용 FCM 토큰이 저장됩니다.
+                    </span>
+                  </span>
+                </label>
+              </div>
             </div>
           )}
 
@@ -578,6 +647,7 @@ export default function LoginModal({ isOpen, onClose }: Props) {
             onClick={() => {
               setIsSignUp(!isSignUp);
               setAgreePrivacy(false);
+              setAgreePushUsage(false);
               setShowPrivacyPolicy(false);
             }}
             className="text-sm text-red-600 hover:text-red-700 font-medium"
