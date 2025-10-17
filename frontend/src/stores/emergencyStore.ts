@@ -3,6 +3,12 @@ import { MissingPerson, EmergencyMessage, FilterState, TimeRange } from '../type
 
 type SortOrder = 'asc' | 'desc';
 
+export interface NewPersonAlert {
+  id: string;
+  persons: MissingPerson[];
+  receivedAt: number;
+}
+
 interface EmergencyStore {
   // 상태
   missingPersons: MissingPerson[];
@@ -12,6 +18,7 @@ interface EmergencyStore {
   selectedPersonId: string | null;
   hoveredPersonId: string | null;
   sortOrder: SortOrder;
+  newPersonAlerts: NewPersonAlert[];
 
   // 액션
   addMissingPerson: (person: MissingPerson) => void;
@@ -27,6 +34,9 @@ interface EmergencyStore {
   getFilteredPersons: () => MissingPerson[];
   clearAllData: () => void;
   removeDuplicates: () => void;
+  enqueueNewPersonAlert: (persons: MissingPerson[]) => void;
+  shiftNewPersonAlert: () => NewPersonAlert | null;
+  clearNewPersonAlerts: () => void;
 }
 
 // 시간 범위를 밀리초로 변환
@@ -66,9 +76,10 @@ export const useEmergencyStore = create<EmergencyStore>((set, get) => ({
   selectedPersonId: null,
   hoveredPersonId: null,
   sortOrder: 'desc', // 기본값: 최신순 (내림차순)
+  newPersonAlerts: [],
 
   // 실종자 1명 추가
-  addMissingPerson: (person) => {
+  addMissingPerson: (person: MissingPerson) => {
     set((state) => {
       // 중복 체크
       const exists = state.missingPersons.some(p => p.id === person.id);
@@ -84,7 +95,7 @@ export const useEmergencyStore = create<EmergencyStore>((set, get) => ({
   },
 
   // 실종자 여러 명 추가 (배치)
-  addMissingPersons: (persons) => {
+  addMissingPersons: (persons: MissingPerson[]) => {
     set((state) => {
       const existingIds = new Set(state.missingPersons.map(p => p.id));
       const existingFingerprints = new Set(
@@ -121,14 +132,14 @@ export const useEmergencyStore = create<EmergencyStore>((set, get) => ({
     });
   },
 
-  setMissingPersons: (persons) => {
+  setMissingPersons: (persons: MissingPerson[]) => {
     set(() => ({
       missingPersons: persons
     }));
   },
 
   // 긴급재난문자 추가
-  addEmergencyMessage: (message) => {
+  addEmergencyMessage: (message: EmergencyMessage) => {
     set((state) => {
       // 중복 체크
       const exists = state.emergencyMessages.some(m => m.id === message.id);
@@ -143,29 +154,29 @@ export const useEmergencyStore = create<EmergencyStore>((set, get) => ({
   },
 
   // 필터 업데이트
-  updateFilters: (newFilters) => {
+  updateFilters: (newFilters: Partial<FilterState>) => {
     set((state) => ({
       filters: { ...state.filters, ...newFilters }
     }));
   },
 
   // 연결 상태 업데이트
-  setConnectionStatus: (status) => {
+  setConnectionStatus: (status: boolean) => {
     set({ isConnected: status });
   },
 
   // 선택된 실종자 ID 설정
-  setSelectedPersonId: (id) => {
+  setSelectedPersonId: (id: string | null) => {
     set({ selectedPersonId: id });
   },
 
   // 호버된 실종자 ID 설정
-  setHoveredPersonId: (id) => {
+  setHoveredPersonId: (id: string | null) => {
     set({ hoveredPersonId: id });
   },
 
   // 정렬 순서 설정
-  setSortOrder: (order) => {
+  setSortOrder: (order: SortOrder) => {
     set({ sortOrder: order });
   },
 
@@ -190,6 +201,7 @@ export const useEmergencyStore = create<EmergencyStore>((set, get) => ({
       }
 
       // 유형 필터
+
       if (!filters.types.includes(person.type)) {
         return false;
       }
@@ -198,7 +210,7 @@ export const useEmergencyStore = create<EmergencyStore>((set, get) => ({
       if (filters.timeRange !== 'all') {
         const cutoffTime = Date.now() - parseTimeRange(filters.timeRange);
         const missingTime = new Date(person.missingDate).getTime();
-        if (missingTime < cutoffTime) {
+        if (Number.isFinite(missingTime) && missingTime < cutoffTime) {
           return false;
         }
       }
@@ -210,7 +222,10 @@ export const useEmergencyStore = create<EmergencyStore>((set, get) => ({
     return filtered.sort((a, b) => {
       const dateA = new Date(a.missingDate).getTime();
       const dateB = new Date(b.missingDate).getTime();
-      return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+      const normalizedA = Number.isFinite(dateA) ? dateA : 0;
+      const normalizedB = Number.isFinite(dateB) ? dateB : 0;
+
+      return sortOrder === 'asc' ? normalizedA - normalizedB : normalizedB - normalizedA;
     });
   },
 
@@ -246,5 +261,36 @@ export const useEmergencyStore = create<EmergencyStore>((set, get) => ({
         missingPersons: uniquePersons
       };
     });
+  },
+
+  enqueueNewPersonAlert: (persons: MissingPerson[]) => {
+    if (!Array.isArray(persons) || persons.length === 0) {
+      return;
+    }
+
+    const alert: NewPersonAlert = {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      persons,
+      receivedAt: Date.now()
+    };
+
+    set((state) => ({
+      newPersonAlerts: [...state.newPersonAlerts, alert]
+    }));
+  },
+
+  shiftNewPersonAlert: () => {
+    const { newPersonAlerts } = get();
+    if (newPersonAlerts.length === 0) {
+      return null;
+    }
+
+    const [next, ...rest] = newPersonAlerts;
+    set({ newPersonAlerts: rest });
+    return next;
+  },
+
+  clearNewPersonAlerts: () => {
+    set({ newPersonAlerts: [] });
   }
 }));
