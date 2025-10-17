@@ -1,3 +1,4 @@
+/// <reference lib="webworker" />
 /* eslint-disable no-restricted-globals */
 
 import { clientsClaim } from 'workbox-core';
@@ -9,7 +10,7 @@ import { initializeApp } from 'firebase/app';
 import { getMessaging, onBackgroundMessage } from 'firebase/messaging/sw';
 import { firebaseConfig } from './services/firebaseConfig';
 
-declare const self: ServiceWorkerGlobalScope & { __WB_MANIFEST: any };
+declare const self: (ServiceWorkerGlobalScope & typeof globalThis) & { __WB_MANIFEST: any };
 
 clientsClaim();
 
