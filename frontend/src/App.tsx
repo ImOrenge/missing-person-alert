@@ -28,6 +28,7 @@ import { usePresenceTracking } from './hooks/usePresenceTracking';
 import { onForegroundMessage } from './services/firebaseMessaging';
 import { detachFcmToken, getLocalTokenState } from './services/userTokenService';
 import { usePushNotifications, PUSH_PROMPT_STORAGE_KEY } from './hooks/usePushNotifications';
+import { useApiData } from './hooks/useApiData';
 
 function App() {
   const [showSidebar, setShowSidebar] = useState(true);
@@ -48,6 +49,8 @@ function App() {
   const [showPopup, setShowPopup] = useState(false);
   const pushPromptToastRef = useRef<React.ReactText | null>(null);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+
+  useApiData();
 
   const missingPersons = useEmergencyStore(state => state.missingPersons);
 
