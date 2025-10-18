@@ -1,9 +1,7 @@
 const { getAuth } = require('firebase-admin/auth');
 const admin = require('firebase-admin');
-const { RecaptchaEnterpriseServiceClient } = require('@google-cloud/recaptcha-enterprise');
 const path = require('path');
-
-const recaptchaClient = new RecaptchaEnterpriseServiceClient();
+const recaptchaService = require('../services/recaptchaService');
 
 // Firebase Admin 초기화 (한번만 실행)
 if (!admin.apps.length) {
@@ -334,48 +332,36 @@ const verifyRecaptcha = async (req, res, next) => {
     }
 
     const projectId = process.env.RECAPTCHA_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || 'missing-person-alram';
-    const siteKey = process.env.RECAPTCHA_SITE_KEY;
-
-    if (!siteKey) {
-      console.error('❌ RECAPTCHA_SITE_KEY가 설정되지 않았습니다');
-      return res.status(500).json({
-        success: false,
-        error: '서버 설정 오류가 발생했습니다'
-      });
-    }
+    const siteKey = process.env.RECAPTCHA_SITE_KEY || process.env.RECAPTCHA_WEB_SITE_KEY;
 
     const expectedAction = req.recaptchaAction || 'report_submit';
 
-    const request = {
-      parent: recaptchaClient.projectPath(projectId),
-      assessment: {
-        event: {
-          token: recaptchaToken,
-          siteKey,
-          expectedAction
-        }
-      }
-    };
+    const assessment = await recaptchaService.assessToken({
+      token: recaptchaToken,
+      action: expectedAction,
+      siteKey,
+      projectId,
+      userIp: req.headers['x-forwarded-for'] || req.ip,
+      userAgent: req.get('user-agent')
+    });
 
-    const [response] = await recaptchaClient.createAssessment(request);
-
-    if (!response.tokenProperties?.valid) {
-      console.error('❌ reCAPTCHA 토큰 무효:', response.tokenProperties?.invalidReason);
+    if (!assessment.valid) {
+      console.error('❌ reCAPTCHA 토큰 무효:', assessment.invalidReason);
       return res.status(400).json({
         success: false,
         error: 'reCAPTCHA 검증에 실패했습니다',
         code: 'RECAPTCHA_VERIFICATION_FAILED',
-        details: response.tokenProperties?.invalidReason
+        details: assessment.invalidReason
       });
     }
 
-    const action = response.tokenProperties?.action || 'unknown';
+    const action = assessment.action || 'unknown';
     if (action !== expectedAction) {
       console.warn(`⚠️ reCAPTCHA 액션 불일치: ${action} (예상: ${expectedAction})`);
     }
 
-    const score = typeof response.riskAnalysis?.score === 'number' ? response.riskAnalysis.score : 0;
-    const reasons = response.riskAnalysis?.reasons || [];
+    const score = typeof assessment.score === 'number' ? assessment.score : 0;
+    const reasons = assessment.reasons || [];
     const MIN_SCORE = parseFloat(process.env.RECAPTCHA_MIN_SCORE) || 0.5;
 
     if (score < MIN_SCORE) {
@@ -395,7 +381,8 @@ const verifyRecaptcha = async (req, res, next) => {
       success: true,
       score,
       action,
-      reasons
+      reasons,
+      assessmentName: assessment.name
     };
 
     next();

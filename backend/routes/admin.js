@@ -2,10 +2,87 @@ const express = require('express');
 const router = express.Router();
 const { verifyFirebaseToken, verifyAdmin } = require('../middleware/authMiddleware');
 const admin = require('firebase-admin');
+const recaptchaService = require('../services/recaptchaService');
 
 // 모든 관리자 라우트에 인증 및 관리자 권한 체크
 router.use(verifyFirebaseToken);
 router.use(verifyAdmin);
+
+// reCAPTCHA 점수 검수 요청
+router.post('/recaptcha/review', async (req, res) => {
+  try {
+    const {
+      token,
+      action = 'report_submit',
+      siteKey,
+      projectId,
+      submitForReview = false,
+      annotation,
+      reasons,
+      hashedAccountId,
+      minScore
+    } = req.body || {};
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        error: 'reCAPTCHA 토큰이 필요합니다',
+        code: 'RECAPTCHA_TOKEN_MISSING'
+      });
+    }
+
+    const assessment = await recaptchaService.assessToken({
+      token,
+      action,
+      siteKey,
+      projectId,
+      userIp: req.headers['x-forwarded-for'] || req.ip,
+      userAgent: req.get('user-agent')
+    });
+
+    const { raw, ...assessmentDetails } = assessment;
+
+    if (!assessment.valid) {
+      return res.status(400).json({
+        success: false,
+        error: '유효하지 않은 reCAPTCHA 토큰입니다',
+        code: 'RECAPTCHA_TOKEN_INVALID',
+        assessment: assessmentDetails
+      });
+    }
+
+    const threshold = typeof minScore === 'number' ? minScore : parseFloat(minScore);
+    const score = typeof assessmentDetails.score === 'number' ? assessmentDetails.score : null;
+    const flagged = Number.isFinite(threshold) && Number.isFinite(score) ? score < threshold : undefined;
+
+    let reviewResult = null;
+    if (submitForReview && assessmentDetails.name) {
+      reviewResult = await recaptchaService.requestScoreReview({
+        assessmentName: assessmentDetails.name,
+        annotation,
+        reasons,
+        hashedAccountId
+      });
+    }
+
+    res.json({
+      success: true,
+      assessment: assessmentDetails,
+      flagged,
+      review: reviewResult,
+      metadata: {
+        availableAnnotations: Object.keys(recaptchaService.constants.AnnotationEnum).filter((key) => Number.isNaN(Number(key))),
+        availableReasons: Object.keys(recaptchaService.constants.ReasonEnum).filter((key) => Number.isNaN(Number(key)))
+      }
+    });
+  } catch (error) {
+    console.error('❌ reCAPTCHA 검수 요청 실패:', error);
+    res.status(500).json({
+      success: false,
+      error: 'reCAPTCHA 검수 요청 중 오류가 발생했습니다'
+    });
+  }
+});
 
 // 유저 목록 조회
 router.get('/users', async (req, res) => {
