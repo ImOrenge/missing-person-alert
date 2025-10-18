@@ -12,7 +12,7 @@ const normalizeKey = (value: string): string => {
     .toLowerCase();
 };
 
-export const REGION_SHAPE_ENTRIES: RegionShapeEntry[] = [
+export const REGION_SHAPE_ENTRIES: ReadonlyArray<RegionShapeEntry> = [
   {
     svgId: '서울특별시',
     label: '서울특별시',
@@ -98,7 +98,7 @@ export const REGION_SHAPE_ENTRIES: RegionShapeEntry[] = [
     label: '제주특별자치도',
     aliases: ['제주특별자치도', '제주도', '제주', 'jeju', 'jejudo', 'kr49', '49']
   }
-] as const;
+];
 
 const buildRegionLookup = () => {
   const map = new Map<string, RegionShapeEntry>();

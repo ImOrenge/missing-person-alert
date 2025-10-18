@@ -13,7 +13,10 @@ export interface RegionIntensity {
   bucketIndex: number;
 }
 
-export type RegionValueKey = 'totalInRange' | 'activeInRange' | 'totalCases' | 'activeCases';
+export type RegionValueKey = Extract<
+  keyof AggregatedRegionStats,
+  'totalInRange' | 'activeInRange' | 'totalCases' | 'activeCases'
+>;
 
 export interface BuildIntensityMapOptions {
   valueKey?: RegionValueKey;
@@ -70,10 +73,15 @@ export const buildRegionIntensityMap = (
   options: BuildIntensityMapOptions = {}
 ): Record<string, RegionIntensity> => {
   const { valueKey = 'totalInRange', buckets = DEFAULT_INTENSITY_BUCKETS } = options;
-  const numericValues = regions.map((region) => {
-    const value = Number((region as Record<string, unknown>)[valueKey]);
-    return Number.isFinite(value) ? Math.max(value, 0) : 0;
-  });
+  const getMetricValue = (region: AggregatedRegionStats): number => {
+    const rawValue = region[valueKey];
+    if (typeof rawValue === 'number') {
+      return Number.isFinite(rawValue) ? rawValue : 0;
+    }
+    const numeric = Number(rawValue ?? 0);
+    return Number.isFinite(numeric) ? numeric : 0;
+  };
+  const numericValues = regions.map((region) => Math.max(getMetricValue(region), 0));
   const total = numericValues.reduce((sum, value) => sum + value, 0);
   if (total <= 0) {
     return regions.reduce<Record<string, RegionIntensity>>((acc, region) => {
