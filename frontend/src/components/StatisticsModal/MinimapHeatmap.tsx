@@ -1,6 +1,8 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import type { AggregatedRegionStats } from '../../hooks/useRegionStatsData';
 import type { RegionMetadataDocument } from '../../types/regionStats';
+import { buildRegionIntensityMap } from './minimap/intensity';
+import { matchRegionShape } from './minimap/regionMap';
 
 export interface MinimapHeatmapProps {
   metadata: RegionMetadataDocument | null;
@@ -45,10 +47,47 @@ const loadSilhouette = async (): Promise<string> => {
   return silhouettePromise!;
 };
 
-const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = (props) => {
-  void props;
+const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions }) => {
   const [svgMarkup, setSvgMarkup] = useState<string | null>(cachedSilhouette);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  const metaMap = useMemo(() => {
+    if (!metadata?.regions) {
+      return null;
+    }
+    return new Map(metadata.regions.map((entry) => [entry.id, entry]));
+  }, [metadata]);
+
+  const intensityMap = useMemo(() => buildRegionIntensityMap(regions), [regions]);
+
+  const { matchedShapes, unmatchedRegions } = useMemo(() => {
+    return regions.reduce<{
+      matchedShapes: Record<string, string>;
+      unmatchedRegions: string[];
+    }>(
+      (acc, region) => {
+        const shape = matchRegionShape({
+          regionId: region.regionId,
+          code: region.code,
+          regionName: region.regionName
+        });
+        if (shape) {
+          acc.matchedShapes[region.regionId] = shape.svgId;
+          return acc;
+        }
+        const metaLabel = metaMap?.get(region.regionId)?.name;
+        acc.unmatchedRegions.push(metaLabel ?? region.regionName ?? region.regionId);
+        return acc;
+      },
+      { matchedShapes: {}, unmatchedRegions: [] }
+    );
+  }, [metaMap, regions]);
+
+  const activeRegionCount = useMemo(() => {
+    return Object.values(intensityMap).filter((entry) => entry.ratio > 0).length;
+  }, [intensityMap]);
+
+  const mappedRegionCount = useMemo(() => Object.keys(matchedShapes).length, [matchedShapes]);
 
   useEffect(() => {
     if (svgMarkup) {
@@ -99,8 +138,21 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = (props) => {
           ) : (
             <div className="absolute inset-0 flex items-center justify-center px-4 text-xs text-slate-400">지도를 불러오는 중...</div>
           )}
+          {regions.length === 0 && !loadError && (
+            <div className="absolute inset-0 flex items-center justify-center bg-white/60 text-xs text-slate-400">표시할 집계가 없습니다.</div>
+          )}
         </div>
       </div>
+      {regions.length > 0 && (
+        <div className="mt-2 text-[11px] text-slate-400">
+          {`데이터 지역 ${regions.length}개 · 매핑 ${mappedRegionCount}개 · 활성 ${activeRegionCount}개`}
+        </div>
+      )}
+      {unmatchedRegions.length > 0 && (
+        <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          {`SVG 매핑되지 않은 지역: ${unmatchedRegions.join(', ')}`}
+        </div>
+      )}
     </div>
   );
 };

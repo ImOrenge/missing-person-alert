@@ -33,9 +33,9 @@
 - [x] `svgo` 등으로 파일 최적화 후 `public/maps` 내 버전 관리, 변경 사항을 문서화
 
 ### Phase 1. 데이터 소스 및 매핑
-- [ ] `stats/regionDaily` 스키마 점검 → `regions.{regionId}.totalCases`, `activeCases` 키 확정
-- [ ] 지역 ID와 SVG path에 사용할 `data-region-id` 매핑 테이블 정의
-- [ ] 정규화 유틸(`getRegionIntensity`) 작성: 전체 대비 비율 계산 + 5단계 버킷 라벨 반환
+- [x] `stats/regionDaily` 스키마 점검 → `regions.{regionId}.totalCases`, `activeCases` 키 확정
+- [x] 지역 ID와 SVG path에 사용할 `data-region-id` 매핑 테이블 정의
+- [x] 정규화 유틸(`getRegionIntensity`) 작성: 전체 대비 비율 계산 + 5단계 버킷 라벨 반환
 
 ### Phase 2. Choropleth 컴포넌트 구성
 - [ ] `MinimapHeatmap.tsx` (가칭) 생성 후 `korea-silhouette.svg` import → React 컴포넌트로 인라인
