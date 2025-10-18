@@ -4,7 +4,8 @@ import type {
   RegionMetadataDocument,
   RegionMetadataEntry,
   RegionStatSummary,
-  RegionStatsDocument
+  RegionStatsDocument,
+  RegionSubStatSummary
 } from '../types/regionStats';
 
 const REGION_STATS_DOC_REF = doc(firestore, 'stats', 'regionDaily');
@@ -88,6 +89,50 @@ const normalizeDailyEntries = (value: unknown): RegionDailyEntry[] => {
   return [];
 };
 
+const normalizeSubRegions = (value: unknown): RegionSubStatSummary[] => {
+  if (!value) {
+    return [];
+  }
+
+  const toSubRegion = (entry: any): RegionSubStatSummary | null => {
+    if (!entry) {
+      return null;
+    }
+    const subRegionId = entry?.subRegionId ?? entry?.id ?? entry?.subRegionID;
+    const name = entry?.name ?? entry?.subRegionName ?? '기타';
+    const parentRegionId = entry?.parentRegionId ?? entry?.regionId ?? 'unknown';
+    if (!subRegionId || !name) {
+      return null;
+    }
+
+    return {
+      subRegionId: String(subRegionId),
+      parentRegionId: String(parentRegionId),
+      name: String(name),
+      totalCases: Number(entry?.totalCases ?? 0),
+      activeCases: Number(entry?.activeCases ?? 0),
+      latestCaseDate: typeof entry?.latestCaseDate === 'string' ? entry.latestCaseDate : null,
+      daily: normalizeDailyEntries(entry?.daily)
+    };
+  };
+
+  if (Array.isArray(value)) {
+    return value
+      .map(toSubRegion)
+      .filter((entry): entry is RegionSubStatSummary => Boolean(entry))
+      .sort((a, b) => b.totalCases - a.totalCases || a.name.localeCompare(b.name));
+  }
+
+  if (typeof value === 'object') {
+    return Object.values(value as Record<string, any>)
+      .map(toSubRegion)
+      .filter((entry): entry is RegionSubStatSummary => Boolean(entry))
+      .sort((a, b) => b.totalCases - a.totalCases || a.name.localeCompare(b.name));
+  }
+
+  return [];
+};
+
 const transformStatsDocument = (raw: any): RegionStatsData => {
   const regionsRaw = raw?.regions ?? {};
   const regions: RegionStatSummary[] = Object.values(regionsRaw).map((entry: any) => ({
@@ -97,7 +142,8 @@ const transformStatsDocument = (raw: any): RegionStatsData => {
     totalCases: Number(entry?.totalCases ?? 0),
     activeCases: Number(entry?.activeCases ?? 0),
     latestCaseDate: typeof entry?.latestCaseDate === 'string' ? entry.latestCaseDate : null,
-    daily: normalizeDailyEntries(entry?.daily)
+    daily: normalizeDailyEntries(entry?.daily),
+    subRegions: normalizeSubRegions(entry?.subRegions)
   }));
 
   regions.sort((a, b) => b.totalCases - a.totalCases || a.regionName.localeCompare(b.regionName));

@@ -12,6 +12,17 @@ export interface RegionStatSummary {
   activeCases: number;
   latestCaseDate: string | null;
   daily: RegionDailyEntry[];
+  subRegions: RegionSubStatSummary[];
+}
+
+export interface RegionSubStatSummary {
+  subRegionId: string;
+  parentRegionId: string;
+  name: string;
+  totalCases: number;
+  activeCases: number;
+  latestCaseDate: string | null;
+  daily: RegionDailyEntry[];
 }
 
 export interface RegionStatsDocument {

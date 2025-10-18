@@ -31,6 +31,7 @@ const REGION_METADATA_DOC = () => db.collection("stats").doc("regionMetadata");
 
 const DEFAULT_REGION = REGION_ALIAS_LOOKUP["기타/미상"] ?? REGION_METADATA.find((region) => region.id === "unknown")!;
 const REGION_STATS_HISTORY_DAYS = 120;
+const SUB_REGION_FALLBACK_NAME = "기타";
 
 const formatDateKey = (date: Date): string => {
   const year = date.getUTCFullYear();
@@ -123,6 +124,39 @@ const resolveRegionFromAddress = (address: unknown): RegionMetadata => {
   }
 
   return DEFAULT_REGION;
+};
+
+const buildSubRegionId = (parentId: string, name: string): string => {
+  const normalized = normalizeRegionToken(name);
+  const suffix = normalized.length > 0 ? normalized.toLowerCase() : "misc";
+  return `${parentId}-${suffix}`;
+};
+
+const resolveSubRegionFromAddress = (address: unknown, parentRegion: RegionMetadata): {id: string; name: string} => {
+  if (typeof address !== "string" || address.trim().length === 0) {
+    return {id: buildSubRegionId(parentRegion.id, SUB_REGION_FALLBACK_NAME), name: SUB_REGION_FALLBACK_NAME};
+  }
+
+  const tokens = address.trim().split(/\s+/);
+  if (tokens.length < 2) {
+    return {id: buildSubRegionId(parentRegion.id, SUB_REGION_FALLBACK_NAME), name: SUB_REGION_FALLBACK_NAME};
+  }
+
+  let candidate = tokens[1];
+
+  if (tokens.length >= 3) {
+    const second = tokens[1];
+    const third = tokens[2];
+    if ((/시$/.test(second) || /군$/.test(second)) && (/구$/.test(third) || /군$/.test(third) || /동$/.test(third))) {
+      candidate = `${second} ${third}`;
+    }
+  }
+
+  if (normalizeRegionToken(candidate).length === 0 || candidate === parentRegion.name) {
+    candidate = SUB_REGION_FALLBACK_NAME;
+  }
+
+  return {id: buildSubRegionId(parentRegion.id, candidate), name: candidate};
 };
 
 // CORS 설정
@@ -1204,12 +1238,23 @@ export const api = onRequest({
   timeoutSeconds: 60,
 }, app);
 
+interface SubRegionAccumulator {
+  id: string;
+  name: string;
+  parent: RegionMetadata;
+  totalCases: number;
+  activeCases: number;
+  latestCaseAt?: number;
+  daily: Record<string, {totalCases: number; activeCases: number;}>;
+}
+
 interface RegionAccumulator {
   region: RegionMetadata;
   totalCases: number;
   activeCases: number;
   latestCaseAt?: number;
   daily: Record<string, {totalCases: number; activeCases: number;}>;
+  subRegions: Map<string, SubRegionAccumulator>;
 }
 
 const ensureRegionAccumulator = (map: Map<string, RegionAccumulator>, region: RegionMetadata): RegionAccumulator => {
@@ -1223,8 +1268,27 @@ const ensureRegionAccumulator = (map: Map<string, RegionAccumulator>, region: Re
     activeCases: 0,
     latestCaseAt: undefined,
     daily: {},
+    subRegions: new Map<string, SubRegionAccumulator>(),
   };
   map.set(region.id, accumulator);
+  return accumulator;
+};
+
+const ensureSubRegionAccumulator = (regionAccumulator: RegionAccumulator, subRegionId: string, name: string): SubRegionAccumulator => {
+  const existing = regionAccumulator.subRegions.get(subRegionId);
+  if (existing) {
+    return existing;
+  }
+  const accumulator: SubRegionAccumulator = {
+    id: subRegionId,
+    name,
+    parent: regionAccumulator.region,
+    totalCases: 0,
+    activeCases: 0,
+    latestCaseAt: undefined,
+    daily: {},
+  };
+  regionAccumulator.subRegions.set(subRegionId, accumulator);
   return accumulator;
 };
 
@@ -1253,6 +1317,13 @@ const collectRegionStats = async (): Promise<{
     accumulator.totalCases += 1;
     if (isActive) {
       accumulator.activeCases += 1;
+    }
+
+    const {id: subRegionId, name: subRegionName} = resolveSubRegionFromAddress(address, resolvedRegion);
+    const subAccumulator = ensureSubRegionAccumulator(accumulator, subRegionId, subRegionName);
+    subAccumulator.totalCases += 1;
+    if (isActive) {
+      subAccumulator.activeCases += 1;
     }
 
     const candidateDates = [
@@ -1287,6 +1358,16 @@ const collectRegionStats = async (): Promise<{
       if (!accumulator.latestCaseAt || epoch > accumulator.latestCaseAt) {
         accumulator.latestCaseAt = epoch;
       }
+
+      const subDailyEntry = subAccumulator.daily[dateKey] ?? {totalCases: 0, activeCases: 0};
+      subDailyEntry.totalCases += 1;
+      if (isActive) {
+        subDailyEntry.activeCases += 1;
+      }
+      subAccumulator.daily[dateKey] = subDailyEntry;
+      if (!subAccumulator.latestCaseAt || epoch > subAccumulator.latestCaseAt) {
+        subAccumulator.latestCaseAt = epoch;
+      }
     }
   });
 
@@ -1305,6 +1386,27 @@ const buildRegionDailyPayload = (map: Map<string, RegionAccumulator>) => {
       .sort((a, b) => a.date.localeCompare(b.date))
       .slice(-REGION_STATS_HISTORY_DAYS);
 
+    const subRegionArray = Array.from(entry.subRegions.values()).map((sub) => {
+      const subDaily = Object.entries(sub.daily)
+        .map(([date, stats]) => ({
+          date,
+          totalCases: stats.totalCases,
+          activeCases: stats.activeCases,
+        }))
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .slice(-REGION_STATS_HISTORY_DAYS);
+
+      return {
+        subRegionId: sub.id,
+        parentRegionId: entry.region.id,
+        name: sub.name,
+        totalCases: sub.totalCases,
+        activeCases: sub.activeCases,
+        latestCaseDate: sub.latestCaseAt ? formatDateKey(new Date(sub.latestCaseAt)) : null,
+        daily: subDaily,
+      };
+    }).sort((a, b) => b.totalCases - a.totalCases || a.name.localeCompare(b.name));
+
     regionEntries[regionId] = {
       regionId: entry.region.id,
       regionName: entry.region.name,
@@ -1313,6 +1415,7 @@ const buildRegionDailyPayload = (map: Map<string, RegionAccumulator>) => {
       activeCases: entry.activeCases,
       latestCaseDate: entry.latestCaseAt ? formatDateKey(new Date(entry.latestCaseAt)) : null,
       daily: dailyArray,
+      subRegions: subRegionArray,
     };
   });
   return regionEntries;

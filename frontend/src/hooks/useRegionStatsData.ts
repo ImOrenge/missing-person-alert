@@ -20,6 +20,7 @@ export interface UseRegionStatsState {
     activeCases: number;
   };
   refreshedAt?: number;
+  lastFetchedAt?: number;
   refresh: (force?: boolean) => Promise<void>;
 }
 
@@ -89,6 +90,7 @@ export const useRegionStatsData = (isOpen: boolean, range: RegionStatsRange): Us
   const [metadata, setMetadata] = useState<RegionMetadataDocument | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastFetchedAt, setLastFetchedAt] = useState<number | undefined>(undefined);
 
   const load = useCallback(async (force = false) => {
     try {
@@ -100,6 +102,7 @@ export const useRegionStatsData = (isOpen: boolean, range: RegionStatsRange): Us
       ]);
       setStats(statsData);
       setMetadata(metadataData);
+      setLastFetchedAt(Date.now());
     } catch (err: any) {
       console.error('지역 통계 조회 실패', err);
       setError(err?.message ?? '통계 데이터를 불러오지 못했습니다');
@@ -143,6 +146,7 @@ export const useRegionStatsData = (isOpen: boolean, range: RegionStatsRange): Us
     regions,
     totals,
     refreshedAt,
+    lastFetchedAt,
     refresh: load
   };
 };
