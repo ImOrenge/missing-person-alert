@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Bell, BellOff, ChevronLeft, ChevronRight, LogIn, LogOut, UserCircle, Plus, FileText, Shield, User as UserIcon, Menu } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Bell, BellOff, ChevronLeft, ChevronRight, LogIn, LogOut, UserCircle, Plus, FileText, Shield, User as UserIcon, Menu, BarChart3 } from 'lucide-react';
 import EmergencyMap from './components/EmergencyMap';
 import Sidebar from './components/Sidebar';
 import FilterPanel from './components/FilterPanel';
@@ -14,6 +14,7 @@ import AnnouncementBanner from './components/AnnouncementBanner';
 import NewMissingPersonBanner from './components/NewMissingPersonBanner';
 import AnnouncementPopup from './components/AnnouncementPopup';
 import NotificationBell from './components/NotificationBell';
+import StatisticsModal from './components/StatisticsModal';
 import { useEmergencyStore } from './stores/emergencyStore';
 import { ToastContainer, toast } from 'react-toastify';
 import { onAuthChange, logout as firebaseLogout } from './services/firebase';
@@ -29,6 +30,7 @@ import { onForegroundMessage } from './services/firebaseMessaging';
 import { detachFcmToken, getLocalTokenState } from './services/userTokenService';
 import { usePushNotifications, PUSH_PROMPT_STORAGE_KEY } from './hooks/usePushNotifications';
 import { useApiData } from './hooks/useApiData';
+import { getRegionStatsUpdateInfo } from './services/regionStatsService';
 
 function App() {
   const [showSidebar, setShowSidebar] = useState(true);
@@ -40,6 +42,7 @@ function App() {
   const [showUserProfile, setShowUserProfile] = useState(false);
   const [showVerificationPrompt, setShowVerificationPrompt] = useState(false);
   const [showPhoneAuth, setShowPhoneAuth] = useState(false);
+  const [showStatisticsModal, setShowStatisticsModal] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [alertsEnabled, setAlertsEnabled] = useState(true);
@@ -49,6 +52,8 @@ function App() {
   const [showPopup, setShowPopup] = useState(false);
   const pushPromptToastRef = useRef<React.ReactText | null>(null);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [statsHasFreshData, setStatsHasFreshData] = useState(false);
+  const [statsUpdatedAt, setStatsUpdatedAt] = useState<number | undefined>(undefined);
 
   useApiData();
 
@@ -57,6 +62,21 @@ function App() {
   usePresenceTracking(currentUser);
 
   const { status: pushStatus, enablePush, syncExistingToken } = usePushNotifications(currentUser);
+  const statsUpdatedLabel = useMemo(() => {
+    if (!statsUpdatedAt) {
+      return undefined;
+    }
+    try {
+      return new Intl.DateTimeFormat('ko-KR', {
+        dateStyle: 'short',
+        timeStyle: 'short',
+        hour12: false
+      }).format(new Date(statsUpdatedAt));
+    } catch (error) {
+      console.warn('통계 업데이트 시각 포맷 실패', error);
+      return undefined;
+    }
+  }, [statsUpdatedAt]);
 
   const handleEnablePush = useCallback(async () => {
     try {
@@ -91,6 +111,29 @@ function App() {
       toast.dismiss(pushPromptToastRef.current);
       pushPromptToastRef.current = null;
     }
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadStatsInfo = async () => {
+      try {
+        const info = await getRegionStatsUpdateInfo();
+        if (!mounted) return;
+        setStatsHasFreshData(info.hasFreshData);
+        setStatsUpdatedAt(info.updatedAt);
+      } catch (error) {
+        console.warn('통계 최신 정보 조회 실패', error);
+      }
+    };
+
+    loadStatsInfo();
+    const interval = window.setInterval(loadStatsInfo, 60 * 60 * 1000);
+
+    return () => {
+      mounted = false;
+      window.clearInterval(interval);
+    };
   }, []);
 
   // reCAPTCHA 전역 초기화
@@ -348,6 +391,10 @@ function App() {
     setShowReportModal(true);
   };
 
+  const handleOpenStatistics = () => {
+    setShowStatisticsModal(true);
+  };
+
   const handlePhoneAuthSuccess = () => {
     setShowPhoneAuth(false);
     toast.success('전화번호 인증이 완료되었습니다!');
@@ -389,14 +436,31 @@ function App() {
           </div>
 
           {/* 두 번째 줄: 버튼들 */}
-          <div className="flex items-center justify-end px-4 py-2">
+          <div className="flex items-center justify-between gap-3 px-4 py-2">
+            <button
+              onClick={() => {
+                setShowMobileMenu(false);
+                handleOpenStatistics();
+              }}
+              className="flex items-center gap-1.5 rounded-lg bg-white/20 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-white/30"
+              aria-label="지역별 실종자 통계 보기"
+              title={statsUpdatedLabel ? `업데이트: ${statsUpdatedLabel}` : '지역별 실종자 통계 보기'}
+            >
+              <BarChart3 size={16} />
+              <span>통계 보기</span>
+              {statsHasFreshData && (
+                <span className="ml-1 inline-flex items-center rounded-full bg-yellow-300 px-1.5 py-0.5 text-[10px] font-bold text-red-700">
+                  New
+                </span>
+              )}
+            </button>
             {currentUser ? (
               <button
                 onClick={async () => {
                   setShowMobileMenu(false);
                   await handleLogout();
                 }}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-800 hover:bg-red-900 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 rounded-lg bg-red-800 px-3 py-1.5 text-sm transition-colors hover:bg-red-900"
               >
                 <LogOut size={16} />
                 <span className="text-sm">로그아웃</span>
@@ -407,7 +471,7 @@ function App() {
                   setShowMobileMenu(false);
                   setShowLoginModal(true);
                 }}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-800 hover:bg-red-900 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 rounded-lg bg-red-800 px-3 py-1.5 text-sm transition-colors hover:bg-red-900"
               >
                 <LogIn size={16} />
                 <span className="text-sm">로그인</span>
@@ -455,6 +519,24 @@ function App() {
                       <div className="flex flex-col">
                         <button
                           onClick={() => {
+                            handleOpenStatistics();
+                            setShowMobileMenu(false);
+                          }}
+                          className="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
+                          title={statsUpdatedLabel ? `업데이트: ${statsUpdatedLabel}` : '지역별 실종자 통계 보기'}
+                        >
+                          <span className="flex items-center gap-2">
+                            <BarChart3 size={18} />
+                            <span>통계 보기</span>
+                            {statsHasFreshData && (
+                              <span className="inline-flex items-center rounded-full bg-yellow-200 px-1.5 py-0.5 text-[10px] font-semibold text-red-600">
+                                New
+                              </span>
+                            )}
+                          </span>
+                        </button>
+                        <button
+                          onClick={() => {
                             setShowMyReportsModal(true);
                             setShowMobileMenu(false);
                           }}
@@ -497,8 +579,28 @@ function App() {
                         )}
                       </div>
                     ) : (
-                      <div className="px-4 py-2 text-xs text-gray-500">
-                        로그인 후 제보, 알림 설정 등 모든 기능을 이용할 수 있습니다.
+                      <div className="flex flex-col">
+                        <button
+                          onClick={() => {
+                            handleOpenStatistics();
+                            setShowMobileMenu(false);
+                          }}
+                          className="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
+                          title={statsUpdatedLabel ? `업데이트: ${statsUpdatedLabel}` : '지역별 실종자 통계 보기'}
+                        >
+                          <span className="flex items-center gap-2">
+                            <BarChart3 size={18} />
+                            <span>통계 보기</span>
+                            {statsHasFreshData && (
+                              <span className="inline-flex items-center rounded-full bg-yellow-200 px-1.5 py-0.5 text-[10px] font-semibold text-red-600">
+                                New
+                              </span>
+                            )}
+                          </span>
+                        </button>
+                        <div className="px-4 py-2 text-xs text-gray-500">
+                          로그인 후 제보, 알림 설정 등 모든 기능을 이용할 수 있습니다.
+                        </div>
                       </div>
                     )}
                   </div>
@@ -533,6 +635,20 @@ function App() {
               {alertsEnabled ? <Bell size={20} /> : <BellOff size={20} />}
             </button>
             <NotificationBell />
+            <button
+              onClick={handleOpenStatistics}
+              className="flex items-center gap-2 rounded-lg bg-white/10 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-white/20"
+              aria-label="지역별 실종자 통계 보기"
+              title={statsUpdatedLabel ? `업데이트: ${statsUpdatedLabel}` : '지역별 실종자 통계 보기'}
+            >
+              <BarChart3 size={18} />
+              <span className="hidden lg:inline">통계 보기</span>
+              {statsHasFreshData && (
+                <span className="inline-flex items-center rounded-full bg-yellow-300 px-1.5 py-0.5 text-[10px] font-bold text-red-700">
+                  New
+                </span>
+              )}
+            </button>
 
             {/* 로그인/로그아웃 */}
             {currentUser ? (
@@ -618,6 +734,21 @@ function App() {
         )}
       </div>
 
+      <button
+        onClick={handleOpenStatistics}
+        className="fixed bottom-20 left-6 flex items-center gap-2 rounded-full bg-white px-5 py-3 font-semibold text-red-600 shadow-lg ring-1 ring-red-100 transition-all hover:scale-105 hover:bg-red-50 z-40"
+        aria-label="지역별 실종자 통계 모달 열기"
+        title={statsUpdatedLabel ? `업데이트: ${statsUpdatedLabel}` : '지역별 실종자 통계 보기'}
+      >
+        <BarChart3 size={20} />
+        <span>통계 보기</span>
+        {statsHasFreshData && (
+          <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-600">
+            New
+          </span>
+        )}
+      </button>
+
       {/* 제보하기 버튼 (로그인 시에만 표시) */}
       {currentUser && (
         <button
@@ -630,6 +761,11 @@ function App() {
       )}
 
       {/* 모달들 */}
+      <StatisticsModal
+        isOpen={showStatisticsModal}
+        onClose={() => setShowStatisticsModal(false)}
+      />
+
       <ReportModal
         isOpen={showReportModal}
         onClose={() => setShowReportModal(false)}

@@ -11,6 +11,12 @@ import {
   CommentReportStatus,
   MissingPersonComment
 } from "./types/missingPersonComments";
+import {
+  REGION_METADATA,
+  REGION_ALIAS_LOOKUP,
+  findRegionByName,
+  RegionMetadata
+} from "./regionMetadata";
 
 // Firebase Admin 초기화
 admin.initializeApp();
@@ -19,6 +25,105 @@ admin.initializeApp();
 const app = express();
 type AuthedRequest = Request & {user?: admin.auth.DecodedIdToken};
 const db = admin.firestore();
+
+const REGION_DAILY_DOC = () => db.collection("stats").doc("regionDaily");
+const REGION_METADATA_DOC = () => db.collection("stats").doc("regionMetadata");
+
+const DEFAULT_REGION = REGION_ALIAS_LOOKUP["기타/미상"] ?? REGION_METADATA.find((region) => region.id === "unknown")!;
+const REGION_STATS_HISTORY_DAYS = 120;
+
+const formatDateKey = (date: Date): string => {
+  const year = date.getUTCFullYear();
+  const month = `${date.getUTCMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getUTCDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const parseDateValue = (value: unknown): Date | null => {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.length === 0) {
+      return null;
+    }
+    if (/^\d{8}$/.test(trimmed)) {
+      const year = trimmed.slice(0, 4);
+      const month = trimmed.slice(4, 6);
+      const day = trimmed.slice(6, 8);
+      const formatted = `${year}-${month}-${day}T00:00:00Z`;
+      const parsed = new Date(formatted);
+      return isNaN(parsed.getTime()) ? null : parsed;
+    }
+    const parsed = new Date(trimmed);
+    return isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  if (typeof value === "number") {
+    const parsed = new Date(value);
+    return isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  if (value instanceof Date) {
+    return new Date(value.getTime());
+  }
+
+  if (typeof value === "object" && value && "toDate" in value && typeof (value as any).toDate === "function") {
+    try {
+      const parsed = (value as any).toDate();
+      return parsed instanceof Date && !isNaN(parsed.getTime()) ? parsed : null;
+    } catch (error) {
+      logger.warn("날짜 변환 실패", error);
+      return null;
+    }
+  }
+
+  return null;
+};
+
+const normalizeRegionToken = (token: string): string => {
+  return token
+    .replace(/\s+/g, "")
+    .replace(/[^\u3131-\uD79D\w]/g, "")
+    .trim();
+};
+
+const resolveRegionFromAddress = (address: unknown): RegionMetadata => {
+  if (typeof address !== "string" || address.trim().length === 0) {
+    return DEFAULT_REGION;
+  }
+
+  const tokens = address.trim().split(/\s+/);
+  if (tokens.length === 0) {
+    return DEFAULT_REGION;
+  }
+
+  const firstToken = normalizeRegionToken(tokens[0]);
+  const firstMatch = REGION_ALIAS_LOOKUP[firstToken] || REGION_ALIAS_LOOKUP[tokens[0]] || findRegionByName(tokens[0]);
+  if (firstMatch && firstMatch.id !== "unknown") {
+    return firstMatch;
+  }
+
+  if (tokens.length > 1) {
+    const combined = normalizeRegionToken(`${tokens[0]} ${tokens[1]}`);
+    const combinedMatch = REGION_ALIAS_LOOKUP[combined] || REGION_ALIAS_LOOKUP[`${tokens[0]}${tokens[1]}`];
+    if (combinedMatch && combinedMatch.id !== "unknown") {
+      return combinedMatch;
+    }
+  }
+
+  if (tokens.length > 1) {
+    const secondToken = normalizeRegionToken(tokens[1]);
+    const secondMatch = REGION_ALIAS_LOOKUP[secondToken] || REGION_ALIAS_LOOKUP[tokens[1]];
+    if (secondMatch && secondMatch.id !== "unknown") {
+      return secondMatch;
+    }
+  }
+
+  return DEFAULT_REGION;
+};
 
 // CORS 설정
 const corsOptions = {
@@ -1098,6 +1203,167 @@ export const api = onRequest({
   memory: "512MiB",
   timeoutSeconds: 60,
 }, app);
+
+interface RegionAccumulator {
+  region: RegionMetadata;
+  totalCases: number;
+  activeCases: number;
+  latestCaseAt?: number;
+  daily: Record<string, {totalCases: number; activeCases: number;}>;
+}
+
+const ensureRegionAccumulator = (map: Map<string, RegionAccumulator>, region: RegionMetadata): RegionAccumulator => {
+  const existing = map.get(region.id);
+  if (existing) {
+    return existing;
+  }
+  const accumulator: RegionAccumulator = {
+    region,
+    totalCases: 0,
+    activeCases: 0,
+    latestCaseAt: undefined,
+    daily: {},
+  };
+  map.set(region.id, accumulator);
+  return accumulator;
+};
+
+const collectRegionStats = async (): Promise<{
+  regions: Map<string, RegionAccumulator>;
+  totalCases: number;
+  activeCases: number;
+}> => {
+  const snapshot = await db.collection("missingPersons").get();
+  const regions = new Map<string, RegionAccumulator>();
+  let totalCases = 0;
+  let activeCases = 0;
+
+  snapshot.forEach((docSnapshot) => {
+    const data = docSnapshot.data() as Record<string, any>;
+    totalCases += 1;
+    const status = typeof data.status === "string" ? data.status : (typeof data.state === "string" ? data.state : "active");
+    const isActive = status === "active" || status === "미발견" || status === "missing";
+    if (isActive) {
+      activeCases += 1;
+    }
+
+    const address = data.location?.address ?? data.address ?? data.occrrncAdres ?? data.occrrncAdresDetail ?? "";
+    const resolvedRegion = resolveRegionFromAddress(address);
+    const accumulator = ensureRegionAccumulator(regions, resolvedRegion);
+    accumulator.totalCases += 1;
+    if (isActive) {
+      accumulator.activeCases += 1;
+    }
+
+    const candidateDates = [
+      data.missingDate,
+      data.missing_date,
+      data.occrrncDe,
+      data.occurDate,
+      data.reportedAt,
+      data.createdAt,
+      data.updatedAt,
+    ];
+
+    let pickedDate: Date | null = null;
+    for (const candidate of candidateDates) {
+      const parsed = parseDateValue(candidate);
+      if (parsed) {
+        pickedDate = parsed;
+        break;
+      }
+    }
+
+    if (pickedDate) {
+      const utcDate = new Date(Date.UTC(pickedDate.getUTCFullYear(), pickedDate.getUTCMonth(), pickedDate.getUTCDate()));
+      const dateKey = formatDateKey(utcDate);
+      const dailyEntry = accumulator.daily[dateKey] ?? {totalCases: 0, activeCases: 0};
+      dailyEntry.totalCases += 1;
+      if (isActive) {
+        dailyEntry.activeCases += 1;
+      }
+      accumulator.daily[dateKey] = dailyEntry;
+      const epoch = utcDate.getTime();
+      if (!accumulator.latestCaseAt || epoch > accumulator.latestCaseAt) {
+        accumulator.latestCaseAt = epoch;
+      }
+    }
+  });
+
+  return {regions, totalCases, activeCases};
+};
+
+const buildRegionDailyPayload = (map: Map<string, RegionAccumulator>) => {
+  const regionEntries: Record<string, any> = {};
+  map.forEach((entry, regionId) => {
+    const dailyArray = Object.entries(entry.daily)
+      .map(([date, stats]) => ({
+        date,
+        totalCases: stats.totalCases,
+        activeCases: stats.activeCases,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(-REGION_STATS_HISTORY_DAYS);
+
+    regionEntries[regionId] = {
+      regionId: entry.region.id,
+      regionName: entry.region.name,
+      code: entry.region.code,
+      totalCases: entry.totalCases,
+      activeCases: entry.activeCases,
+      latestCaseDate: entry.latestCaseAt ? formatDateKey(new Date(entry.latestCaseAt)) : null,
+      daily: dailyArray,
+    };
+  });
+  return regionEntries;
+};
+
+export const aggregateRegionStatistics = onSchedule({
+  schedule: "0 * * * *", // 매시 정각
+  timeZone: "Asia/Seoul",
+  region: "asia-northeast3",
+  memory: "256MiB",
+  timeoutSeconds: 300,
+}, async () => {
+  try {
+    logger.info("📊 지역별 실종자 통계 집계 시작");
+    const {regions, totalCases, activeCases} = await collectRegionStats();
+    const generatedAt = admin.firestore.Timestamp.now();
+
+    const payload = {
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      generatedAt,
+      totals: {
+        regions: regions.size,
+        totalCases,
+        activeCases,
+      },
+      historyDays: REGION_STATS_HISTORY_DAYS,
+      regions: buildRegionDailyPayload(regions),
+    };
+
+    await REGION_DAILY_DOC().set(payload, {merge: false});
+    await REGION_METADATA_DOC().set({
+      lastUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      regions: REGION_METADATA.map((region) => ({
+        id: region.id,
+        name: region.name,
+        code: region.code,
+        parentId: region.parentId,
+        center: region.center,
+      })),
+    }, {merge: true});
+
+    logger.info("✅ 지역별 실종자 통계 집계 완료", {
+      regions: regions.size,
+      totalCases,
+      activeCases,
+    });
+  } catch (error: any) {
+    logger.error("❌ 지역별 실종자 통계 집계 실패", error);
+    throw error;
+  }
+});
 
 /**
  * 안전드림 API에서 실종자 데이터를 가져와서 Firestore에 저장

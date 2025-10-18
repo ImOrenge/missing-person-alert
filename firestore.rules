@@ -194,6 +194,12 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    // 통계 데이터 (읽기 전용)
+    match /stats/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     // 사용자별 푸시 토큰
     match /userTokens/{userId} {
       allow read: if request.auth != null && request.auth.uid == userId;
