@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, BarChart3, Calendar, ChevronLeft, ChevronRight, Info, MapPin, RefreshCw, X } from 'lucide-react';
+import { AlertCircle, BarChart3, Calendar, ChevronLeft, ChevronRight, Info, RefreshCw, X } from 'lucide-react';
 import { useRegionStatsData, type RegionStatsRange } from '../../hooks/useRegionStatsData';
 import type { AggregatedRegionStats } from '../../hooks/useRegionStatsData';
-import type { RegionMetadataDocument, RegionSubStatSummary } from '../../types/regionStats';
+import type { RegionSubStatSummary } from '../../types/regionStats';
+import { MinimapHeatmap } from './MinimapHeatmap';
 
 interface StatisticsModalProps {
   isOpen: boolean;
@@ -317,93 +318,6 @@ const SummaryMetric: React.FC<{ label: string; value: number; accent?: 'primary'
     <div className={`flex flex-col gap-1 rounded-xl px-4 py-3 text-sm font-medium ${accentClasses}`}>
       <span className="text-xs uppercase tracking-wide text-slate-400">{label}</span>
       <span className="text-xl font-semibold">{value.toLocaleString()}건</span>
-    </div>
-  );
-};
-
-interface RegionMapPreviewProps {
-  metadata: RegionMetadataDocument | null;
-  regions: AggregatedRegionStats[];
-  selectedRegionId: string | null;
-  onSelect: (regionId: string) => void;
-  reduceMotion?: boolean;
-}
-
-const RegionMapPreview: React.FC<RegionMapPreviewProps> = ({ metadata, regions, selectedRegionId, onSelect, reduceMotion }) => {
-  const entries = metadata?.regions ?? [];
-  const metaMap = new Map(entries.map((entry) => [entry.id, entry]));
-  const points = regions
-    .map((region) => {
-      const meta = metaMap.get(region.regionId);
-      if (!meta) return null;
-      return { meta, region };
-    })
-    .filter((point): point is { meta: typeof entries[number]; region: AggregatedRegionStats } => Boolean(point));
-
-  if (points.length === 0) {
-    return (
-      <div className="rounded-2xl bg-white p-4 text-sm text-slate-500 shadow-sm ring-1 ring-slate-100">
-        <div className="flex items-center gap-2 text-sm font-semibold text-slate-600">
-          <MapPin className="h-4 w-4" />
-          지역 지도 뷰
-        </div>
-        <p className="mt-2 text-xs">지도 정보를 표시할 메타데이터가 없습니다.</p>
-      </div>
-    );
-  }
-
-  const latVals = points.map((point) => point.meta.center.lat);
-  const lngVals = points.map((point) => point.meta.center.lng);
-  const latMin = Math.min(...latVals);
-  const latMax = Math.max(...latVals);
-  const lngMin = Math.min(...lngVals);
-  const lngMax = Math.max(...lngVals);
-  const maxValue = points.reduce((max, point) => Math.max(max, point.region.totalInRange), 0) || 1;
-
-  return (
-    <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
-      <div className="flex items-center gap-2 text-sm font-semibold text-slate-600">
-        <MapPin className="h-4 w-4" />
-        지역 분포 미니맵 (베타)
-      </div>
-      <div className="relative mt-3 aspect-[3/4] w-full overflow-hidden rounded-xl bg-gradient-to-b from-slate-100 to-slate-200">
-        {points.map(({ meta, region }) => {
-          const top = latMax === latMin ? 50 : 100 - ((meta.center.lat - latMin) / (latMax - latMin)) * 100;
-          const left = lngMax === lngMin ? 50 : ((meta.center.lng - lngMin) / (lngMax - lngMin)) * 100;
-          const scale = Math.max(region.totalInRange / maxValue, 0.15);
-          const size = 24 + scale * 22;
-          const isSelected = region.regionId === selectedRegionId;
-
-          return (
-            <button
-              key={region.regionId}
-              type="button"
-              onClick={() => onSelect(region.regionId)}
-              className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full border text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${
-                isSelected ? 'border-red-500 bg-red-500 text-white shadow-lg' : 'border-white/70 bg-white/90 text-slate-600 shadow'
-              } ${reduceMotion ? '' : 'transition'}`}
-              style={{ top: `${top}%`, left: `${left}%`, width: `${size}px`, height: `${size}px` }}
-              aria-pressed={isSelected}
-              title={`${region.regionName}: ${region.totalInRange.toLocaleString()}건`}
-            >
-              {region.regionName.slice(0, 2)}
-            </button>
-          );
-        })}
-      </div>
-      <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
-        {points.slice(0, 5).map(({ region }) => (
-          <span
-            key={region.regionId}
-            className={`inline-flex items-center gap-1 rounded-full px-2 py-1 ${
-              region.regionId === selectedRegionId ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'
-            }`}
-          >
-            <span className="h-1.5 w-1.5 rounded-full bg-current" />
-            {region.regionName}
-          </span>
-        ))}
-      </div>
     </div>
   );
 };
@@ -805,7 +719,7 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
                 </div>
               </div>
 
-              <RegionMapPreview
+              <MinimapHeatmap
                 metadata={metadata}
                 regions={regions}
                 selectedRegionId={selectedRegionId}
