@@ -1421,6 +1421,25 @@ const buildRegionDailyPayload = (map: Map<string, RegionAccumulator>) => {
   return regionEntries;
 };
 
+const sendSlackNotification = async (message: string) => {
+  const webhookUrl = process.env.REGION_STATS_SLACK_WEBHOOK;
+  if (!webhookUrl) {
+    return;
+  }
+
+  try {
+    await fetch(webhookUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({text: message}),
+    });
+  } catch (error) {
+    logger.error("Slack 알림 전송 실패", error);
+  }
+};
+
 export const aggregateRegionStatistics = onSchedule({
   schedule: "0 * * * *", // 매시 정각
   timeZone: "Asia/Seoul",
@@ -1462,8 +1481,11 @@ export const aggregateRegionStatistics = onSchedule({
       totalCases,
       activeCases,
     });
+
+    await sendSlackNotification(`✅ 지역 통계 집계 완료: 총 ${totalCases}건 / 활성 ${activeCases}건 (${regions.size}개 권역)`);
   } catch (error: any) {
     logger.error("❌ 지역별 실종자 통계 집계 실패", error);
+    await sendSlackNotification(`❌ 지역 통계 집계 실패: ${error?.message ?? error}`);
     throw error;
   }
 });

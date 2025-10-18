@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, BarChart3, Calendar, ChevronLeft, ChevronRight, Info, MapPin, RefreshCw, X } from 'lucide-react';
 import { useRegionStatsData, type RegionStatsRange } from '../../hooks/useRegionStatsData';
 import type { AggregatedRegionStats } from '../../hooks/useRegionStatsData';
@@ -100,6 +100,28 @@ const aggregateSubRegionsForRange = (subRegions: RegionSubStatSummary[], range: 
     .sort((a, b) => b.totalInRange - a.totalInRange || a.name.localeCompare(b.name));
 };
 
+const usePrefersReducedMotion = (): boolean => {
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const handleChange = () => setPrefersReducedMotion(mediaQuery.matches);
+
+    handleChange();
+    mediaQuery.addEventListener('change', handleChange);
+
+    return () => {
+      mediaQuery.removeEventListener('change', handleChange);
+    };
+  }, []);
+
+  return prefersReducedMotion;
+};
+
 const useModalBodyScroll = (isOpen: boolean) => {
   useEffect(() => {
     if (isOpen) {
@@ -126,9 +148,10 @@ interface RegionBarChartProps {
   selectedId?: string | null;
   onSelect?: (regionId: string) => void;
   emptyMessage?: string;
+  reduceMotion?: boolean;
 }
 
-const RegionBarChart: React.FC<RegionBarChartProps> = ({ data, selectedId, onSelect, emptyMessage }) => {
+const RegionBarChart: React.FC<RegionBarChartProps> = ({ data, selectedId, onSelect, emptyMessage, reduceMotion }) => {
   if (data.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 px-6 py-10 text-center text-sm text-gray-500">
@@ -153,9 +176,15 @@ const RegionBarChart: React.FC<RegionBarChartProps> = ({ data, selectedId, onSel
             type="button"
             disabled={!clickable}
             onClick={() => onSelect?.(region.regionId)}
-            className={`group w-full rounded-xl border px-4 py-3 text-left shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${
+            className={`group w-full rounded-xl border px-4 py-3 text-left shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${
               isSelected ? 'border-red-200 bg-red-50/60' : 'border-gray-100 bg-white'
-            } ${clickable ? 'hover:translate-y-[-1px] hover:shadow-md disabled:hover:translate-y-0 disabled:hover:shadow-sm' : 'cursor-default'}`}
+            } ${
+              clickable
+                ? reduceMotion
+                  ? ''
+                  : 'transition hover:translate-y-[-1px] hover:shadow-md disabled:hover:translate-y-0 disabled:hover:shadow-sm'
+                : 'cursor-default'
+            }`}
             aria-pressed={isSelected}
           >
             <div className="flex items-center justify-between text-sm font-medium text-slate-700">
@@ -202,9 +231,10 @@ interface SubRegionBarChartProps {
   data: AggregatedSubRegionStats[];
   selectedId?: string | null;
   onSelect?: (subRegionId: string) => void;
+  reduceMotion?: boolean;
 }
 
-const SubRegionBarChart: React.FC<SubRegionBarChartProps> = ({ data, selectedId, onSelect }) => {
+const SubRegionBarChart: React.FC<SubRegionBarChartProps> = ({ data, selectedId, onSelect, reduceMotion }) => {
   if (data.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 px-6 py-10 text-center text-sm text-gray-500">
@@ -227,9 +257,15 @@ const SubRegionBarChart: React.FC<SubRegionBarChartProps> = ({ data, selectedId,
             key={subRegion.subRegionId}
             type="button"
             onClick={() => onSelect?.(subRegion.subRegionId)}
-            className={`w-full rounded-xl border px-4 py-3 text-left shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${
+            className={`w-full rounded-xl border px-4 py-3 text-left shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${
               isSelected ? 'border-blue-200 bg-blue-50/70' : 'border-gray-100 bg-white'
-            } ${onSelect ? 'hover:translate-y-[-1px] hover:shadow-md' : 'cursor-default'}`}
+            } ${
+              onSelect
+                ? reduceMotion
+                  ? ''
+                  : 'transition hover:translate-y-[-1px] hover:shadow-md'
+                : 'cursor-default'
+            }`}
             aria-pressed={isSelected}
           >
             <div className="flex items-center justify-between text-sm font-medium text-slate-700">
@@ -290,9 +326,10 @@ interface RegionMapPreviewProps {
   regions: AggregatedRegionStats[];
   selectedRegionId: string | null;
   onSelect: (regionId: string) => void;
+  reduceMotion?: boolean;
 }
 
-const RegionMapPreview: React.FC<RegionMapPreviewProps> = ({ metadata, regions, selectedRegionId, onSelect }) => {
+const RegionMapPreview: React.FC<RegionMapPreviewProps> = ({ metadata, regions, selectedRegionId, onSelect, reduceMotion }) => {
   const entries = metadata?.regions ?? [];
   const metaMap = new Map(entries.map((entry) => [entry.id, entry]));
   const points = regions
@@ -342,9 +379,9 @@ const RegionMapPreview: React.FC<RegionMapPreviewProps> = ({ metadata, regions, 
               key={region.regionId}
               type="button"
               onClick={() => onSelect(region.regionId)}
-              className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full border text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${
+              className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full border text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${
                 isSelected ? 'border-red-500 bg-red-500 text-white shadow-lg' : 'border-white/70 bg-white/90 text-slate-600 shadow'
-              }`}
+              } ${reduceMotion ? '' : 'transition'}`}
               style={{ top: `${top}%`, left: `${left}%`, width: `${size}px`, height: `${size}px` }}
               aria-pressed={isSelected}
               title={`${region.regionName}: ${region.totalInRange.toLocaleString()}건`}
@@ -371,6 +408,106 @@ const RegionMapPreview: React.FC<RegionMapPreviewProps> = ({ metadata, regions, 
   );
 };
 
+interface TrendWindowConfig {
+  id: '7d' | '30d' | '90d' | 'all';
+  label: string;
+  days: number | null;
+}
+
+const COMPARISON_WINDOWS: TrendWindowConfig[] = [
+  { id: '7d', label: '최근 7일', days: 7 },
+  { id: '30d', label: '최근 30일', days: 30 },
+  { id: '90d', label: '최근 90일', days: 90 },
+  { id: 'all', label: '전체 기간', days: null }
+];
+
+const Sparkline: React.FC<{ data: number[] }> = ({ data }) => {
+  if (data.length === 0) {
+    return null;
+  }
+
+  const max = Math.max(...data);
+  const min = Math.min(...data);
+  const range = max - min || 1;
+  const points = data
+    .map((value, index) => {
+      const x = data.length === 1 ? 0 : (index / (data.length - 1)) * 100;
+      const y = 100 - ((value - min) / range) * 100;
+      return `${x},${y}`;
+    })
+    .join(' ');
+
+  return (
+    <svg viewBox="0 0 100 60" preserveAspectRatio="none" className="mt-2 h-16 w-full" aria-hidden>
+      <polyline points={points} fill="none" stroke="#ef4444" strokeWidth={2.5} strokeLinecap="round" />
+    </svg>
+  );
+};
+
+interface TrendComparisonPanelProps {
+  sourceLabel: string;
+  daily: { date: string; totalCases: number }[];
+}
+
+const TrendComparisonPanel: React.FC<TrendComparisonPanelProps> = ({ sourceLabel, daily }) => {
+  if (!daily || daily.length === 0) {
+    return null;
+  }
+
+  const windows = COMPARISON_WINDOWS.map((window) => {
+    const slice = window.days ? daily.slice(-window.days) : daily;
+    if (slice.length === 0) {
+      return null;
+    }
+
+    const totals = slice.map((entry) => entry.totalCases);
+    const first = totals[0] || 0;
+    const last = totals[totals.length - 1] || 0;
+    const change = first === 0 ? 0 : ((last - first) / first) * 100;
+    const trendLabel = change === 0 ? '변화 없음' : change > 0 ? `+${change.toFixed(1)}%` : `${change.toFixed(1)}%`;
+
+    return {
+      ...window,
+      totals,
+      change,
+      trendLabel
+    };
+  }).filter((entry): entry is TrendWindowConfig & { totals: number[]; change: number; trendLabel: string } => Boolean(entry));
+
+  if (windows.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100">
+      <div className="flex items-center justify-between">
+        <h4 className="text-sm font-semibold text-slate-700">기간별 신고 추이 비교</h4>
+        <span className="text-xs text-slate-400">기준: {sourceLabel}</span>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        {windows.map((window) => (
+          <div key={window.id} className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+            <div className="flex items-center justify-between text-xs text-slate-400">
+              <span>{window.label}</span>
+              <span
+                className={`font-semibold ${
+                  window.change === 0 ? 'text-slate-400' : window.change > 0 ? 'text-red-500' : 'text-blue-500'
+                }`}
+              >
+                {window.trendLabel}
+              </span>
+            </div>
+            <Sparkline data={window.totals} />
+            <div className="mt-2 text-xs text-slate-500">
+              최근 {window.totals[window.totals.length - 1].toLocaleString()}건
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+};
+
 const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) => {
   const [range, setRange] = useState<RegionStatsRange>('week');
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
@@ -378,6 +515,7 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
   const selectionInitializedRef = useRef(false);
 
   const { loading, error, stats, metadata, regions, totals, refreshedAt, lastFetchedAt, refresh } = useRegionStatsData(isOpen, range);
+  const prefersReducedMotion = usePrefersReducedMotion();
 
   useModalBodyScroll(isOpen);
 
@@ -493,6 +631,33 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
 
   const regionOptions = useMemo(() => stats?.regions.slice().sort((a, b) => a.regionName.localeCompare(b.regionName)) ?? [], [stats]);
 
+  const overallDaily = useMemo(() => {
+    if (!stats) {
+      return [] as { date: string; totalCases: number; activeCases: number }[];
+    }
+
+    const map = new Map<string, { totalCases: number; activeCases: number }>();
+    for (const region of stats.regions) {
+      for (const entry of region.daily) {
+        const current = map.get(entry.date) ?? { totalCases: 0, activeCases: 0 };
+        current.totalCases += entry.totalCases;
+        current.activeCases += entry.activeCases;
+        map.set(entry.date, current);
+      }
+    }
+
+    return Array.from(map.entries())
+      .map(([date, totals]) => ({ date, totalCases: totals.totalCases, activeCases: totals.activeCases }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [stats]);
+
+  const trendDaily = useMemo(() => {
+    if (selectedRegionFull) {
+      return selectedRegionFull.daily;
+    }
+    return overallDaily;
+  }, [selectedRegionFull, overallDaily]);
+
   const handleRegionSelect = (regionId: string) => {
     setSelectedRegionId((current) => (current === regionId ? null : regionId));
     setSelectedSubRegionId(null);
@@ -501,6 +666,34 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
   const handleSubRegionSelect = (subRegionId: string) => {
     setSelectedSubRegionId((current) => (current === subRegionId ? null : subRegionId));
   };
+
+  const handleDownloadCsv = useCallback(() => {
+    const targetName = selectedRegionAggregated ? selectedRegionAggregated.regionName : '전국';
+    const targetId = selectedRegionAggregated ? selectedRegionAggregated.regionId : 'national';
+    const dataSource = selectedRegionFull ? selectedRegionFull.daily : overallDaily;
+
+    if (!dataSource || dataSource.length === 0 || typeof window === 'undefined') {
+      return;
+    }
+
+    const header = 'date,totalCases,activeCases\n';
+    const rows = dataSource
+      .map((entry) => `${entry.date},${entry.totalCases},${entry.activeCases ?? 0}`)
+      .join('\n');
+    const csvContent = `${header}${rows}`;
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `region-stats-${targetId}.csv`;
+    link.setAttribute('aria-label', `${targetName} 통계 CSV 다운로드`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [overallDaily, selectedRegionAggregated, selectedRegionFull]);
 
   if (!isOpen) {
     return null;
@@ -617,6 +810,7 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
                 regions={regions}
                 selectedRegionId={selectedRegionId}
                 onSelect={handleRegionSelect}
+                reduceMotion={prefersReducedMotion}
               />
 
               <details className="rounded-2xl bg-white p-4 text-xs text-slate-500 shadow-sm ring-1 ring-slate-100" open>
@@ -707,6 +901,7 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
                       data={aggregatedSubRegions}
                       selectedId={selectedSubRegionId}
                       onSelect={handleSubRegionSelect}
+                      reduceMotion={prefersReducedMotion}
                     />
                   ) : (
                     <RegionBarChart
@@ -714,9 +909,15 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
                       selectedId={selectedRegionId}
                       onSelect={handleRegionSelect}
                       emptyMessage="지역 데이터를 불러올 수 없습니다."
+                      reduceMotion={prefersReducedMotion}
                     />
                   )}
                 </div>
+
+                <TrendComparisonPanel
+                  sourceLabel={selectedRegionAggregated ? selectedRegionAggregated.regionName : '전국'}
+                  daily={trendDaily}
+                />
               </div>
 
               {selectedSubRegionAggregated && (
@@ -750,6 +951,13 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
             <span className="hidden md:inline">• 데이터는 1시간마다 자동 갱신됩니다</span>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleDownloadCsv}
+              className="rounded-full border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-500 transition hover:bg-slate-100"
+            >
+              CSV 다운로드
+            </button>
             <button
               type="button"
               onClick={() => {
