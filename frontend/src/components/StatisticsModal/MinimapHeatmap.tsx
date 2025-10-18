@@ -17,6 +17,12 @@ const BASE_REGION_FILL = '#e2e8f0';
 const BUCKET_FILLS = ['#ffffff', '#fff7cc', '#fdba74', '#f97316', '#dc2626'] as const;
 const REGION_STROKE_COLOR = '#ffffff';
 const REGION_STROKE_WIDTH = '0.6';
+const NUMBER_FORMATTER = new Intl.NumberFormat('ko-KR');
+const PERCENT_FORMATTER = new Intl.NumberFormat('ko-KR', {
+  style: 'percent',
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 1
+});
 
 const buildGroupSelector = (value: string): string => {
   const safe = value.replace(/"/g, '\\"');
@@ -32,6 +38,20 @@ const applyRegionFill = (group: SVGGElement, fill: string) => {
     segment.setAttribute('stroke-linejoin', 'round');
   });
 };
+
+const HOVER_FILTER = 'drop-shadow(0 0 8px rgba(15,23,42,0.25))';
+const SELECTED_FILTER = 'drop-shadow(0 0 12px rgba(220,38,38,0.45))';
+
+interface TooltipState {
+  regionId: string;
+  name: string;
+  total: number;
+  active: number;
+  ratio: number;
+  bucketLabel: string;
+  x: number;
+  y: number;
+}
 
 let cachedSilhouette: string | null = null;
 let silhouettePromise: Promise<string> | null = null;
@@ -68,11 +88,15 @@ const loadSilhouette = async (): Promise<string> => {
   return silhouettePromise!;
 };
 
-const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions }) => {
+const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions, selectedRegionId, onSelect, reduceMotion }) => {
   const [svgMarkup, setSvgMarkup] = useState<string | null>(cachedSilhouette);
   const [loadError, setLoadError] = useState<string | null>(null);
   const svgContainerRef = useRef<HTMLDivElement>(null);
   const regionElementsRef = useRef<Map<string, SVGGElement>>(new Map());
+  const regionCleanupRef = useRef<Map<string, () => void>>(new Map());
+  const prefersReducedMotion = Boolean(reduceMotion);
+  const [hoveredRegionId, setHoveredRegionId] = useState<string | null>(null);
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null);
 
   const metaMap = useMemo(() => {
     if (!metadata?.regions) {
@@ -102,6 +126,47 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions }
     },
     [intensityMap]
   );
+
+  const showTooltip = useCallback(
+    (regionId: string, group: SVGGElement) => {
+      const container = svgContainerRef.current;
+      if (!container) {
+        return;
+      }
+      const region = regionById.get(regionId);
+      const intensity = intensityMap[regionId];
+      const hostRect = container.getBoundingClientRect();
+      const bounds = group.getBoundingClientRect();
+      const centerX = bounds.left + bounds.width / 2 - hostRect.left;
+      const topY = bounds.top - hostRect.top;
+      const clampedX = Math.min(Math.max(centerX, 40), Math.max(hostRect.width - 40, 40));
+      const vertical = Math.max(topY, 42);
+
+      setTooltip({
+        regionId,
+        name: region?.regionName ?? group.dataset.regionLabel ?? '알 수 없음',
+        total: region?.totalInRange ?? 0,
+        active: region?.activeInRange ?? 0,
+        ratio: intensity?.ratio ?? 0,
+        bucketLabel: intensity?.bucket.label ?? '데이터 없음',
+        x: clampedX,
+        y: vertical
+      });
+    },
+    [intensityMap, regionById]
+  );
+
+  const hideTooltip = useCallback((regionId?: string) => {
+    setTooltip((current) => {
+      if (!current) {
+        return null;
+      }
+      if (regionId && current.regionId !== regionId) {
+        return current;
+      }
+      return null;
+    });
+  }, []);
 
   const { matchedShapes, unmatchedRegions } = useMemo(() => {
     return regions.reduce<{
@@ -161,7 +226,11 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions }
 
   useEffect(() => {
     if (!svgMarkup) {
+      regionCleanupRef.current.forEach((dispose) => dispose());
+      regionCleanupRef.current.clear();
       regionElementsRef.current.clear();
+      setHoveredRegionId(null);
+      hideTooltip();
       return;
     }
 
@@ -175,6 +244,10 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions }
       return;
     }
 
+    const cleanupMap = regionCleanupRef.current;
+    cleanupMap.forEach((dispose) => dispose());
+    cleanupMap.clear();
+
     const groups = svg.querySelectorAll<SVGGElement>('g[id]');
     groups.forEach((group) => {
       group.removeAttribute('data-region-id');
@@ -185,6 +258,9 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions }
       group.removeAttribute('data-ratio');
       group.removeAttribute('data-bucket-id');
       group.style.cursor = 'default';
+      group.style.transition = prefersReducedMotion ? 'none' : 'filter 180ms ease, transform 180ms ease';
+      group.setAttribute('role', 'presentation');
+      group.removeAttribute('tabindex');
       applyRegionFill(group, BASE_REGION_FILL);
     });
 
@@ -208,13 +284,85 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions }
         group.removeAttribute('data-region-code');
       }
       group.style.cursor = 'pointer';
+      group.style.transition = prefersReducedMotion ? 'none' : 'filter 180ms ease, transform 180ms ease';
+      group.setAttribute('role', 'button');
+      group.setAttribute('tabindex', '-1');
+      group.setAttribute('aria-label', regionLabel);
       applyRegionFill(group, BASE_REGION_FILL);
       elementMap.set(regionId, group);
+
+      const handlePointerEnter = () => {
+        setHoveredRegionId(regionId);
+        showTooltip(regionId, group);
+      };
+
+      const handlePointerMove = () => {
+        showTooltip(regionId, group);
+      };
+
+      const handlePointerLeave = () => {
+        setHoveredRegionId((prev) => (prev === regionId ? null : prev));
+        hideTooltip(regionId);
+      };
+
+      const handleClick = () => {
+        onSelect(regionId);
+        showTooltip(regionId, group);
+      };
+
+      const handleKeyDown = (event: KeyboardEvent) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onSelect(regionId);
+          showTooltip(regionId, group);
+        }
+        if (event.key === 'Escape') {
+          hideTooltip(regionId);
+          setHoveredRegionId((prev) => (prev === regionId ? null : prev));
+        }
+      };
+
+      const handleFocusIn = () => {
+        setHoveredRegionId(regionId);
+        showTooltip(regionId, group);
+      };
+
+      const handleFocusOut = () => {
+        setHoveredRegionId((prev) => (prev === regionId ? null : prev));
+        hideTooltip(regionId);
+      };
+
+      group.addEventListener('pointerenter', handlePointerEnter);
+      group.addEventListener('pointermove', handlePointerMove);
+      group.addEventListener('pointerleave', handlePointerLeave);
+      group.addEventListener('pointercancel', handlePointerLeave);
+      group.addEventListener('click', handleClick);
+      group.addEventListener('keydown', handleKeyDown);
+      group.addEventListener('focusin', handleFocusIn);
+      group.addEventListener('focusout', handleFocusOut);
+
+      cleanupMap.set(regionId, () => {
+        group.removeEventListener('pointerenter', handlePointerEnter);
+        group.removeEventListener('pointermove', handlePointerMove);
+        group.removeEventListener('pointerleave', handlePointerLeave);
+        group.removeEventListener('pointercancel', handlePointerLeave);
+        group.removeEventListener('click', handleClick);
+        group.removeEventListener('keydown', handleKeyDown);
+        group.removeEventListener('focusin', handleFocusIn);
+        group.removeEventListener('focusout', handleFocusOut);
+      });
     });
 
     regionElementsRef.current = elementMap;
     updateRegionColors(elementMap);
-  }, [matchedShapes, regionById, svgMarkup, updateRegionColors]);
+    return () => {
+      cleanupMap.forEach((dispose) => dispose());
+      cleanupMap.clear();
+      if (regionElementsRef.current === elementMap) {
+        regionElementsRef.current.clear();
+      }
+    };
+  }, [hideTooltip, matchedShapes, onSelect, prefersReducedMotion, regionById, showTooltip, svgMarkup, updateRegionColors]);
   useEffect(() => {
     const elements = regionElementsRef.current;
     if (elements.size === 0) {
@@ -224,10 +372,63 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions }
   }, [updateRegionColors]);
 
   useEffect(() => {
+    const elements = regionElementsRef.current;
+    if (elements.size === 0) {
+      return;
+    }
+    elements.forEach((group, regionId) => {
+      const isSelected = regionId === selectedRegionId;
+      const isHovered = regionId === hoveredRegionId;
+      group.style.filter = isSelected ? SELECTED_FILTER : isHovered ? HOVER_FILTER : 'none';
+      if (prefersReducedMotion) {
+        group.style.transform = 'none';
+      } else {
+        group.style.transform = isSelected ? 'scale(1.02)' : isHovered ? 'scale(1.01)' : 'scale(1)';
+      }
+      group.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+    });
+  }, [hoveredRegionId, prefersReducedMotion, selectedRegionId]);
+
+  useEffect(() => {
     if (process.env.NODE_ENV !== 'production' && unmatchedRegions.length > 0) {
       console.warn('[MinimapHeatmap] SVG 매핑 누락 지역', unmatchedRegions);
     }
   }, [unmatchedRegions]);
+
+  useEffect(() => {
+    if (!tooltip) {
+      return;
+    }
+    const region = regionById.get(tooltip.regionId);
+    if (!region) {
+      return;
+    }
+    const intensity = intensityMap[tooltip.regionId];
+    setTooltip((current) => {
+      if (!current || current.regionId !== tooltip.regionId) {
+        return current;
+      }
+      const updatedTotal = region.totalInRange ?? 0;
+      const updatedActive = region.activeInRange ?? 0;
+      const updatedRatio = intensity?.ratio ?? 0;
+      const updatedBucket = intensity?.bucket.label ?? current.bucketLabel;
+      if (
+        current.total === updatedTotal &&
+        current.active === updatedActive &&
+        current.ratio === updatedRatio &&
+        current.bucketLabel === updatedBucket
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        total: updatedTotal,
+        active: updatedActive,
+        ratio: updatedRatio,
+        bucketLabel: updatedBucket
+      };
+    });
+  }, [intensityMap, regionById, tooltip]);
 
   return (
     <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
@@ -250,6 +451,25 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions }
             <div className="absolute inset-0 flex items-center justify-center px-4 text-xs text-red-500">{loadError}</div>
           ) : (
             <div className="absolute inset-0 flex items-center justify-center px-4 text-xs text-slate-400">지도를 불러오는 중...</div>
+          )}
+          {tooltip && (
+            <div
+              className="pointer-events-none absolute z-10 flex -translate-x-1/2 -translate-y-3 flex-col items-center"
+              style={{ left: `${tooltip.x}px`, top: `${tooltip.y}px` }}
+            >
+              <div className="rounded-lg bg-slate-900/90 px-3 py-2 text-[10px] text-white shadow-lg ring-1 ring-slate-900/60">
+                <div className="text-[11px] font-semibold text-white">{tooltip.name}</div>
+                <div className="mt-1 flex items-center gap-1 text-[10px] text-white/75">
+                  <span>{`총 ${NUMBER_FORMATTER.format(Math.round(tooltip.total))}건`}</span>
+                  <span aria-hidden>•</span>
+                  <span>{`활성 ${NUMBER_FORMATTER.format(Math.round(tooltip.active))}건`}</span>
+                </div>
+                <div className="mt-1 text-[10px] text-amber-200">
+                  {`${tooltip.bucketLabel} · ${PERCENT_FORMATTER.format(Math.max(0, Math.min(tooltip.ratio, 1)))}`}
+                </div>
+              </div>
+              <div className="h-0 w-0 border-x-[6px] border-t-[6px] border-x-transparent border-t-slate-900/90" />
+            </div>
           )}
           {regions.length === 0 && !loadError && (
             <div className="absolute inset-0 flex items-center justify-center bg-white/60 text-xs text-slate-400">표시할 집계가 없습니다.</div>

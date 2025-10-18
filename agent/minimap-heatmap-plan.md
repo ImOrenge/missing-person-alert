@@ -43,9 +43,9 @@
 - [x] SVG path 반복 렌더링 시 지역별 클래스/스타일 바인딩, 기본 윤곽선 스타일 적용
 
 ### Phase 3. 인터랙션 및 상태 연동
-- [ ] Hover/Focus 이벤트 핸들러 추가 → 툴팁에 지역명·총 신고수·활성 건수·퍼센트 표시
-- [ ] 클릭/엔터 시 `StatisticsModal`과 상태 공유(`handleRegionSelect`)로 하단 패널 싱크
-- [ ] 선택 상태 유지 로직 구성: 모달 내 다른 액션 후에도 마지막 선택이 남도록 store 연동
+- [x] Hover/Focus 이벤트 핸들러 추가 → 툴팁에 지역명·총 신고수·활성 건수·퍼센트 표시
+- [x] 클릭/엔터 시 `StatisticsModal`과 상태 공유(`handleRegionSelect`)로 하단 패널 싱크
+- [x] 선택 상태 유지 로직 구성: 모달 내 다른 액션 후에도 마지막 선택이 남도록 store 연동
 
 ### Phase 4. 접근성·반응형 보강
 - [ ] Tab 순서가 SVG path에 도달하도록 `tabIndex`/`aria-label` 세팅
