@@ -38,9 +38,9 @@
 - [x] 정규화 유틸(`getRegionIntensity`) 작성: 전체 대비 비율 계산 + 5단계 버킷 라벨 반환
 
 ### Phase 2. Choropleth 컴포넌트 구성
-- [ ] `MinimapHeatmap.tsx` (가칭) 생성 후 `korea-silhouette.svg` import → React 컴포넌트로 인라인
-- [ ] D3 `scaleSequential` 또는 `scaleThreshold`로 색상 스케일 생성, 팔레트(백→노→주→적) 연결
-- [ ] SVG path 반복 렌더링 시 지역별 클래스/스타일 바인딩, 기본 윤곽선 스타일 적용
+- [x] `MinimapHeatmap.tsx` (가칭) 생성 후 `korea-silhouette.svg` import → React 컴포넌트로 인라인
+- [x] D3 `scaleSequential` 또는 `scaleThreshold`로 색상 스케일 생성, 팔레트(백→노→주→적) 연결
+- [x] SVG path 반복 렌더링 시 지역별 클래스/스타일 바인딩, 기본 윤곽선 스타일 적용
 
 ### Phase 3. 인터랙션 및 상태 연동
 - [ ] Hover/Focus 이벤트 핸들러 추가 → 툴팁에 지역명·총 신고수·활성 건수·퍼센트 표시
