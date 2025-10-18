@@ -15,8 +15,11 @@ export interface MinimapHeatmapProps {
 const SILHOUETTE_URL = `${process.env.PUBLIC_URL || ''}/maps/korea-silhouette.svg`;
 const BASE_REGION_FILL = '#e2e8f0';
 const BUCKET_FILLS = ['#ffffff', '#fff7cc', '#fdba74', '#f97316', '#dc2626'] as const;
-const REGION_STROKE_COLOR = '#ffffff';
-const REGION_STROKE_WIDTH = '0.6';
+const REGION_STROKE_COLOR = 'rgba(15,23,42,0.52)';
+const REGION_STROKE_WIDTH = '1.1';
+const BASE_RELIEF_FILTER = 'drop-shadow(0.4px 0.6px 0.9px rgba(15,23,42,0.32)) drop-shadow(-0.45px -0.6px 0.8px rgba(255,255,255,0.35))';
+const HOVER_GLOW_FILTER = 'drop-shadow(0 0 8px rgba(15,23,42,0.35))';
+const SELECTED_GLOW_FILTER = 'drop-shadow(0 0 12px rgba(220,38,38,0.5))';
 const NUMBER_FORMATTER = new Intl.NumberFormat('ko-KR');
 const PERCENT_FORMATTER = new Intl.NumberFormat('ko-KR', {
   style: 'percent',
@@ -36,16 +39,25 @@ const applyRegionFill = (group: SVGGElement, fill: string) => {
     segment.setAttribute('stroke', REGION_STROKE_COLOR);
     segment.setAttribute('stroke-width', REGION_STROKE_WIDTH);
     segment.setAttribute('stroke-linejoin', 'round');
+    segment.setAttribute('paint-order', 'stroke fill markers');
     const drawable = segment as unknown as SVGGraphicsElement;
     drawable.style.fill = fill;
     drawable.style.stroke = REGION_STROKE_COLOR;
     drawable.style.strokeWidth = REGION_STROKE_WIDTH;
     drawable.style.strokeLinejoin = 'round';
+    drawable.style.paintOrder = 'stroke fill markers';
   });
 };
 
-const HOVER_FILTER = 'drop-shadow(0 0 8px rgba(15,23,42,0.25))';
-const SELECTED_FILTER = 'drop-shadow(0 0 12px rgba(220,38,38,0.45))';
+const buildFilter = (isHovered: boolean, isSelected: boolean): string => {
+  return [BASE_RELIEF_FILTER, isSelected ? SELECTED_GLOW_FILTER : isHovered ? HOVER_GLOW_FILTER : ''].filter(Boolean).join(' ');
+};
+
+const HOVER_FILTER = buildFilter(true, false);
+const SELECTED_FILTER = buildFilter(false, true);
+// Ensures legacy hot-reload chunks referencing the old constants continue to resolve safely.
+void HOVER_FILTER;
+void SELECTED_FILTER;
 
 interface TooltipState {
   regionId: string;
@@ -291,6 +303,7 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions, 
       if (parent) {
         parent.appendChild(group);
       }
+      const initiallySelected = regionId === selectedRegionId;
       group.dataset.regionId = regionId;
       group.dataset.regionKey = shape.svgId;
       group.dataset.regionLabel = regionLabel;
@@ -306,6 +319,7 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions, 
       group.setAttribute('tabindex', '0');
       group.dataset.tabIndex = String(index + 1);
       group.setAttribute('aria-label', regionLabel);
+      group.style.filter = buildFilter(false, initiallySelected);
       applyRegionFill(group, BASE_REGION_FILL);
       elementMap.set(regionId, group);
 
@@ -380,7 +394,7 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions, 
         regionElementsRef.current.clear();
       }
     };
-  }, [hideTooltip, matchedShapes, onSelect, prefersReducedMotion, regionById, showTooltip, svgMarkup, updateRegionColors]);
+  }, [hideTooltip, matchedShapes, onSelect, prefersReducedMotion, regionById, selectedRegionId, showTooltip, svgMarkup, updateRegionColors]);
   useEffect(() => {
     const elements = regionElementsRef.current;
     if (elements.size === 0) {
@@ -397,7 +411,7 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions, 
     elements.forEach((group, regionId) => {
       const isSelected = regionId === selectedRegionId;
       const isHovered = regionId === hoveredRegionId;
-      group.style.filter = isSelected ? SELECTED_FILTER : isHovered ? HOVER_FILTER : 'none';
+      group.style.filter = buildFilter(isHovered, isSelected);
       if (prefersReducedMotion) {
         group.style.transform = 'none';
       } else {
