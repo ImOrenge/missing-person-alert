@@ -36,6 +36,11 @@ const applyRegionFill = (group: SVGGElement, fill: string) => {
     segment.setAttribute('stroke', REGION_STROKE_COLOR);
     segment.setAttribute('stroke-width', REGION_STROKE_WIDTH);
     segment.setAttribute('stroke-linejoin', 'round');
+    const drawable = segment as unknown as SVGGraphicsElement;
+    drawable.style.fill = fill;
+    drawable.style.stroke = REGION_STROKE_COLOR;
+    drawable.style.strokeWidth = REGION_STROKE_WIDTH;
+    drawable.style.strokeLinejoin = 'round';
   });
 };
 
