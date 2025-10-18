@@ -48,9 +48,9 @@
 - [x] 선택 상태 유지 로직 구성: 모달 내 다른 액션 후에도 마지막 선택이 남도록 store 연동
 
 ### Phase 4. 접근성·반응형 보강
-- [ ] Tab 순서가 SVG path에 도달하도록 `tabIndex`/`aria-label` 세팅
-- [ ] `prefers-reduced-motion` 대응: 색상 전환 애니메이션 제거 또는 최소화
-- [ ] 모바일(≤480px) 레이아웃 검증: 정사각형 컨테이너, 터치 탭 탐색 UX 확인
+- [x] Tab 순서가 SVG path에 도달하도록 `tabIndex`/`aria-label` 세팅
+- [x] `prefers-reduced-motion` 대응: 색상 전환 애니메이션 제거 또는 최소화
+- [x] 모바일(≤480px) 레이아웃 검증: 정사각형 컨테이너, 터치 탭 탐색 UX 확인
 
 ### Phase 5. 품질 검증 및 배포 준비
 - [ ] Storybook 시나리오 5종(최저~최고 버킷) 스냅샷 테스트 추가

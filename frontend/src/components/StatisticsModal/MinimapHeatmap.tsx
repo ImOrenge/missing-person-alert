@@ -264,9 +264,17 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions, 
       applyRegionFill(group, BASE_REGION_FILL);
     });
 
+    const sortedEntries = Object.entries(matchedShapes).sort((entryA, entryB) => {
+      const regionA = regionById.get(entryA[0]);
+      const regionB = regionById.get(entryB[0]);
+      const labelA = regionA?.regionName ?? entryA[1].label;
+      const labelB = regionB?.regionName ?? entryB[1].label;
+      return labelA.localeCompare(labelB, 'ko-KR');
+    });
+
     const elementMap = new Map<string, SVGGElement>();
 
-    Object.entries(matchedShapes).forEach(([regionId, shape]) => {
+    sortedEntries.forEach(([regionId, shape], index) => {
       const selector = buildGroupSelector(shape.svgId);
       const group = svg.querySelector<SVGGElement>(selector);
       if (!group) {
@@ -274,6 +282,10 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions, 
       }
       const region = regionById.get(regionId);
       const regionLabel = region?.regionName ?? shape.label;
+      const parent = group.parentElement;
+      if (parent) {
+        parent.appendChild(group);
+      }
       group.dataset.regionId = regionId;
       group.dataset.regionKey = shape.svgId;
       group.dataset.regionLabel = regionLabel;
@@ -286,7 +298,8 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions, 
       group.style.cursor = 'pointer';
       group.style.transition = prefersReducedMotion ? 'none' : 'filter 180ms ease, transform 180ms ease';
       group.setAttribute('role', 'button');
-      group.setAttribute('tabindex', '-1');
+      group.setAttribute('tabindex', '0');
+      group.dataset.tabIndex = String(index + 1);
       group.setAttribute('aria-label', regionLabel);
       applyRegionFill(group, BASE_REGION_FILL);
       elementMap.set(regionId, group);
