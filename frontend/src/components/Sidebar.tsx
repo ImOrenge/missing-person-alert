@@ -1,6 +1,8 @@
-import React from 'react';
-import { Filter, User, Clock, MapPin, X } from 'lucide-react';
+import React, { useMemo } from 'react';
+import { Filter, User, Clock, MapPin, X, MessageCircle, Search, Eye } from 'lucide-react';
 import { useEmergencyStore } from '../stores/emergencyStore';
+import type { MissingPersonStatus } from '../types';
+import { formatViewCount } from '../hooks/useViewCount';
 
 interface Props {
   onShowFilters: () => void;
@@ -58,13 +60,46 @@ const getTimeSince = (date: string): string => {
   return formattedDate;
 };
 
+const getStatusLabel = (status?: MissingPersonStatus | null): string => {
+  switch (status) {
+    case 'active':
+      return '수색중';
+    case 'investigating':
+      return '조사중';
+    case 'found':
+      return '발견 완료';
+    default:
+      return '상태 미상';
+  }
+};
+
+const getStatusStyle = (status?: MissingPersonStatus | null): string => {
+  switch (status) {
+    case 'active':
+      return 'bg-red-100 text-red-700';
+    case 'investigating':
+      return 'bg-yellow-100 text-yellow-700';
+    case 'found':
+      return 'bg-green-100 text-green-700';
+    default:
+      return 'bg-gray-100 text-gray-600';
+  }
+};
+
 export default function Sidebar({ onShowFilters, showFilters, onClose }: Props) {
-  const getFilteredPersons = useEmergencyStore(state => state.getFilteredPersons);
+  const missingPersons = useEmergencyStore(state => state.missingPersons);
+  const filters = useEmergencyStore(state => state.filters);
+  const sortOrder = useEmergencyStore(state => state.sortOrder);
   const selectedPersonId = useEmergencyStore(state => state.selectedPersonId);
   const hoveredPersonId = useEmergencyStore(state => state.hoveredPersonId);
   const setSelectedPersonId = useEmergencyStore(state => state.setSelectedPersonId);
   const setHoveredPersonId = useEmergencyStore(state => state.setHoveredPersonId);
-  const filteredPersons = getFilteredPersons();
+  const getFilteredPersons = useEmergencyStore(state => state.getFilteredPersons);
+
+  // useMemo로 필터링 결과 캐싱
+  const filteredPersons = useMemo(() => {
+    return getFilteredPersons();
+  }, [missingPersons, filters, sortOrder, getFilteredPersons]);
 
   return (
     <div className="w-full h-full md:w-80 bg-white md:border-r border-gray-200 flex flex-col shadow-lg">
@@ -116,6 +151,14 @@ export default function Sidebar({ onShowFilters, showFilters, onClose }: Props) 
               const isSelected = selectedPersonId === person.id;
               const isHovered = hoveredPersonId === person.id;
               const isHighlighted = isSelected || isHovered;
+              const totalComments =
+                typeof person.commentCount === 'number'
+                  ? person.commentCount
+                  : typeof person.commentStats?.total === 'number'
+                  ? person.commentStats.total
+                  : 0;
+              const statusLabel = getStatusLabel(person.status);
+              const statusClasses = getStatusStyle(person.status);
 
               return (
                 <div
@@ -197,9 +240,24 @@ export default function Sidebar({ onShowFilters, showFilters, onClose }: Props) 
                     </div>
                   </div>
                 </div>
+
+                <div className="mt-3 flex flex-wrap gap-2 text-xs font-medium">
+                  <div className={`flex items-center gap-1 rounded-lg px-2 py-1 ${statusClasses}`}>
+                    <Search size={14} />
+                    <span>{statusLabel}</span>
+                  </div>
+                  <div className="flex items-center gap-1 rounded-lg bg-blue-50 px-2 py-1 text-blue-600">
+                    <Eye size={14} />
+                    <span>{formatViewCount(person.viewCount || 0)}</span>
+                  </div>
+                  <div className="flex items-center gap-1 rounded-lg bg-gray-100 px-2 py-1 text-gray-600">
+                    <MessageCircle size={14} />
+                    <span>{totalComments.toLocaleString()}</span>
+                  </div>
+                </div>
               </div>
-              );
-            })}
+            );
+          })}
           </div>
         )}
       </div>

@@ -5,10 +5,11 @@ import {
   InfoWindow,
   useAdvancedMarkerRef
 } from '@vis.gl/react-google-maps';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 import { MissingPerson } from '../types';
 import ShareModal from './ShareModal';
 import CommentsPanel from './MissingPersonComments/CommentsPanel';
+import { useViewCount, formatViewCount } from '../hooks/useViewCount';
 
 interface Props {
   person: MissingPerson;
@@ -65,6 +66,9 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
   const [activeTab, setActiveTab] = useState<'details' | 'comments'>('details');
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
   const [hiddenPhotoIndexes, setHiddenPhotoIndexes] = useState<number[]>([]);
+
+  // 조회수 추적 (InfoWindow가 열렸을 때만)
+  const { viewCount } = useViewCount(isSelected ? person.id : null, true);
 
   useEffect(() => {
     const handleResize = () => setWindowWidth(window.innerWidth);
@@ -184,6 +188,7 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
                 <img
                   src={currentPhoto.url}
                   alt={`${person.name} 사진 ${activePhotoIndex + 1}`}
+                  loading="lazy"
                   style={{
                     width: '100%',
                     maxHeight: isMobile ? '140px' : '220px',
@@ -278,16 +283,34 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
               </div>
             )}
 
-            <h3
-              style={{
-                margin: isMobile ? '6px 0' : '10px 0',
-                fontSize: isMobile ? '15px' : '18px',
-                fontWeight: 'bold',
-                lineHeight: '1.3'
-              }}
-            >
-              {person.name}
-            </h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: isMobile ? '15px' : '18px',
+                  fontWeight: 'bold',
+                  lineHeight: '1.3'
+                }}
+              >
+                {person.name}
+              </h3>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '2px 8px',
+                  backgroundColor: '#e3f2fd',
+                  borderRadius: '12px',
+                  fontSize: isMobile ? '10px' : '11px',
+                  color: '#1976d2'
+                }}
+                title={`조회수: ${(viewCount || person.viewCount || 0).toLocaleString()}회`}
+              >
+                <Eye size={isMobile ? 12 : 14} />
+                <span>{formatViewCount(viewCount || person.viewCount || 0)}</span>
+              </div>
+            </div>
 
             <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
               <button

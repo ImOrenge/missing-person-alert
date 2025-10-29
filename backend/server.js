@@ -2,12 +2,10 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const nodeCron = require('node-cron');
-const WebSocketManager = require('./services/websocketManager');
 const APIPoller = require('./services/apiPoller');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const WS_PORT = process.env.WS_PORT || 8080;
 
 // CORS 설정
 const corsOptions = {
@@ -53,28 +51,34 @@ const corsOptions = {
   },
   credentials: true, // 쿠키 및 인증 헤더 허용
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-recaptcha-token']
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-recaptcha-token', 'x-guest-id']
 };
 
 app.use(cors(corsOptions));
 app.use(express.json());
+
+// Guest ID 로깅 미들웨어
+const { logGuestId } = require('./middleware/authMiddleware');
+app.use(logGuestId);
 
 // 라우터
 const authRouter = require('./routes/auth');
 const reportsRouter = require('./routes/reports');
 const apiRouter = require('./routes/api');
 const adminRouter = require('./routes/admin');
+const viewsRouter = require('./routes/views');
+const missingPagesRouter = require('./routes/missingPages');
 app.use('/api/auth', authRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/views', viewsRouter);
 app.use('/api', apiRouter);
+app.use('/', missingPagesRouter);
 
 console.log('✅ 실종자 제보 API 서버 시작');
 
-// WebSocket & 주기적 API Poller 초기화
-const wsManager = new WebSocketManager(WS_PORT);
-const apiPoller = new APIPoller(wsManager);
-global.wsManager = wsManager;
+// 주기적 API Poller 초기화 (Firestore 기반, WebSocket 제거됨)
+const apiPoller = new APIPoller();
 
 const pollIntervalMinutes = Number(process.env.API_POLL_INTERVAL_MINUTES || '5');
 const cronExpression = `*/${pollIntervalMinutes} * * * *`;

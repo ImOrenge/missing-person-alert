@@ -24,6 +24,8 @@ export interface MissingPerson {
   missingDate: string;
   type: MissingPersonType;
   status: MissingPersonStatus;
+  // 발견 사유 (자동 처리 시 기록)
+  foundReason?: string;
   // 안전드림 API 추가 필드
   height?: number;
   weight?: number;
@@ -42,6 +44,21 @@ export interface MissingPerson {
   };
   source?: 'user_report' | 'api';
   updatedAt?: number;
+  // API에서 마지막으로 확인된 시간 (자동 발견 처리용)
+  lastSeenInAPI?: number;
+  // 댓글 수 (commentCount로 통일, commentsCount는 deprecated)
+  commentCount?: number;
+  commentStats?: {
+    total?: number;
+    [key: string]: number | undefined;
+  };
+  // 조회 수
+  viewCount?: number;
+  viewStats?: {
+    total: number;
+    lastViewed?: number;
+    uniqueViewers?: number;
+  };
 }
 
 // 긴급재난문자

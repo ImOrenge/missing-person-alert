@@ -5,8 +5,7 @@ const firebaseService = require('./firebaseService');
 const storageService = require('./storageService');
 
 class APIPoller {
-  constructor(wsManager) {
-    this.wsManager = wsManager;
+  constructor() {
     this.lastFetchTime = new Date();
 
     // Geocoder 설정 (Google Maps API 또는 무료 대안 사용)
@@ -18,15 +17,6 @@ class APIPoller {
 
     // 주소-좌표 캐시 (반복 조회 방지)
     this.locationCache = new Map();
-
-    // 새 클라이언트 연결 시 Firebase에서 데이터 전송
-    this.wsManager.setOnNewConnection(async (client) => {
-      const recentData = await firebaseService.getMissingPersons(10);
-      if (recentData.length > 0) {
-        console.log(`🔄 새 클라이언트에게 Firebase에서 ${recentData.length}건 전송`);
-        this.wsManager.sendToClient(client, 'NEW_MISSING_PERSON', recentData);
-      }
-    });
   }
 
   /**
@@ -165,19 +155,22 @@ class APIPoller {
 
         if (totalChanges > 0) {
           console.log(`💾 신규 ${created}건, 갱신 ${updated}건 처리`);
-
-          // Firebase에서 최근 저장된 데이터 조회 후 WebSocket 전송
-          const recentlySaved = await firebaseService.getMissingPersons(totalChanges);
-
-          if (recentlySaved.length > 0) {
-            this.wsManager.broadcast('NEW_MISSING_PERSON', recentlySaved);
-            console.log(`📡 ${recentlySaved.length}건 WebSocket 전송 완료`);
-          }
-
+          console.log(`✅ Firestore 실시간 리스너를 통해 프론트엔드에 자동 전파됩니다`);
           this.lastFetchTime = new Date();
         } else {
           console.log('⏭️  저장할 신규/갱신 데이터 없음');
         }
+      }
+
+      // 자동 발견 처리: API에서 설정된 기간 이상 나타나지 않은 실종자 처리
+      try {
+        const autoMarkFoundDays = parseInt(process.env.AUTO_MARK_FOUND_DAYS) || 7;
+        const { markedAsFound } = await firebaseService.markStaleMissingPersonsAsFound(autoMarkFoundDays);
+        if (markedAsFound > 0) {
+          console.log(`✅ ${markedAsFound}건 자동 발견 처리 완료 (Firestore 실시간 업데이트)`);
+        }
+      } catch (error) {
+        console.error('⚠️ 자동 발견 처리 실패:', error.message);
       }
 
     } catch (error) {
@@ -269,6 +262,7 @@ class APIPoller {
       type,
       status: 'active',
       source: 'api', // API 데이터 표시
+      lastSeenInAPI: Date.now(), // API에서 확인된 현재 시간
       height: apiData.height || null,
       weight: apiData.bdwgh || null,
       clothes: apiData.alldressingDscd || null,
