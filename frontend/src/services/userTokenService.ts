@@ -138,7 +138,15 @@ export const syncUserFcmToken = async (uid: string, token: string) => {
 
   const previousState = readLocalTokenState();
   if (previousState?.uid && previousState.uid !== uid && previousState.token) {
-    await detachFcmToken(previousState.uid, previousState.token, { skipLocalUpdate: true });
+    try {
+      await detachFcmToken(previousState.uid, previousState.token, { skipLocalUpdate: true });
+    } catch (error: any) {
+      if (error?.code === 'permission-denied') {
+        console.warn('[PushToken] 이전 사용자 토큰을 해제할 권한이 없어 무시합니다.', error);
+      } else {
+        console.warn('[PushToken] 이전 사용자 토큰 해제 실패 (무시 가능):', error);
+      }
+    }
   }
 
   const tokenRef = doc(firestore, 'userTokens', uid);

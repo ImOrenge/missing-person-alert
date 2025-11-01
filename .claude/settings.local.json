@@ -27,7 +27,9 @@
       "Bash(git commit:*)",
       "Bash(firebase functions:list:*)",
       "Bash(firebase functions:log:*)",
-      "Bash(firebase functions:config:get:*)"
+      "Bash(firebase functions:config:get:*)",
+      "Bash(npx tsc:*)",
+      "Bash(cd:*)"
     ],
     "deny": [],
     "ask": []

@@ -5,11 +5,23 @@
   padding: 0 !important;
   border-radius: 12px !important;
   overflow: hidden !important;
+  max-width: 360px;
 }
 
 .gm-style .gm-style-iw-d {
   overflow: auto !important;
   max-height: 400px !important;
+}
+
+@media (max-width: 768px) {
+  .gm-style .gm-style-iw-c {
+    max-width: calc(100vw - 16px) !important;
+    width: calc(100vw - 16px) !important;
+  }
+
+  .gm-style .gm-style-iw-d {
+    max-height: calc(100vh - var(--app-header-height, 96px) - 16px) !important;
+  }
 }
 
 /* 토스트 알림 커스텀 */

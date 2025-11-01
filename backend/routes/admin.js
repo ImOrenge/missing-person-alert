@@ -270,6 +270,68 @@ router.get('/statistics', async (req, res) => {
     // 시간순 정렬
     recentActivity.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
+    // 실시간 세션 정보
+    const activeSessionThresholdMinutes = 5;
+    const activeSessionThresholdMs = activeSessionThresholdMinutes * 60 * 1000;
+
+    const [activeSessionsSnapshot, visitorStatsDoc] = await Promise.all([
+      db.collection('activeSessions').get(),
+      db.collection('appMetrics').doc('visitorStats').get()
+    ]);
+
+    const visitorStatsData = visitorStatsDoc.exists ? visitorStatsDoc.data() : {};
+    const visitorUpdatedAt = typeof visitorStatsData?.updatedAt === 'number'
+      ? visitorStatsData.updatedAt
+      : visitorStatsData?.updatedAt?.toMillis?.() ?? null;
+
+    const totalSessionsValue = [
+      visitorStatsData?.totalSessions,
+      visitorStatsData?.totalVisitors
+    ].find((value) => typeof value === 'number' && Number.isFinite(value));
+
+    const todaySessionsValue = [
+      visitorStatsData?.todaySessions,
+      visitorStatsData?.todayVisitors
+    ].find((value) => typeof value === 'number' && Number.isFinite(value));
+
+    const activeSessionsRaw = activeSessionsSnapshot.docs.map((doc) => {
+      const session = doc.data() || {};
+      const lastActive = typeof session.lastActive === 'number' ? session.lastActive : 0;
+      const createdAt = typeof session.createdAt === 'number'
+        ? session.createdAt
+        : session.createdAt?.toMillis?.() ?? null;
+      const updatedAt = typeof session.updatedAt === 'number'
+        ? session.updatedAt
+        : session.updatedAt?.toMillis?.() ?? null;
+
+      const inferredActive = lastActive > 0 && now.getTime() - lastActive <= activeSessionThresholdMs;
+      const explicitActive = typeof session.isActive === 'boolean' ? session.isActive : null;
+      const isActive = explicitActive ?? inferredActive;
+
+      return {
+        sessionId: session.sessionId || doc.id,
+        userId: session.userId ?? null,
+        userEmail: session.userEmail ?? null,
+        displayName: session.displayName ?? null,
+        userAgent: session.userAgent ?? null,
+        platform: session.platform ?? null,
+        createdAt,
+        updatedAt,
+        lastActive,
+        isActive,
+        lastActiveAgoMs: lastActive > 0 ? now.getTime() - lastActive : null
+      };
+    });
+
+    const liveSessions = activeSessionsRaw
+      .filter((session) => session.isActive && (!session.lastActive || now.getTime() - session.lastActive <= activeSessionThresholdMs))
+      .sort((a, b) => (b.lastActive || 0) - (a.lastActive || 0));
+
+    const activeSessionsCount = liveSessions.length;
+    const authenticatedSessionsCount = liveSessions.filter((session) => !!session.userId).length;
+    const guestSessionsCount = liveSessions.filter((session) => !session.userId).length;
+    const liveSessionsLimited = liveSessions.slice(0, 25);
+
     res.json({
       success: true,
       statistics: {
@@ -289,6 +351,16 @@ router.get('/statistics', async (req, res) => {
           withReports: usersWithReports.size,
           todayRegistered: todayUsers.length,
           weekRegistered: weekUsers.length
+        },
+        sessions: {
+          totalSessions: typeof totalSessionsValue === 'number' ? totalSessionsValue : activeSessionsSnapshot.size,
+          todaySessions: typeof todaySessionsValue === 'number' ? todaySessionsValue : 0,
+          activeSessions: activeSessionsCount,
+          activeAuthenticated: authenticatedSessionsCount,
+          activeGuests: guestSessionsCount,
+          liveSessions: liveSessionsLimited,
+          lastUpdated: visitorUpdatedAt ?? now.getTime(),
+          activeThresholdMinutes: activeSessionThresholdMinutes
         },
         locations,
         recentActivity: recentActivity.slice(0, 10)

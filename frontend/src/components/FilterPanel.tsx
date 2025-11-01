@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, ArrowUpDown } from 'lucide-react';
 import { useEmergencyStore } from '../stores/emergencyStore';
+import type { MissingPersonType, TimeRange } from '../types';
 
 const KOREAN_REGIONS = [
   '서울특별시', '부산광역시', '대구광역시', '인천광역시',
@@ -24,15 +25,15 @@ export default function FilterPanel({ onClose }: Props) {
     updateFilters({ regions: newRegions });
   };
 
-  const handleTypeToggle = (type: string) => {
-    const newTypes = filters.types.includes(type as any)
+  const handleTypeToggle = (type: MissingPersonType) => {
+    const newTypes = filters.types.includes(type)
       ? filters.types.filter((t) => t !== type)
-      : [...filters.types, type as any];
+      : [...filters.types, type];
     updateFilters({ types: newTypes });
   };
 
-  const handleTimeRangeChange = (range: string) => {
-    updateFilters({ timeRange: range as any });
+  const handleTimeRangeChange = (range: TimeRange) => {
+    updateFilters({ timeRange: range });
   };
 
   return (
@@ -100,15 +101,15 @@ export default function FilterPanel({ onClose }: Props) {
         <div>
           <h3 className="text-sm font-bold text-gray-700 mb-3">📅 실종 기간</h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {[
-              { range: '30d', label: '30일 이내' },
-              { range: '90d', label: '90일 이내' },
-              { range: '180d', label: '180일 이내' },
-              { range: '1y', label: '1년 이내' },
-              { range: '3y', label: '3년 이내' },
-              { range: '5y', label: '5년 이내' },
-              { range: 'all', label: '전체' },
-            ].map((item) => (
+            {([
+              { range: '30d' as TimeRange, label: '30일 이내' },
+              { range: '90d' as TimeRange, label: '90일 이내' },
+              { range: '180d' as TimeRange, label: '180일 이내' },
+              { range: '1y' as TimeRange, label: '1년 이내' },
+              { range: '3y' as TimeRange, label: '3년 이내' },
+              { range: '5y' as TimeRange, label: '5년 이내' },
+              { range: 'all' as TimeRange, label: '전체' },
+            ]).map((item) => (
               <button
                 key={item.range}
                 onClick={() => handleTimeRangeChange(item.range)}
@@ -128,19 +129,19 @@ export default function FilterPanel({ onClose }: Props) {
         <div>
           <h3 className="text-sm font-bold text-gray-700 mb-3">👥 실종자 유형</h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {[
-              { type: 'missing_child', label: '실종 아동', color: 'bg-red-500' },
-              { type: 'runaway', label: '가출인', color: 'bg-blue-500' },
-              { type: 'disabled', label: '지적장애인', color: 'bg-orange-500' },
-              { type: 'dementia', label: '치매환자', color: 'bg-purple-500' },
-              { type: 'facility', label: '시설보호자', color: 'bg-green-600' },
-              { type: 'unknown', label: '신원불상', color: 'bg-gray-500' },
-            ].map((item) => (
+            {([
+              { type: 'missing_child' as MissingPersonType, label: '실종 아동', color: 'bg-red-500' },
+              { type: 'runaway' as MissingPersonType, label: '가출인', color: 'bg-blue-500' },
+              { type: 'disabled' as MissingPersonType, label: '지적장애인', color: 'bg-orange-500' },
+              { type: 'dementia' as MissingPersonType, label: '치매환자', color: 'bg-purple-500' },
+              { type: 'facility' as MissingPersonType, label: '시설보호자', color: 'bg-green-600' },
+              { type: 'unknown' as MissingPersonType, label: '신원불상', color: 'bg-gray-500' },
+            ]).map((item) => (
               <button
                 key={item.type}
                 onClick={() => handleTypeToggle(item.type)}
                 className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                  filters.types.includes(item.type as any)
+                  filters.types.includes(item.type)
                     ? `${item.color} text-white shadow-lg`
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}

@@ -194,17 +194,27 @@ const buildMissingPersonNotification = (missingPerson) => {
     body: `${location}에서 제보가 접수되었습니다. 빠른 확인이 필요합니다.`
   };
 
+  const deepLinkPath = missingPerson?.id ? `/?personId=${missingPerson.id}&utm_source=push` : '/';
+  const seoPath = missingPerson?.id ? `/missing/${missingPerson.id}` : '/';
+
   const data = {
     missingPersonId: missingPerson?.id ?? '',
     missingPersonName: displayName,
     missingPersonLocation: location,
     missingDate: missingPerson?.missingDate ? String(missingPerson.missingDate) : '',
-    source: missingPerson?.source || 'user_report'
+    source: missingPerson?.source || 'user_report',
+    intent: 'missing-person',
+    url: deepLinkPath,
+    seoUrl: seoPath
   };
 
   Object.keys(data).forEach((key) => {
     if (data[key] == null) {
       data[key] = '';
+      return;
+    }
+    if (typeof data[key] !== 'string') {
+      data[key] = String(data[key]);
     }
   });
 

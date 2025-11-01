@@ -21,13 +21,15 @@ export type RegionValueKey = Extract<
 export interface BuildIntensityMapOptions {
   valueKey?: RegionValueKey;
   buckets?: IntensityBucket[];
+  useAbsoluteScale?: boolean; // true면 최대값 기준, false면 합계 기준
+  maxValue?: number; // 절대 스케일 사용 시 기준 최대값
 }
 
 export const DEFAULT_INTENSITY_BUCKETS: IntensityBucket[] = [
-  { id: 'very-low', label: '0~10%', minRatio: 0, maxRatio: 0.1 },
-  { id: 'low', label: '10~30%', minRatio: 0.1, maxRatio: 0.3 },
-  { id: 'medium', label: '30~50%', minRatio: 0.3, maxRatio: 0.5 },
-  { id: 'high', label: '50~70%', minRatio: 0.5, maxRatio: 0.7 },
+  { id: 'very-low', label: '0~5%', minRatio: 0, maxRatio: 0.05 },
+  { id: 'low', label: '5~15%', minRatio: 0.05, maxRatio: 0.15 },
+  { id: 'medium', label: '15~30%', minRatio: 0.15, maxRatio: 0.3 },
+  { id: 'high', label: '30~50%', minRatio: 0.3, maxRatio: 0.5 },
   { id: 'very-high', label: '70% 이상', minRatio: 0.7, maxRatio: 1.0000000001 }
 ];
 
@@ -72,7 +74,7 @@ export const buildRegionIntensityMap = (
   regions: AggregatedRegionStats[],
   options: BuildIntensityMapOptions = {}
 ): Record<string, RegionIntensity> => {
-  const { valueKey = 'totalInRange', buckets = DEFAULT_INTENSITY_BUCKETS } = options;
+  const { valueKey = 'totalInRange', buckets = DEFAULT_INTENSITY_BUCKETS, useAbsoluteScale = true, maxValue } = options;
   const getMetricValue = (region: AggregatedRegionStats): number => {
     const rawValue = region[valueKey];
     if (typeof rawValue === 'number') {
@@ -81,9 +83,20 @@ export const buildRegionIntensityMap = (
     const numeric = Number(rawValue ?? 0);
     return Number.isFinite(numeric) ? numeric : 0;
   };
+
   const numericValues = regions.map((region) => Math.max(getMetricValue(region), 0));
-  const total = numericValues.reduce((sum, value) => sum + value, 0);
-  if (total <= 0) {
+
+  // 절대값 스케일: 최대값 기준, 상대값 스케일: 합계 기준
+  let referenceValue: number;
+  if (useAbsoluteScale) {
+    referenceValue = maxValue !== undefined && maxValue > 0
+      ? maxValue // 외부에서 전달된 최대값 사용
+      : Math.max(...numericValues, 1); // 현재 데이터의 최대값
+  } else {
+    referenceValue = numericValues.reduce((sum, value) => sum + value, 0); // 합계
+  }
+
+  if (referenceValue <= 0) {
     return regions.reduce<Record<string, RegionIntensity>>((acc, region) => {
       acc[region.regionId] = {
         ratio: 0,
@@ -96,7 +109,7 @@ export const buildRegionIntensityMap = (
 
   return regions.reduce<Record<string, RegionIntensity>>((acc, region, index) => {
     const value = numericValues[index];
-    acc[region.regionId] = getRegionIntensity(value, total, buckets);
+    acc[region.regionId] = getRegionIntensity(value, referenceValue, buckets);
     return acc;
   }, {});
 };

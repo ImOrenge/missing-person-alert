@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Play, Pause } from 'lucide-react';
 import type { AggregatedRegionStats } from '../../hooks/useRegionStatsData';
 import type { RegionMetadataDocument } from '../../types/regionStats';
 import { buildRegionIntensityMap } from './minimap/intensity';
@@ -9,7 +10,14 @@ export interface MinimapHeatmapProps {
   regions: AggregatedRegionStats[];
   selectedRegionId: string | null;
   onSelect: (regionId: string) => void;
+  maxIntensityValue?: number;
   reduceMotion?: boolean;
+  // 날짜별 슬라이더용
+  availableDates?: string[];
+  selectedDate?: string | null;
+  onDateChange?: (date: string | null) => void;
+  mode?: 'timeline' | 'current';
+  onModeChange?: (mode: 'timeline' | 'current') => void;
 }
 
 const SILHOUETTE_URL = `${process.env.PUBLIC_URL || ''}/maps/korea-silhouette.svg`;
@@ -59,6 +67,13 @@ const SELECTED_FILTER = buildFilter(false, true);
 void HOVER_FILTER;
 void SELECTED_FILTER;
 
+const PLAYBACK_SPEED_OPTIONS = [0.5, 1, 2, 4] as const;
+const DEFAULT_PLAYBACK_SPEED_INDEX = 1;
+const VIEW_MODE_OPTIONS = [
+  { id: 'timeline' as const, label: '슬라이드 재생' },
+  { id: 'current' as const, label: '현재 분포' }
+];
+
 interface TooltipState {
   regionId: string;
   name: string;
@@ -105,7 +120,19 @@ const loadSilhouette = async (): Promise<string> => {
   return silhouettePromise!;
 };
 
-const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions, selectedRegionId, onSelect, reduceMotion }) => {
+const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({
+  metadata,
+  regions,
+  selectedRegionId,
+  onSelect,
+  maxIntensityValue,
+  reduceMotion,
+  availableDates,
+  selectedDate,
+  onDateChange,
+  mode = 'timeline',
+  onModeChange
+}) => {
   const [svgMarkup, setSvgMarkup] = useState<string | null>(cachedSilhouette);
   const [loadError, setLoadError] = useState<string | null>(null);
   const svgContainerRef = useRef<HTMLDivElement>(null);
@@ -114,6 +141,118 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions, 
   const prefersReducedMotion = Boolean(reduceMotion);
   const [hoveredRegionId, setHoveredRegionId] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+  const viewMode = mode;
+  const timelineEnabled = viewMode === 'timeline';
+
+  const handleModeSelect = useCallback(
+    (nextMode: 'timeline' | 'current') => {
+      if (!onModeChange || nextMode === viewMode) {
+        return;
+      }
+      onModeChange(nextMode);
+    },
+    [onModeChange, viewMode]
+  );
+
+  // 시간별 슬라이더 상태
+  const sortedDates = useMemo(() => {
+    if (!timelineEnabled || !availableDates || availableDates.length === 0) {
+      return [];
+    }
+    return [...availableDates].sort();
+  }, [timelineEnabled, availableDates]);
+
+  const lastDateIndex = sortedDates.length > 0 ? sortedDates.length - 1 : 0;
+
+  const currentDateIndex = useMemo(() => {
+    if (!timelineEnabled || sortedDates.length === 0) {
+      return lastDateIndex;
+    }
+    if (!selectedDate) {
+      return lastDateIndex;
+    }
+    const index = sortedDates.indexOf(selectedDate);
+    return index >= 0 ? index : lastDateIndex;
+  }, [timelineEnabled, selectedDate, sortedDates, lastDateIndex]);
+
+  const [localDateIndex, setLocalDateIndex] = useState<number>(currentDateIndex);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [playbackSpeedIndex, setPlaybackSpeedIndex] = useState<number>(DEFAULT_PLAYBACK_SPEED_INDEX);
+
+  const selectedDateIndex = timelineEnabled
+    ? (selectedDate !== undefined ? currentDateIndex : localDateIndex)
+    : lastDateIndex;
+
+  const hasTimelineData = timelineEnabled && sortedDates.length > 0;
+  const hasTimeSlider = hasTimelineData && sortedDates.length > 1;
+  const currentDate =
+    timelineEnabled && selectedDateIndex >= 0 && selectedDateIndex < sortedDates.length
+      ? sortedDates[selectedDateIndex]
+      : null;
+
+  const playbackSpeed = PLAYBACK_SPEED_OPTIONS[playbackSpeedIndex] ?? PLAYBACK_SPEED_OPTIONS[DEFAULT_PLAYBACK_SPEED_INDEX];
+
+  useEffect(() => {
+    if (!timelineEnabled) {
+      setIsPlaying(false);
+      setLocalDateIndex(lastDateIndex);
+      return;
+    }
+    if (selectedDate === undefined && sortedDates.length > 0) {
+      setLocalDateIndex(sortedDates.length - 1);
+    }
+  }, [timelineEnabled, selectedDate, sortedDates, lastDateIndex]);
+
+  // 날짜 변경 시 부모에게 전달
+  const handleDateChange = useCallback((index: number) => {
+    if (!timelineEnabled) {
+      return;
+    }
+    if (onDateChange && sortedDates[index]) {
+      onDateChange(sortedDates[index]);
+    } else {
+      setLocalDateIndex(index);
+    }
+  }, [timelineEnabled, onDateChange, sortedDates]);
+
+  // 외부 selectedDate가 변경되면 로컬 상태도 업데이트
+  useEffect(() => {
+    if (selectedDate === undefined && sortedDates.length > 0) {
+      setLocalDateIndex(sortedDates.length - 1);
+    }
+  }, [selectedDate, sortedDates]);
+
+  // 재생 기능
+  useEffect(() => {
+    if (!timelineEnabled || !isPlaying || !hasTimeSlider) {
+      if (playIntervalRef.current) {
+        clearInterval(playIntervalRef.current);
+        playIntervalRef.current = null;
+      }
+      return;
+    }
+
+    const intervalMs = Math.max(200, Math.round(1000 / playbackSpeed));
+
+    playIntervalRef.current = setInterval(() => {
+      const currentIndex = selectedDateIndex;
+      const nextIndex = currentIndex + 1;
+      if (nextIndex >= sortedDates.length) {
+        setIsPlaying(false);
+        handleDateChange(sortedDates.length - 1);
+      } else {
+        handleDateChange(nextIndex);
+      }
+    }, intervalMs);
+
+    return () => {
+      if (playIntervalRef.current) {
+        clearInterval(playIntervalRef.current);
+        playIntervalRef.current = null;
+      }
+    };
+  }, [timelineEnabled, isPlaying, hasTimeSlider, sortedDates.length, selectedDateIndex, handleDateChange, playbackSpeed]);
 
   const metaMap = useMemo(() => {
     if (!metadata?.regions) {
@@ -123,7 +262,10 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions, 
   }, [metadata]);
 
   const regionById = useMemo(() => new Map(regions.map((region) => [region.regionId, region])), [regions]);
-  const intensityMap = useMemo(() => buildRegionIntensityMap(regions), [regions]);
+  const intensityMap = useMemo(() => buildRegionIntensityMap(regions, {
+    useAbsoluteScale: true,
+    maxValue: maxIntensityValue
+  }), [regions, maxIntensityValue]);
 
   const updateRegionColors = useCallback(
     (elements: Map<string, SVGGElement>) => {
@@ -462,16 +604,252 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions, 
     });
   }, [intensityMap, regionById, tooltip]);
 
+  const handlePlayPause = () => {
+    if (!timelineEnabled || !hasTimeSlider) {
+      return;
+    }
+    if (isPlaying) {
+      setIsPlaying(false);
+    } else {
+      // 마지막 날짜면 처음부터 재생
+      if (selectedDateIndex >= sortedDates.length - 1) {
+        handleDateChange(0);
+      }
+      setIsPlaying(true);
+    }
+  };
+
+  const handlePlaybackSpeedToggle = () => {
+    if (!timelineEnabled || !hasTimeSlider) {
+      return;
+    }
+    setPlaybackSpeedIndex((current) => {
+      const next = current + 1;
+      return next < PLAYBACK_SPEED_OPTIONS.length ? next : 0;
+    });
+  };
+
+  const playbackSpeedLabel = useMemo(() => {
+    const value = playbackSpeed;
+    return Number.isInteger(value) ? `${value.toFixed(0)}x` : `${value.toFixed(1)}x`;
+  }, [playbackSpeed]);
+
   return (
-    <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
-      <div className="flex items-center gap-2 text-sm font-semibold text-slate-600">
-        <span aria-hidden className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-slate-200 text-[10px] font-bold text-slate-500">
-          맵
-        </span>
-        지역 분포 미니맵 (실험중)
+    <div className="rounded-xl bg-white p-2 shadow-sm ring-1 ring-slate-100 md:rounded-2xl md:p-4">
+      {/* 모바일: 컴팩트한 헤더 */}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 md:hidden">
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+          <span aria-hidden className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-slate-200 text-[8px] font-bold text-slate-500">
+            맵
+          </span>
+          <span>지역 분포</span>
+        </div>
+        {onModeChange && (
+          <div className="flex items-center gap-0.5 rounded-full bg-slate-100 p-0.5 text-[10px] font-semibold text-slate-500">
+            {VIEW_MODE_OPTIONS.map((option) => {
+              const isActive = option.id === viewMode;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => handleModeSelect(option.id)}
+                  className={`rounded-full px-2 py-0.5 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200 ${isActive ? 'bg-white text-red-600 shadow' : 'text-slate-500'}`}
+                  aria-pressed={isActive}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
-      <div className="mt-3 flex justify-center">
-        <div ref={svgContainerRef} className="relative aspect-[509/716] w-full max-w-[320px] overflow-hidden rounded-xl bg-slate-950/5">
+
+      {/* 데스크톱: 기존 헤더 */}
+      <div className="hidden flex-wrap items-center justify-between gap-2 md:flex">
+        <div className="flex items-center gap-2 text-sm font-semibold text-slate-600">
+          <span aria-hidden className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-slate-200 text-[10px] font-bold text-slate-500">
+            맵
+          </span>
+          <span>지역 분포 미니맵</span>
+          <span className="text-xs font-medium text-slate-400">{viewMode === 'timeline' ? '슬라이드 재생' : '현재 분포'}</span>
+        </div>
+        {onModeChange && (
+          <div className="flex items-center gap-1 rounded-full bg-slate-100 p-1 text-[11px] font-semibold text-slate-500">
+            {VIEW_MODE_OPTIONS.map((option) => {
+              const isActive = option.id === viewMode;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => handleModeSelect(option.id)}
+                  className={`rounded-full px-3 py-1 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200 ${isActive ? 'bg-white text-red-600 shadow' : 'text-slate-500 hover:text-slate-700'}`}
+                  aria-pressed={isActive}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* 시간별 슬라이더 - 모바일 */}
+      {timelineEnabled ? (
+        hasTimelineData ? (
+          <div className="mt-2 space-y-1.5 md:hidden">
+            <div className="flex items-center justify-between text-[10px]">
+              <span className="font-medium text-slate-600">
+                {currentDate
+                  ? new Date(currentDate).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })
+                  : '전체 기간'}
+              </span>
+              <div className="flex items-center gap-1">
+                {hasTimeSlider ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handlePlaybackSpeedToggle}
+                      className="flex items-center gap-0.5 rounded-md bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold text-slate-500"
+                      aria-label="재생 속도 변경"
+                    >
+                      <span>{playbackSpeedLabel}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handlePlayPause}
+                      className={`flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[9px] font-semibold ${isPlaying ? 'bg-red-100 text-red-600' : 'bg-red-50 text-red-600'}`}
+                      aria-label={isPlaying ? '일시정지' : '재생'}
+                    >
+                      {isPlaying ? (
+                        <>
+                          <Pause size={10} />
+                          <span>정지</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play size={10} />
+                          <span>재생</span>
+                        </>
+                      )}
+                    </button>
+                  </>
+                ) : (
+                  <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-400">단일</span>
+                )}
+              </div>
+            </div>
+            {hasTimeSlider && (
+              <>
+                <input
+                  type="range"
+                  min={0}
+                  max={sortedDates.length - 1}
+                  value={selectedDateIndex}
+                  onChange={(e) => {
+                    handleDateChange(Number(e.target.value));
+                    setIsPlaying(false);
+                  }}
+                  className="w-full accent-red-600"
+                  aria-label="날짜 선택 슬라이더"
+                />
+                <div className="flex justify-between text-[9px] text-slate-400">
+                  <span>{sortedDates[0] ? new Date(sortedDates[0]).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' }) : ''}</span>
+                  <span>
+                    {sortedDates[sortedDates.length - 1]
+                      ? new Date(sortedDates[sortedDates.length - 1]).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })
+                      : ''}
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="mt-2 rounded-lg bg-slate-50 px-2 py-1.5 text-[10px] text-slate-500 md:hidden">시간 데이터 부족</div>
+        )
+      ) : (
+        <div className="mt-2 rounded-lg bg-slate-50 px-2 py-1.5 text-[10px] text-slate-500 md:hidden">최신 분포 표시</div>
+      )}
+
+      {/* 시간별 슬라이더 - 데스크톱 */}
+      {timelineEnabled ? (
+        hasTimelineData ? (
+          <div className="mt-3 hidden space-y-2 md:block">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-medium text-slate-600">
+                {currentDate
+                  ? new Date(currentDate).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })
+                  : '전체 기간'}
+              </span>
+              <div className="flex items-center gap-2">
+                {hasTimeSlider ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handlePlaybackSpeedToggle}
+                      className="flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500 transition hover:bg-slate-200"
+                      aria-label="재생 속도 변경"
+                    >
+                      <span>배속</span>
+                      <span className="text-slate-700">{playbackSpeedLabel}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handlePlayPause}
+                      className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold transition ${isPlaying ? 'bg-red-100 text-red-600' : 'bg-red-50 text-red-600 hover:bg-red-100'}`}
+                      aria-label={isPlaying ? '일시정지' : '재생'}
+                    >
+                      {isPlaying ? (
+                        <>
+                          <Pause size={12} />
+                          <span>일시정지</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play size={12} />
+                          <span>재생</span>
+                        </>
+                      )}
+                    </button>
+                  </>
+                ) : (
+                  <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-400">단일 스냅샷</span>
+                )}
+              </div>
+            </div>
+            {hasTimeSlider && (
+              <>
+                <input
+                  type="range"
+                  min={0}
+                  max={sortedDates.length - 1}
+                  value={selectedDateIndex}
+                  onChange={(e) => {
+                    handleDateChange(Number(e.target.value));
+                    setIsPlaying(false);
+                  }}
+                  className="w-full accent-red-600"
+                  aria-label="날짜 선택 슬라이더"
+                />
+                <div className="flex justify-between text-[10px] text-slate-400">
+                  <span>{sortedDates[0] ? new Date(sortedDates[0]).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' }) : ''}</span>
+                  <span>
+                    {sortedDates[sortedDates.length - 1]
+                      ? new Date(sortedDates[sortedDates.length - 1]).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })
+                      : ''}
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="mt-3 hidden rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-500 md:block">시간 슬라이드를 위한 데이터가 부족합니다.</div>
+        )
+      ) : (
+        <div className="mt-3 hidden rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-500 md:block">선택한 기간의 최신 분포를 표시합니다.</div>
+      )}
+
+      <div className="mt-2 flex justify-center md:mt-3">
+        <div ref={svgContainerRef} className="relative aspect-[509/716] w-full max-w-[min(100%,360px)] overflow-hidden rounded-lg bg-slate-950/5 md:rounded-xl">
           {svgMarkup ? (
             <div
               role="img"
@@ -509,13 +887,13 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({ metadata, regions, 
         </div>
       </div>
       {regions.length > 0 && (
-        <div className="mt-2 text-[11px] text-slate-400">
-          {`데이터 지역 ${regions.length}개 · 매핑 ${mappedRegionCount}개 · 활성 ${activeRegionCount}개`}
+        <div className="mt-1.5 text-[9px] text-slate-400 md:mt-2 md:text-[11px]">
+          {`데이터 ${regions.length}개 · 매핑 ${mappedRegionCount}개 · 활성 ${activeRegionCount}개`}
         </div>
       )}
       {unmatchedRegions.length > 0 && (
-        <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">
-          {`SVG 매핑되지 않은 지역: ${unmatchedRegions.join(', ')}`}
+        <div className="mt-2 rounded-lg bg-amber-50 px-2 py-1.5 text-[10px] text-amber-700 md:mt-3 md:rounded-xl md:px-3 md:py-2 md:text-xs">
+          {`SVG 매핑 누락: ${unmatchedRegions.join(', ')}`}
         </div>
       )}
     </div>

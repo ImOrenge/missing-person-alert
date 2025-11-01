@@ -250,7 +250,7 @@ class FirebaseService {
   /**
    * 실종자 정보 저장 (API 데이터 또는 사용자 제보) - Firestore
    */
-  async saveMissingPersons(persons) {
+  async saveMissingPersons(persons, options = {}) {
     if (!this.db) {
       throw new Error('Firebase가 초기화되지 않았습니다');
     }
@@ -258,34 +258,73 @@ class FirebaseService {
     try {
       let created = 0;
       let updated = 0;
+      const { captureCreatedPersons = false, captureUpdatedPersons = false } = options || {};
+      const createdPersons = [];
+      const updatedPersons = [];
 
       for (const person of persons) {
         try {
           // ID 중복 확인
           const personRef = doc(this.db, 'missingPersons', person.id);
           const personDoc = await getDoc(personRef);
+          const now = Timestamp.now();
 
           // updatedAt 추가
-          const personData = {
-            ...person,
-            updatedAt: Timestamp.now()
-          };
-
           if (personDoc.exists()) {
+            const existingData = personDoc.data();
+            const personData = {
+              ...person,
+              createdAt: existingData?.createdAt ?? existingData?.updatedAt ?? now,
+              updatedAt: now
+            };
             await setDoc(personRef, personData, { merge: true });
             updated++;
+            if (captureUpdatedPersons) {
+              updatedPersons.push({
+                ...existingData,
+                ...personData
+              });
+            }
           } else {
+            const personData = {
+              ...person,
+              createdAt: now,
+              updatedAt: now
+            };
             await setDoc(personRef, personData);
             created++;
+            if (captureCreatedPersons) {
+              createdPersons.push(personData);
+            }
           }
         } catch (error) {
           console.error(`❌ 실종자 저장 실패 (${person.id}):`, error.message);
         }
       }
 
-      return { created, updated };
+      return {
+        created,
+        updated,
+        createdPersons: captureCreatedPersons ? createdPersons : [],
+        updatedPersons: captureUpdatedPersons ? updatedPersons : []
+      };
     } catch (error) {
       console.error('❌ 실종자 정보 저장 실패:', error);
+      throw error;
+    }
+  }
+
+  async hasAnyMissingPersons() {
+    if (!this.db) {
+      throw new Error('Firebase가 초기화되지 않았습니다');
+    }
+
+    try {
+      const missingPersonsRef = collection(this.db, 'missingPersons');
+      const snapshot = await getDocs(query(missingPersonsRef, firestoreLimit(1)));
+      return !snapshot.empty;
+    } catch (error) {
+      console.error('❌ 실종자 존재 여부 확인 실패:', error);
       throw error;
     }
   }
@@ -362,6 +401,63 @@ class FirebaseService {
       return { success: true };
     } catch (error) {
       console.error('❌ 실종자 정보 삭제 실패:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * API에서 사라진 실종자를 자동으로 'found' 처리
+   * @param {number} daysThreshold - API에 나타나지 않은 일수 (기본값: 7일)
+   */
+  async markStaleMissingPersonsAsFound(daysThreshold = 7) {
+    if (!this.db) {
+      throw new Error('Firebase가 초기화되지 않았습니다');
+    }
+
+    try {
+      const cutoffTime = Date.now() - (daysThreshold * 24 * 60 * 60 * 1000);
+
+      // API 출처이고 active 상태인 실종자 조회
+      const missingPersonsRef = collection(this.db, 'missingPersons');
+      const q = query(
+        missingPersonsRef,
+        where('source', '==', 'api'),
+        where('status', '==', 'active')
+      );
+
+      const snapshot = await getDocs(q);
+
+      if (snapshot.empty) {
+        return { markedAsFound: 0 };
+      }
+
+      let markedAsFound = 0;
+
+      for (const docSnap of snapshot.docs) {
+        const person = docSnap.data();
+        const lastSeen = person.lastSeenInAPI || 0;
+
+        // lastSeenInAPI가 cutoff 시간보다 오래된 경우
+        if (lastSeen > 0 && lastSeen < cutoffTime) {
+          const personRef = doc(this.db, 'missingPersons', docSnap.id);
+          await updateDoc(personRef, {
+            status: 'found',
+            updatedAt: Timestamp.now(),
+            foundReason: `API에서 ${daysThreshold}일 이상 확인되지 않음 (자동 처리)`
+          });
+
+          console.log(`  ✓ 자동 발견 처리: ${person.name} (${docSnap.id})`);
+          markedAsFound++;
+        }
+      }
+
+      if (markedAsFound > 0) {
+        console.log(`🔍 ${markedAsFound}건 자동 발견 처리 완료`);
+      }
+
+      return { markedAsFound };
+    } catch (error) {
+      console.error('❌ 자동 발견 처리 실패:', error);
       throw error;
     }
   }

@@ -1,44 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { X, Info, AlertTriangle } from 'lucide-react';
 import type { Announcement } from '../types/announcement';
+import { collectDismissedSetForToday, markPopupDismissedForToday } from '../utils/announcementPopupStorage';
 
 interface Props {
   announcements: Announcement[];
   onClose: () => void;
 }
 
-const STORAGE_KEY_PREFIX = 'announcement_popup_dismissed_';
-
 export default function AnnouncementPopup({ announcements, onClose }: Props) {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(() =>
+    collectDismissedSetForToday(announcements)
+  );
 
-  // localStorage에서 오늘 날짜 내에 닫은 공지 목록 불러오기
   useEffect(() => {
-    const dismissed = new Set<string>();
-    const today = new Date().toDateString();
-
-    announcements.forEach(announcement => {
-      const storageKey = `${STORAGE_KEY_PREFIX}${announcement.id}`;
-      const stored = localStorage.getItem(storageKey);
-
-      if (stored) {
-        try {
-          const data = JSON.parse(stored);
-          // 같은 날짜에 닫았으면 다시 표시하지 않음
-          if (data.date === today) {
-            dismissed.add(announcement.id);
-          } else {
-            // 날짜가 바뀌었으면 삭제
-            localStorage.removeItem(storageKey);
-          }
-        } catch (e) {
-          localStorage.removeItem(storageKey);
-        }
-      }
-    });
-
-    setDismissedIds(dismissed);
+    setDismissedIds(collectDismissedSetForToday(announcements));
   }, [announcements]);
 
   // 아직 보지 않은 공지 필터링
@@ -60,34 +37,40 @@ export default function AnnouncementPopup({ announcements, onClose }: Props) {
   const currentAnnouncement = visibleAnnouncements[currentIndex];
   const isWarning = currentAnnouncement.type === 'warning';
 
-  const handleClose = () => {
-    if (currentIndex < visibleAnnouncements.length - 1) {
-      // 다음 공지로 이동
-      setCurrentIndex(prev => prev + 1);
-    } else {
-      // 마지막 공지면 팝업 닫기
-      onClose();
+  const advanceAndDismiss = (persist: boolean) => {
+    const currentId = currentAnnouncement.id;
+    const visibleCount = visibleAnnouncements.length;
+
+    if (persist) {
+      markPopupDismissedForToday(currentId);
     }
+
+    setDismissedIds((prev) => {
+      if (prev.has(currentId)) {
+        return prev;
+      }
+      const next = new Set(prev);
+      next.add(currentId);
+      return next;
+    });
+
+    if (visibleCount <= 1) {
+      onClose();
+      return;
+    }
+
+    setCurrentIndex((prev) => {
+      const nextIndex = Math.min(prev, visibleCount - 2);
+      return nextIndex < 0 ? 0 : nextIndex;
+    });
+  };
+
+  const handleClose = (persist = true) => {
+    advanceAndDismiss(persist);
   };
 
   const handleDismissToday = () => {
-    // localStorage에 오늘 날짜로 저장
-    const storageKey = `${STORAGE_KEY_PREFIX}${currentAnnouncement.id}`;
-    const today = new Date().toDateString();
-
-    localStorage.setItem(storageKey, JSON.stringify({
-      date: today,
-      announcementId: currentAnnouncement.id
-    }));
-
-    // 닫은 목록에 추가
-    setDismissedIds(prev => {
-      const newSet = new Set(prev);
-      newSet.add(currentAnnouncement.id);
-      return newSet;
-    });
-
-    handleClose();
+    advanceAndDismiss(true);
   };
 
   return (
@@ -105,7 +88,7 @@ export default function AnnouncementPopup({ announcements, onClose }: Props) {
         zIndex: 9999,
         padding: '20px'
       }}
-      onClick={handleClose}
+      onClick={() => handleClose()}
     >
       <div
         style={{
@@ -159,7 +142,7 @@ export default function AnnouncementPopup({ announcements, onClose }: Props) {
             </div>
           </div>
           <button
-            onClick={handleClose}
+            onClick={() => handleClose()}
             style={{
               background: 'none',
               border: 'none',
@@ -220,7 +203,7 @@ export default function AnnouncementPopup({ announcements, onClose }: Props) {
             오늘 하루 보지 않기
           </button>
           <button
-            onClick={handleClose}
+            onClick={() => handleClose()}
             style={{
               padding: '10px 24px',
               backgroundColor: isWarning ? '#ffc107' : '#17a2b8',

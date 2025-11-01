@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useState } from 'react';
-import { getGuestId } from '../utils/guestId';
 import { getAuth } from 'firebase/auth';
+import { getGuestId } from '../utils/guestId';
+import { useEmergencyStore } from '../stores/emergencyStore';
 
 interface ViewCountResult {
   viewCount: number;
@@ -31,6 +32,7 @@ export const useViewCount = (
   const [hasTracked, setHasTracked] = useState<boolean>(false);
 
   const API_BASE_URL = process.env.REACT_APP_API_URL || '';
+  const updatePersonViewCount = useEmergencyStore(state => state.updatePersonViewCount);
 
   /**
    * 조회수 증가 함수
@@ -74,16 +76,22 @@ export const useViewCount = (
       const data = await response.json();
       console.log('[useViewCount] 조회수 증가 성공:', data);
 
-      if (data.success) {
+      if (typeof data.viewCount === 'number') {
         setViewCount(data.viewCount);
         setViewStats(data.viewStats);
+        if (personId) {
+          updatePersonViewCount(personId, data.viewCount, data.viewStats);
+        }
+      }
+
+      if (data.success) {
         setHasTracked(true);
       }
     } catch (err) {
       console.error('[useViewCount] 조회수 증가 오류:', err);
       setError(err instanceof Error ? err.message : '조회수 증가에 실패했습니다.');
     }
-  }, [personId, hasTracked, API_BASE_URL]);
+  }, [personId, hasTracked, API_BASE_URL, updatePersonViewCount]);
 
   /**
    * 조회수 조회 함수
@@ -114,15 +122,19 @@ export const useViewCount = (
 
       const data = await response.json();
       console.log('[useViewCount] 조회수 조회 성공:', data);
-      setViewCount(data.viewCount || 0);
+      const nextViewCount = typeof data.viewCount === 'number' ? data.viewCount : 0;
+      setViewCount(nextViewCount);
       setViewStats(data.viewStats);
+      if (personId) {
+        updatePersonViewCount(personId, nextViewCount, data.viewStats);
+      }
     } catch (err) {
       console.error('[useViewCount] 조회수 조회 오류:', err);
       setError(err instanceof Error ? err.message : '조회수 조회에 실패했습니다.');
     } finally {
       setLoading(false);
     }
-  }, [personId, API_BASE_URL]);
+  }, [personId, API_BASE_URL, updatePersonViewCount]);
 
   /**
    * 컴포넌트 마운트 시 자동 조회수 추적

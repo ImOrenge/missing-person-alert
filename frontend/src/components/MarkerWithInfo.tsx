@@ -11,6 +11,21 @@ import ShareModal from './ShareModal';
 import CommentsPanel from './MissingPersonComments/CommentsPanel';
 import { useViewCount, formatViewCount } from '../hooks/useViewCount';
 
+const getInitialViewport = () => {
+  if (typeof window === 'undefined') {
+    return { width: 375, height: 667 };
+  }
+  return { width: window.innerWidth, height: window.innerHeight };
+};
+
+const getHeaderHeight = () => {
+  if (typeof document === 'undefined') {
+    return 0;
+  }
+  const header = document.querySelector('header');
+  return header ? header.getBoundingClientRect().height : 0;
+};
+
 interface Props {
   person: MissingPerson;
   isSelected: boolean;
@@ -62,7 +77,8 @@ function getTypeLabel(type: string): string {
 const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, onClick, onClose }: Props) => {
   const [markerRef, marker] = useAdvancedMarkerRef();
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
-  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+  const [viewport, setViewport] = useState(() => getInitialViewport());
+  const [headerHeight, setHeaderHeight] = useState(() => getHeaderHeight());
   const [activeTab, setActiveTab] = useState<'details' | 'comments'>('details');
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
   const [hiddenPhotoIndexes, setHiddenPhotoIndexes] = useState<number[]>([]);
@@ -71,16 +87,38 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
   const { viewCount } = useViewCount(isSelected ? person.id : null, true);
 
   useEffect(() => {
-    const handleResize = () => setWindowWidth(window.innerWidth);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const applyMeasurements = () => {
+      const nextViewport = { width: window.innerWidth, height: window.innerHeight };
+      const nextHeaderHeight = getHeaderHeight();
+      setViewport(nextViewport);
+      setHeaderHeight(nextHeaderHeight);
+      if (typeof document !== 'undefined') {
+        document.documentElement.style.setProperty('--app-header-height', `${nextHeaderHeight}px`);
+      }
+    };
+
+    applyMeasurements();
+    window.addEventListener('resize', applyMeasurements);
+    window.addEventListener('orientationchange', applyMeasurements);
+    return () => {
+      window.removeEventListener('resize', applyMeasurements);
+      window.removeEventListener('orientationchange', applyMeasurements);
+    };
   }, []);
 
   const scale = isHighlighted || isSelected ? 1.5 : 1.2;
   const borderColor = isHighlighted ? '#FFD700' : '#000';
 
-  const isMobile = windowWidth < 640;
-  const isVerySmall = windowWidth < 400;
+  const isMobile = viewport.width < 640;
+  const isVerySmall = viewport.width < 400;
+  const infoWindowMaxWidth = isMobile ? Math.max(280, viewport.width - 16) : 380;
+  const mobileContentHeight = isMobile
+    ? Math.max(viewport.height - headerHeight - 24, 260)
+    : undefined;
 
   const photoEntries = useMemo(() => {
     const basePhotos = Array.isArray(person.photos) && person.photos.length > 0
@@ -162,17 +200,20 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
             setActiveTab('details');
             onClose();
           }}
-          maxWidth={isMobile ? windowWidth - 40 : 380}
+          maxWidth={infoWindowMaxWidth}
         >
           <div
             className="info-window-content"
             style={{
               width: '100%',
-              maxWidth: isMobile ? `${windowWidth - 60}px` : '360px',
+              maxWidth: isMobile ? `${infoWindowMaxWidth - 8}px` : '360px',
               minWidth: isMobile ? 'auto' : '260px',
-              padding: isMobile ? '8px' : '12px',
+              padding: isMobile ? '12px' : '12px',
               fontSize: isMobile ? '12px' : '14px',
-              boxSizing: 'border-box'
+              boxSizing: 'border-box',
+              maxHeight: mobileContentHeight ? `${mobileContentHeight}px` : undefined,
+              height: mobileContentHeight ? `${mobileContentHeight}px` : undefined,
+              overflowY: mobileContentHeight ? 'auto' : 'visible'
             }}
           >
             {currentPhoto ? (

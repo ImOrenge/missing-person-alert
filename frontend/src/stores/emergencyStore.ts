@@ -37,6 +37,7 @@ interface EmergencyStore {
   enqueueNewPersonAlert: (persons: MissingPerson[]) => void;
   shiftNewPersonAlert: () => NewPersonAlert | null;
   clearNewPersonAlerts: () => void;
+  updatePersonViewCount: (id: string, viewCount: number, viewStats?: MissingPerson['viewStats']) => void;
 }
 
 // 시간 범위를 밀리초로 변환
@@ -292,5 +293,34 @@ export const useEmergencyStore = create<EmergencyStore>((set, get) => ({
 
   clearNewPersonAlerts: () => {
     set({ newPersonAlerts: [] });
+  },
+
+  updatePersonViewCount: (id, viewCount, viewStats) => {
+    if (!id) {
+      return;
+    }
+
+    set((state) => ({
+      missingPersons: state.missingPersons.map((person) => {
+        if (person.id !== id) {
+          return person;
+        }
+
+        const existingStats = person.viewStats;
+        const mergedStats = viewStats
+          ? {
+              ...existingStats,
+              ...viewStats,
+              total: viewStats.total ?? viewCount
+            }
+          : existingStats;
+
+        return {
+          ...person,
+          viewCount,
+          viewStats: mergedStats
+        };
+      })
+    }));
   }
 }));

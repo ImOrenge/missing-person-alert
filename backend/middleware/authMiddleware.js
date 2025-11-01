@@ -241,10 +241,29 @@ const verifyAdmin = async (req, res, next) => {
 const rateLimitMap = new Map();
 const RATE_LIMIT_WINDOW = 60 * 1000; // 1분
 const MAX_REQUESTS = 10; // 1분당 최대 요청 수
+const MAX_MAP_SIZE = 10000; // 최대 10,000개 항목으로 제한
 
 const rateLimit = (req, res, next) => {
   const identifier = req.user?.uid || req.ip;
   const now = Date.now();
+
+  // Map 크기 제한 체크 및 즉시 정리
+  if (rateLimitMap.size >= MAX_MAP_SIZE) {
+    // 오래된 항목 즉시 정리
+    for (const [key, value] of rateLimitMap.entries()) {
+      if (now > value.resetTime) {
+        rateLimitMap.delete(key);
+      }
+    }
+
+    // 정리 후에도 크기가 크면 오래된 순서로 삭제
+    if (rateLimitMap.size >= MAX_MAP_SIZE) {
+      const entries = Array.from(rateLimitMap.entries());
+      entries.sort((a, b) => a[1].resetTime - b[1].resetTime);
+      const toDelete = entries.slice(0, Math.floor(MAX_MAP_SIZE * 0.1)); // 10% 삭제
+      toDelete.forEach(([key]) => rateLimitMap.delete(key));
+    }
+  }
 
   if (!rateLimitMap.has(identifier)) {
     rateLimitMap.set(identifier, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
@@ -406,11 +425,41 @@ const verifyRecaptcha = async (req, res, next) => {
   }
 };
 
+/**
+ * Guest ID 로깅 미들웨어
+ * 요청 헤더에서 Guest ID를 추출하여 로그에 기록
+ */
+const logGuestId = (req, res, next) => {
+  try {
+    const guestId = req.headers['x-guest-id'];
+    const userId = req.user?.uid;
+
+    if (userId) {
+      // 인증된 사용자
+      console.log(`👤 사용자 요청 [UID: ${userId}] ${req.method} ${req.path}`);
+    } else if (guestId) {
+      // Guest 사용자
+      console.log(`👻 Guest 요청 [Guest ID: ${guestId}] ${req.method} ${req.path}`);
+      req.guestId = guestId;
+    } else {
+      // ID 없음
+      console.log(`❓ 익명 요청 ${req.method} ${req.path}`);
+    }
+
+    next();
+  } catch (error) {
+    // 에러가 발생해도 계속 진행
+    console.error('Guest ID 로깅 오류:', error.message);
+    next();
+  }
+};
+
 module.exports = {
   verifyFirebaseToken,
   verifyPhoneAuthenticated,
   verifyAdmin,
   rateLimit,
   optionalAuth,
-  verifyRecaptcha
+  verifyRecaptcha,
+  logGuestId
 };

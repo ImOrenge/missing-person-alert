@@ -5,6 +5,7 @@ import * as admin from "firebase-admin";
 import express, {NextFunction, Request, Response} from "express";
 import cors from "cors";
 import axios from "axios";
+import {onDocumentWritten} from "firebase-functions/v2/firestore";
 import {
   CommentReport,
   CommentReportReason,
@@ -17,6 +18,7 @@ import {
   findRegionByName,
   RegionMetadata
 } from "./regionMetadata";
+import * as crypto from "crypto";
 
 // Firebase Admin 초기화
 admin.initializeApp();
@@ -194,7 +196,7 @@ const corsOptions = {
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "x-recaptcha-token"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-recaptcha-token", "x-guest-id"],
 };
 
 app.use(cors(corsOptions));
@@ -204,6 +206,11 @@ const ANONYMOUS_PREFIX = "익명";
 const COMMENT_COLLECTION = "missingPersonComments";
 const REPORT_COLLECTION = "commentReports";
 const NOTIFICATION_COLLECTION = "commentNotifications";
+const VIEW_LOG_COLLECTION = "viewLogs";
+const MISSING_PERSON_COLLECTION = "missingPersons";
+const DATA_DELETION_COLLECTION = "dataDeletionLogs";
+const DATA_DELETION_SECRET = process.env.DATA_DELETION_SECRET;
+const META_APP_SECRET = process.env.META_APP_SECRET || process.env.THREADS_APP_SECRET || process.env.FACEBOOK_APP_SECRET;
 
 const rateLimitCache = new Map<string, {count: number; resetAt: number}>();
 const RATE_LIMIT_MAX = 20;
@@ -235,6 +242,440 @@ const isAdminUser = (user?: admin.auth.DecodedIdToken | null): boolean => {
   logger.warn(`Admin access denied for: ${user.email || "no email"}`);
   return false;
 };
+
+const base64UrlDecode = (input: string): Buffer => {
+  let normalized = input.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = normalized.length % 4;
+  if (pad === 2) {
+    normalized += "==";
+  } else if (pad === 3) {
+    normalized += "=";
+  } else if (pad !== 0) {
+    normalized += "=".repeat(4 - pad);
+  }
+  return Buffer.from(normalized, "base64");
+};
+
+const decodeMetaSignedRequest = (signedRequest: string, secret: string) => {
+  const [encodedSig, payload] = signedRequest.split(".", 2);
+  if (!encodedSig || !payload) {
+    throw new Error("INVALID_SIGNED_REQUEST_FORMAT");
+  }
+
+  const signature = base64UrlDecode(encodedSig);
+  const expectedSignature = crypto.createHmac("sha256", secret).update(payload).digest();
+
+  if (signature.length !== expectedSignature.length || !crypto.timingSafeEqual(signature, expectedSignature)) {
+    throw new Error("INVALID_SIGNED_REQUEST_SIGNATURE");
+  }
+
+  const decodedPayload = base64UrlDecode(payload).toString("utf8");
+  try {
+    return JSON.parse(decodedPayload);
+  } catch (error) {
+    throw new Error("INVALID_SIGNED_REQUEST_PAYLOAD");
+  }
+};
+
+type DeletionTaskResult = {
+  task: string;
+  success: boolean;
+  count?: number;
+  skipped?: boolean;
+  message?: string;
+};
+
+const performDeletionTask = async (
+  task: string,
+  fn: () => Promise<{count?: number; skipped?: boolean}>,
+  results: DeletionTaskResult[]
+) => {
+  try {
+    const outcome = await fn();
+    results.push({
+      task,
+      success: true,
+      count: outcome.count,
+      skipped: outcome.skipped,
+    });
+  } catch (error: any) {
+    results.push({
+      task,
+      success: false,
+      message: error?.message || "unknown-error",
+    });
+  }
+};
+
+const deleteDocIfExists = async (ref: FirebaseFirestore.DocumentReference): Promise<boolean> => {
+  const snapshot = await ref.get();
+  if (!snapshot.exists) {
+    return false;
+  }
+  await ref.delete();
+  return true;
+};
+
+const deleteDocsByQuery = async (
+  collectionName: string,
+  fieldPath: string,
+  value: unknown
+): Promise<number> => {
+  const snapshot = await db.collection(collectionName).where(fieldPath, "==", value).get();
+  if (snapshot.empty) {
+    return 0;
+  }
+
+  let batch = db.batch();
+  let writesInBatch = 0;
+  let total = 0;
+  const commits: Array<Promise<FirebaseFirestore.WriteResult[]>> = [];
+
+  snapshot.docs.forEach((doc) => {
+    batch.delete(doc.ref);
+    writesInBatch += 1;
+    total += 1;
+
+    if (writesInBatch >= 400) {
+      commits.push(batch.commit());
+      batch = db.batch();
+      writesInBatch = 0;
+    }
+  });
+
+  if (writesInBatch > 0) {
+    commits.push(batch.commit());
+  }
+
+  await Promise.all(commits);
+  return total;
+};
+
+const removeUserFromCommentLikes = async (uid: string): Promise<number> => {
+  const snapshot = await db.collection(COMMENT_COLLECTION).where("likedBy", "array-contains", uid).get();
+  if (snapshot.empty) {
+    return 0;
+  }
+
+  await Promise.all(
+    snapshot.docs.map(async (doc) => {
+      const data = doc.data() as MissingPersonComment;
+      const newLikedBy = (data.likedBy || []).filter((likeUid) => likeUid !== uid);
+      const newLikes = Math.max(0, newLikedBy.length);
+      await doc.ref.update({
+        likedBy: newLikedBy,
+        likes: newLikes,
+        updatedAt: admin.firestore.Timestamp.now(),
+      });
+    })
+  );
+
+  return snapshot.size;
+};
+
+const removeUserFromCommentReports = async (uid: string): Promise<number> => {
+  const snapshot = await db.collection(COMMENT_COLLECTION).where("reportedBy", "array-contains", uid).get();
+  if (snapshot.empty) {
+    return 0;
+  }
+
+  await Promise.all(
+    snapshot.docs.map(async (doc) => {
+      const data = doc.data() as MissingPersonComment;
+      const newReportedBy = (data.reportedBy || []).filter((reportUid) => reportUid !== uid);
+      const reportCount = newReportedBy.length;
+      await doc.ref.update({
+        reportedBy: newReportedBy,
+        reportCount,
+        reported: reportCount > 0,
+        updatedAt: admin.firestore.Timestamp.now(),
+      });
+    })
+  );
+
+  return snapshot.size;
+};
+
+const maskName = (name: unknown): string => {
+  if (typeof name !== "string") {
+    return "미상";
+  }
+  const trimmed = name.trim();
+  if (!trimmed) {
+    return "미상";
+  }
+  if (trimmed.length === 1) {
+    return `${trimmed}**`;
+  }
+  return `${trimmed[0]}**`;
+};
+
+const REGION_NAME_REGEX = /^([가-힣]+(?:특별시|광역시|특별자치시|도|특별자치도))$/;
+const EXCLUDED_REGIONS = new Set(["대한민국"]);
+
+const pickRegionFromAddress = (address: string): string | null => {
+  if (typeof address !== "string") {
+    return null;
+  }
+
+  const tokens = address.trim().split(/\s+/);
+  for (const token of tokens) {
+    if (!token || EXCLUDED_REGIONS.has(token)) {
+      continue;
+    }
+    if (REGION_NAME_REGEX.test(token)) {
+      return token;
+    }
+  }
+
+  return null;
+};
+
+const extractRegionFromData = (data: FirebaseFirestore.DocumentData | undefined): string => {
+  if (!data) return "미상";
+  const location = data.location;
+  if (location && typeof location === "object") {
+    const address = (location as any).address;
+    if (typeof address === "string" && address.trim().length > 0) {
+      const regionFromAddress = pickRegionFromAddress(address);
+      if (regionFromAddress) {
+        return regionFromAddress;
+      }
+    }
+    const region = (location as any).region;
+    if (typeof region === "string") {
+      const trimmed = region.trim();
+      if (trimmed && !EXCLUDED_REGIONS.has(trimmed)) {
+        return trimmed;
+      }
+    }
+  }
+  return "미상";
+};
+
+const normalizeDateValue = (value: unknown): number | null => {
+  if (!value) return null;
+  if (value instanceof admin.firestore.Timestamp) {
+    return value.toMillis();
+  }
+  if (value instanceof Date) {
+    return value.getTime();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+};
+
+const getReportTimestamp = (report: any): number | null => {
+  if (!report || typeof report !== "object") {
+    return null;
+  }
+
+  const candidates: unknown[] = [
+    report?.reportedBy?.reportedAt,
+    report?.createdAt,
+    report?.reportedAt,
+    report?.syncedAt,
+    report?.fetchedAt,
+    report?.missingDate,
+  ];
+
+  for (const value of candidates) {
+    const normalized = normalizeDateValue(value);
+    if (normalized !== null) {
+      return normalized;
+    }
+  }
+
+  return null;
+};
+
+const getComparableSnapshot = (data: FirebaseFirestore.DocumentData | undefined) => {
+  if (!data) {
+    return null;
+  }
+  return {
+    status: typeof data.status === "string" ? data.status : "unknown",
+    type: typeof data.type === "string" ? data.type : "unknown",
+    gender: typeof data.gender === "string" ? data.gender : "unknown",
+    region: extractRegionFromData(data),
+    missingDate: normalizeDateValue(data.missingDate),
+  };
+};
+
+const shouldRecalculateMissingPersonStats = (
+  before: FirebaseFirestore.DocumentData | undefined,
+  after: FirebaseFirestore.DocumentData | undefined
+): boolean => {
+  if (!before && after) return true;
+  if (before && !after) return true;
+  if (!before || !after) return true;
+
+  const prev = getComparableSnapshot(before);
+  const next = getComparableSnapshot(after);
+  if (!prev || !next) return true;
+
+  return (
+    prev.status !== next.status ||
+    prev.type !== next.type ||
+    prev.gender !== next.gender ||
+    prev.region !== next.region ||
+    prev.missingDate !== next.missingDate
+  );
+};
+
+const aggregateMissingPersonSummary = async () => {
+  const snapshot = await db.collection(MISSING_PERSON_COLLECTION).get();
+
+  const totals = {
+    total: snapshot.size,
+    active: 0,
+    found: 0,
+    investigating: 0,
+    other: 0,
+  };
+
+  const statusCounts: Record<string, number> = {};
+  const typeCounts: Record<string, number> = {};
+  const genderCounts: Record<string, number> = {};
+  const regionCounts: Record<string, number> = {};
+
+  const recentRecords: Array<{
+    id: string;
+    maskedName: string;
+    status: string;
+    type: string;
+    gender: string;
+    region: string;
+    missingDateMs: number | null;
+    missingDate: string | null;
+    updatedAt: string | null;
+    source: string;
+  }> = [];
+
+  snapshot.docs.forEach((doc) => {
+    const data = doc.data() || {};
+
+    const status = typeof data.status === "string" ? data.status : "unknown";
+    statusCounts[status] = (statusCounts[status] || 0) + 1;
+    if (status === "active") totals.active += 1;
+    else if (status === "found") totals.found += 1;
+    else if (status === "investigating") totals.investigating += 1;
+    else totals.other += 1;
+
+    const type = typeof data.type === "string" ? data.type : "unknown";
+    typeCounts[type] = (typeCounts[type] || 0) + 1;
+
+    const gender = typeof data.gender === "string" ? data.gender : "unknown";
+    genderCounts[gender] = (genderCounts[gender] || 0) + 1;
+
+    const region = extractRegionFromData(data);
+    regionCounts[region] = (regionCounts[region] || 0) + 1;
+
+    const missingDateMs = normalizeDateValue(data.missingDate);
+    const updatedAtMs = normalizeDateValue(data.updatedAt);
+
+    recentRecords.push({
+      id: doc.id,
+      maskedName: maskName(data.name),
+      status,
+      type,
+      gender,
+      region,
+      missingDateMs,
+      missingDate: missingDateMs ? new Date(missingDateMs).toISOString().slice(0, 10) : null,
+      updatedAt: updatedAtMs ? new Date(updatedAtMs).toISOString() : null,
+      source: typeof data.source === "string" ? data.source : "unknown",
+    });
+  });
+
+  recentRecords.sort((a, b) => {
+    const aValue = a.missingDateMs ?? 0;
+    const bValue = b.missingDateMs ?? 0;
+    return bValue - aValue;
+  });
+
+  const recent = recentRecords.slice(0, 20).map(({missingDateMs, ...rest}) => rest);
+
+  const timestamp = admin.firestore.Timestamp.now();
+
+  const statusArray = Object.entries(statusCounts).map(([status, count]) => ({status, count}));
+  statusArray.sort((a, b) => b.count - a.count);
+
+  const typeArray = Object.entries(typeCounts).map(([type, count]) => ({type, count}));
+  typeArray.sort((a, b) => b.count - a.count);
+
+  const genderArray = Object.entries(genderCounts).map(([gender, count]) => ({gender, count}));
+  genderArray.sort((a, b) => b.count - a.count);
+
+  const regionArray = Object.entries(regionCounts).map(([region, count]) => ({region, count}));
+  regionArray.sort((a, b) => b.count - a.count);
+
+  const summaryDoc = {
+    totals,
+    statuses: statusArray,
+    types: typeArray,
+    genders: genderArray,
+    regions: regionArray,
+    recent,
+    generatedAt: timestamp.toDate().toISOString(),
+    updatedAt: timestamp,
+  };
+
+  await db.collection("stats").doc("summary").set(summaryDoc, {merge: false});
+  return summaryDoc;
+};
+
+const serializeSummaryDocument = (data: FirebaseFirestore.DocumentData | null | undefined) => {
+  if (!data) {
+    return null;
+  }
+
+  const {updatedAt, ...rest} = data;
+  let updatedAtIso: string | null = null;
+  if (updatedAt instanceof admin.firestore.Timestamp) {
+    updatedAtIso = updatedAt.toDate().toISOString();
+  } else if (updatedAt instanceof Date) {
+    updatedAtIso = updatedAt.toISOString();
+  } else if (typeof updatedAt === "string") {
+    updatedAtIso = updatedAt;
+  }
+
+  return {
+    ...rest,
+    updatedAt: updatedAtIso,
+  };
+};
+
+export const missingPersonSummaryUpdater = onDocumentWritten(
+  {
+    document: `${MISSING_PERSON_COLLECTION}/{personId}`,
+    region: "asia-northeast3",
+  },
+  async (event) => {
+    const beforeSnapshot = event.data?.before;
+    const afterSnapshot = event.data?.after;
+
+    const beforeData = beforeSnapshot && beforeSnapshot.exists ? beforeSnapshot.data() : undefined;
+    const afterData = afterSnapshot && afterSnapshot.exists ? afterSnapshot.data() : undefined;
+
+    if (!shouldRecalculateMissingPersonStats(beforeData, afterData)) {
+      return;
+    }
+
+    try {
+      await aggregateMissingPersonSummary();
+    } catch (error: any) {
+      logger.error("missingPersonSummaryUpdater 실패", error);
+      throw error;
+    }
+  }
+);
 
 const authenticate = async (req: AuthedRequest, res: Response, next: NextFunction) => {
   try {
@@ -365,6 +806,444 @@ app.get("/api/status", (req: Request, res: Response) => {
     platform: "firebase-functions",
   });
 });
+
+app.get("/api/admin/reports/summary", requireAdmin, async (req: AuthedRequest, res: Response) => {
+  try {
+    const docSnap = await db.collection("stats").doc("summary").get();
+    if (!docSnap.exists) {
+      const summary = await aggregateMissingPersonSummary();
+      return res.json({
+        success: true,
+        summary: serializeSummaryDocument(summary),
+        regenerated: true,
+      });
+    }
+
+    res.json({
+      success: true,
+      summary: serializeSummaryDocument(docSnap.data()),
+      regenerated: false,
+    });
+  } catch (error: any) {
+    logger.error("요약 리포트 조회 실패", error);
+    res.status(500).json({
+      success: false,
+      error: "리포트 데이터를 불러오지 못했습니다",
+    });
+  }
+});
+
+app.post("/api/admin/reports/summary/recalculate", requireAdmin, async (req: AuthedRequest, res: Response) => {
+  try {
+    const summary = await aggregateMissingPersonSummary();
+    res.json({
+      success: true,
+      summary: serializeSummaryDocument(summary),
+    });
+  } catch (error: any) {
+    logger.error("요약 리포트 재계산 실패", error);
+    res.status(500).json({
+      success: false,
+      error: "리포트를 재계산하지 못했습니다",
+    });
+  }
+});
+
+app.get("/api/auth/data-deletion", (req: Request, res: Response) => {
+  res.json({
+    success: true,
+    message: "Submit a POST request to this endpoint with a user identifier (uid) to remove user data.",
+    requirements: {
+      tokenHeader: DATA_DELETION_SECRET ? "x-deletion-token" : null,
+      supportedBodyFields: ["uid", "user_id", "userId", "signed_request"],
+      statusEndpoint: "/api/auth/data-deletion/status?code={confirmation_code}",
+    },
+  });
+});
+
+app.get("/api/auth/data-deletion/status", async (req: Request, res: Response) => {
+  try {
+    const {code} = req.query;
+    if (typeof code !== "string" || code.trim().length === 0) {
+      return res.status(400).json({success: false, error: "code 파라미터가 필요합니다"});
+    }
+
+    const docRef = db.collection(DATA_DELETION_COLLECTION).doc(code.trim());
+    const snapshot = await docRef.get();
+
+    if (!snapshot.exists) {
+      return res.status(404).json({success: false, error: "삭제 요청을 찾을 수 없습니다"});
+    }
+
+    res.json({
+      success: true,
+      ...snapshot.data(),
+    });
+  } catch (error: any) {
+    logger.error("데이터 삭제 상태 조회 실패", error);
+    res.status(500).json({
+      success: false,
+      error: "데이터 삭제 상태 조회 중 오류가 발생했습니다",
+    });
+  }
+});
+
+app.post("/api/auth/data-deletion", async (req: Request, res: Response) => {
+  try {
+    const results: DeletionTaskResult[] = [];
+    const tokenFromHeader = req.headers["x-deletion-token"] as string | undefined;
+    const tokenFromQuery = typeof req.query.token === "string" ? req.query.token : undefined;
+    const tokenFromBody = typeof req.body?.token === "string" ? req.body.token : undefined;
+    const providedToken = tokenFromHeader || tokenFromQuery || tokenFromBody;
+
+    if (DATA_DELETION_SECRET && DATA_DELETION_SECRET !== providedToken) {
+      return res.status(403).json({success: false, error: "삭제 토큰이 유효하지 않습니다"});
+    }
+
+    let uidCandidate: unknown =
+      req.body?.uid ??
+      req.body?.user_id ??
+      req.body?.userId ??
+      req.query?.uid ??
+      req.query?.user_id ??
+      req.query?.userId;
+
+    let signedRequestPayload: any = null;
+    const signedRequest = typeof req.body?.signed_request === "string" ? req.body.signed_request : undefined;
+
+    if (!uidCandidate && signedRequest) {
+      if (!META_APP_SECRET) {
+        return res.status(400).json({
+          success: false,
+          error: "signed_request를 처리하려면 META_APP_SECRET 환경 변수가 필요합니다",
+        });
+      }
+
+      try {
+        signedRequestPayload = decodeMetaSignedRequest(signedRequest, META_APP_SECRET);
+        uidCandidate = signedRequestPayload?.user_id ?? signedRequestPayload?.userId ?? signedRequestPayload?.uid;
+      } catch (error: any) {
+        return res.status(400).json({
+          success: false,
+          error: "SIGNED_REQUEST_INVALID",
+          details: error?.message || "Failed to verify signed_request",
+        });
+      }
+    }
+
+    if (typeof uidCandidate !== "string" || uidCandidate.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "삭제할 사용자 uid가 필요합니다",
+      });
+    }
+
+    const uid = uidCandidate.trim();
+
+    await performDeletionTask(
+      "auth.deleteUser",
+      async () => {
+        try {
+          await admin.auth().deleteUser(uid);
+          return {count: 1};
+        } catch (error: any) {
+          if (error?.code === "auth/user-not-found") {
+            return {count: 0, skipped: true};
+          }
+          throw error;
+        }
+      },
+      results
+    );
+
+    await performDeletionTask(
+      "firestore.users",
+      async () => {
+        const deleted = await deleteDocIfExists(db.collection("users").doc(uid));
+        return {count: deleted ? 1 : 0, skipped: !deleted};
+      },
+      results
+    );
+
+    await performDeletionTask(
+      "firestore.userTokens",
+      async () => {
+        const deleted = await deleteDocIfExists(db.collection("userTokens").doc(uid));
+        return {count: deleted ? 1 : 0, skipped: !deleted};
+      },
+      results
+    );
+
+    await performDeletionTask(
+      "firestore.missing_persons",
+      async () => {
+        const count = await deleteDocsByQuery("missing_persons", "reportedBy.uid", uid);
+        return {count};
+      },
+      results
+    );
+
+    await performDeletionTask(
+      "firestore.missingPersonComments",
+      async () => {
+        const count = await deleteDocsByQuery(COMMENT_COLLECTION, "userId", uid);
+        return {count};
+      },
+      results
+    );
+
+    await performDeletionTask(
+      "firestore.commentNotifications",
+      async () => {
+        const count = await deleteDocsByQuery(NOTIFICATION_COLLECTION, "userId", uid);
+        return {count};
+      },
+      results
+    );
+
+    await performDeletionTask(
+      "firestore.commentReports",
+      async () => {
+        const count = await deleteDocsByQuery(REPORT_COLLECTION, "reportedBy", uid);
+        return {count};
+      },
+      results
+    );
+
+    await performDeletionTask(
+      "firestore.activeSessions",
+      async () => {
+        const count = await deleteDocsByQuery("activeSessions", "userId", uid);
+        return {count};
+      },
+      results
+    );
+
+    await performDeletionTask(
+      "firestore.viewLogs",
+      async () => {
+        const count = await deleteDocsByQuery(VIEW_LOG_COLLECTION, "viewerId", uid);
+        return {count};
+      },
+      results
+    );
+
+    await performDeletionTask(
+      "firestore.commentLikesArrayCleanup",
+      async () => {
+        const count = await removeUserFromCommentLikes(uid);
+        return {count};
+      },
+      results
+    );
+
+    await performDeletionTask(
+      "firestore.commentReportsArrayCleanup",
+      async () => {
+        const count = await removeUserFromCommentReports(uid);
+        return {count};
+      },
+      results
+    );
+
+    const allSuccessful = results.every((task) => task.success);
+    const timestamp = admin.firestore.Timestamp.now();
+    const deletionCode = `${uid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
+    const protocolHeader = (req.headers["x-forwarded-proto"] as string) || req.protocol || "https";
+    const hostHeader = (req.headers["x-forwarded-host"] as string) || req.get("host") || "";
+    const statusUrl = `${protocolHeader}://${hostHeader}/api/auth/data-deletion/status?code=${encodeURIComponent(deletionCode)}`;
+
+    await db.collection(DATA_DELETION_COLLECTION).doc(deletionCode).set({
+      code: deletionCode,
+      uid,
+      processedAt: timestamp,
+      success: allSuccessful,
+      tasks: results,
+      signedRequest: !!signedRequest,
+      requester: {
+        ip: req.ip,
+        userAgent: req.get("user-agent") || null,
+        tokenProvided: !!providedToken,
+      },
+      metaPayload: signedRequestPayload || null,
+    });
+
+    res.json({
+      url: statusUrl,
+      confirmation_code: deletionCode,
+      success: allSuccessful,
+      tasks: results,
+    });
+  } catch (error: any) {
+    logger.error("데이터 삭제 처리 실패", error);
+    res.status(500).json({
+      success: false,
+      error: "데이터 삭제 처리 중 오류가 발생했습니다",
+      details: error?.message || "unknown-error",
+    });
+  }
+});
+
+const incrementViewHandler = async (req: Request, res: Response) => {
+  try {
+    const {id} = req.params;
+    const {guestId, userId} = req.body || {};
+
+    if (!id) {
+      return res.status(400).json({error: "실종자 ID가 필요합니다."});
+    }
+
+    const now = Date.now();
+    const safeGuestId = typeof guestId === "string" && guestId.trim().length > 0 ? guestId.trim() : undefined;
+    const safeUserId = typeof userId === "string" && userId.trim().length > 0 ? userId.trim() : undefined;
+    const viewId = safeUserId || safeGuestId || `anonymous_${now}`;
+    const personRef = db.collection(MISSING_PERSON_COLLECTION).doc(id);
+    const viewLogRef = db.collection(VIEW_LOG_COLLECTION).doc(`${id}_${viewId}`);
+
+    const personDoc = await personRef.get();
+    if (!personDoc.exists) {
+      return res.status(404).json({error: "실종자 정보를 찾을 수 없습니다."});
+    }
+
+    const existingLogSnap = await viewLogRef.get();
+    const existingLog = existingLogSnap.data() as {lastViewed?: number | admin.firestore.Timestamp} | undefined;
+    const lastViewed = existingLog?.lastViewed instanceof admin.firestore.Timestamp
+      ? existingLog.lastViewed.toMillis()
+      : typeof existingLog?.lastViewed === "number"
+        ? existingLog.lastViewed
+        : undefined;
+
+    const oneHourAgo = now - 60 * 60 * 1000;
+    if (existingLogSnap.exists && lastViewed && lastViewed > oneHourAgo) {
+      const personData = personDoc.data() || {};
+      return res.json({
+        viewCount: personData.viewCount || 0,
+        viewStats: personData.viewStats || {total: personData.viewCount || 0},
+        alreadyViewed: true,
+      });
+    }
+
+    const result = await db.runTransaction(async (transaction) => {
+      const freshPersonSnap = await transaction.get(personRef);
+      if (!freshPersonSnap.exists) {
+        throw new Error("실종자 정보를 찾을 수 없습니다.");
+      }
+
+      const freshLogSnap = await transaction.get(viewLogRef);
+      const personData = freshPersonSnap.data() || {};
+      const currentViewCount = personData.viewCount || 0;
+      const currentViewStats = personData.viewStats || {};
+
+      const newViewCount = currentViewCount + 1;
+      const newViewStats = {
+        total: newViewCount,
+        lastViewed: now,
+        uniqueViewers: currentViewStats.uniqueViewers || 0,
+      };
+
+      if (!freshLogSnap.exists) {
+        newViewStats.uniqueViewers += 1;
+      }
+
+      transaction.update(personRef, {
+        viewCount: newViewCount,
+        viewStats: newViewStats,
+        updatedAt: now,
+      });
+
+      const previousViewCount = freshLogSnap.exists ? (freshLogSnap.data()?.viewCount || 0) : 0;
+      transaction.set(viewLogRef, {
+        personId: id,
+        viewerId: viewId,
+        viewerType: safeUserId ? "user" : "guest",
+        lastViewed: now,
+        viewCount: previousViewCount + 1,
+        updatedAt: now,
+      }, {merge: true});
+
+      return {
+        viewCount: newViewCount,
+        viewStats: newViewStats,
+      };
+    });
+
+    res.json({
+      success: true,
+      viewCount: result.viewCount,
+      viewStats: result.viewStats,
+    });
+  } catch (error: any) {
+    logger.error("조회수 증가 실패", error);
+    res.status(500).json({
+      error: "조회수 증가에 실패했습니다.",
+      details: error?.message || "unknown-error",
+    });
+  }
+};
+
+app.post("/api/views/:id/increment", incrementViewHandler);
+app.post("/views/:id/increment", incrementViewHandler);
+
+const getTopViewsHandler = async (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit as string, 10) || 10, 50);
+
+    const snapshot = await db.collection(MISSING_PERSON_COLLECTION)
+      .where("status", "==", "active")
+      .orderBy("viewCount", "desc")
+      .limit(limit)
+      .get();
+
+    const persons = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    res.json({
+      persons,
+      count: persons.length,
+    });
+  } catch (error: any) {
+    logger.error("상위 조회수 목록 조회 실패", error);
+    res.status(500).json({
+      error: "상위 조회수 목록 조회에 실패했습니다.",
+      details: error?.message || "unknown-error",
+    });
+  }
+};
+
+app.get("/api/views/top", getTopViewsHandler);
+app.get("/views/top", getTopViewsHandler);
+
+const getViewHandler = async (req: Request, res: Response) => {
+  try {
+    const {id} = req.params;
+    if (!id) {
+      return res.status(400).json({error: "실종자 ID가 필요합니다."});
+    }
+
+    const personSnap = await db.collection(MISSING_PERSON_COLLECTION).doc(id).get();
+    if (!personSnap.exists) {
+      return res.status(404).json({error: "실종자 정보를 찾을 수 없습니다."});
+    }
+
+    const data = personSnap.data() || {};
+    res.json({
+      viewCount: data.viewCount || 0,
+      viewStats: data.viewStats || {total: data.viewCount || 0},
+    });
+  } catch (error: any) {
+    logger.error("조회수 조회 실패", error);
+    res.status(500).json({
+      error: "조회수 조회에 실패했습니다.",
+      details: error?.message || "unknown-error",
+    });
+  }
+};
+
+app.get("/api/views/:id", getViewHandler);
+app.get("/views/:id", getViewHandler);
 
 app.get("/api/comments/:missingPersonId", async (req: Request, res: Response) => {
   try {
@@ -927,31 +1806,45 @@ app.get("/api/admin/statistics", requireAdmin, async (req: AuthedRequest, res: R
     }
 
     // 전체 제보 가져오기
-    const reportsSnapshot = await db.collection("missing_persons").get();
+    const reportsSnapshot = await db.collection(MISSING_PERSON_COLLECTION).get();
     const allReports = reportsSnapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     }));
 
-    // 제보 통계
-    const userReports = allReports.filter((r: any) => r.source === "user_report");
-    const apiReports = allReports.filter((r: any) => r.source !== "user_report");
-    const activeReports = allReports.filter((r: any) => r.status === "active");
-    const resolvedReports = allReports.filter((r: any) => r.status === "resolved");
+    const reportsWithTimestamp = allReports.map((report: any) => ({
+      report,
+      timestamp: getReportTimestamp(report),
+    }));
 
-    // 오늘, 이번 주, 이번 달 제보
+    // 제보 통계
+    const userReports = reportsWithTimestamp.filter(({report}) => report.source === "user_report");
+    const apiReports = reportsWithTimestamp.filter(({report}) => report.source !== "user_report");
+    const activeReports = reportsWithTimestamp.filter(({report}) => report.status === "active");
+    const resolvedReports = reportsWithTimestamp.filter(({report}) => report.status === "resolved");
+
+    // 오늘, 이번 주, 이번 달, 올해 제보
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     const monthStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const yearStart = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
 
-    const todayReports = allReports.filter(
-      (r: any) => r.reportedBy?.reportedAt && new Date(r.reportedBy.reportedAt) >= todayStart
+    const todayStartMs = todayStart.getTime();
+    const weekStartMs = weekStart.getTime();
+    const monthStartMs = monthStart.getTime();
+    const yearStartMs = yearStart.getTime();
+
+    const todayReports = reportsWithTimestamp.filter(
+      ({timestamp}) => timestamp !== null && timestamp >= todayStartMs
     );
-    const weekReports = allReports.filter(
-      (r: any) => r.reportedBy?.reportedAt && new Date(r.reportedBy.reportedAt) >= weekStart
+    const weekReports = reportsWithTimestamp.filter(
+      ({timestamp}) => timestamp !== null && timestamp >= weekStartMs
     );
-    const monthReports = allReports.filter(
-      (r: any) => r.reportedBy?.reportedAt && new Date(r.reportedBy.reportedAt) >= monthStart
+    const monthReports = reportsWithTimestamp.filter(
+      ({timestamp}) => timestamp !== null && timestamp >= monthStartMs
+    );
+    const yearReports = reportsWithTimestamp.filter(
+      ({timestamp}) => timestamp !== null && timestamp >= yearStartMs
     );
 
     // 사용자 통계
@@ -969,12 +1862,28 @@ app.get("/api/admin/statistics", requireAdmin, async (req: AuthedRequest, res: R
     // 지역별 제보 통계
     const locationCounts: {[key: string]: number} = {};
     allReports.forEach((report: any) => {
-      if (report.location?.address) {
-        // 주소에서 시/도 추출
-        const match = report.location.address.match(/^([가-힣]+(?:특별시|광역시|특별자치시|도|특별자치도))/);
-        const region = match ? match[1] : "기타";
-        locationCounts[region] = (locationCounts[region] || 0) + 1;
+      const location = report.location;
+      if (!location || typeof location !== "object") {
+        return;
       }
+
+      let regionName: string | null = null;
+      if (typeof location.address === "string" && location.address.trim().length > 0) {
+        regionName = pickRegionFromAddress(location.address);
+      }
+
+      if (!regionName && typeof location.region === "string") {
+        const trimmed = location.region.trim();
+        if (trimmed && !EXCLUDED_REGIONS.has(trimmed)) {
+          regionName = trimmed;
+        }
+      }
+
+      if (!regionName) {
+        regionName = "기타";
+      }
+
+      locationCounts[regionName] = (locationCounts[regionName] || 0) + 1;
     });
 
     const locations = Object.entries(locationCounts)
@@ -985,16 +1894,16 @@ app.get("/api/admin/statistics", requireAdmin, async (req: AuthedRequest, res: R
     const recentActivity: any[] = [];
 
     // 최근 제보 추가
-    const recentReports = allReports
-      .filter((r: any) => r.reportedBy?.reportedAt)
-      .sort((a: any, b: any) => new Date(b.reportedBy.reportedAt).getTime() - new Date(a.reportedBy.reportedAt).getTime())
+    const recentReports = reportsWithTimestamp
+      .filter(({timestamp}) => timestamp !== null)
+      .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
       .slice(0, 5);
 
-    recentReports.forEach((report: any) => {
+    recentReports.forEach(({report, timestamp}) => {
       recentActivity.push({
         type: "report",
-        description: `${report.name} (${report.age}세) 실종자 제보`,
-        timestamp: report.reportedBy.reportedAt,
+        description: `${report.name || "실종자"}${typeof report.age === "number" ? ` (${report.age}세)` : ""} 실종자 제보`,
+        timestamp: timestamp ? new Date(timestamp).toISOString() : new Date().toISOString(),
       });
     });
 
@@ -1014,6 +1923,68 @@ app.get("/api/admin/statistics", requireAdmin, async (req: AuthedRequest, res: R
     // 시간순 정렬
     recentActivity.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
+    // 실시간 세션 정보
+    const activeSessionThresholdMinutes = 5;
+    const activeSessionThresholdMs = activeSessionThresholdMinutes * 60 * 1000;
+
+    const [activeSessionsSnapshot, visitorStatsDoc] = await Promise.all([
+      db.collection("activeSessions").get(),
+      db.collection("appMetrics").doc("visitorStats").get(),
+    ]);
+
+    const visitorStatsData: any = visitorStatsDoc.exists ? visitorStatsDoc.data() : {};
+    const visitorUpdatedAt = typeof visitorStatsData?.updatedAt === "number"
+      ? visitorStatsData.updatedAt
+      : visitorStatsData?.updatedAt?.toMillis?.() ?? null;
+
+    const totalSessionsValue = [
+      visitorStatsData?.totalSessions,
+      visitorStatsData?.totalVisitors,
+    ].find((value) => typeof value === "number" && Number.isFinite(value));
+
+    const todaySessionsValue = [
+      visitorStatsData?.todaySessions,
+      visitorStatsData?.todayVisitors,
+    ].find((value) => typeof value === "number" && Number.isFinite(value));
+
+    const activeSessionsRaw = activeSessionsSnapshot.docs.map((doc) => {
+      const session = doc.data() || {};
+      const lastActive = typeof session.lastActive === "number" ? session.lastActive : 0;
+      const createdAt = typeof session.createdAt === "number"
+        ? session.createdAt
+        : session.createdAt?.toMillis?.() ?? null;
+      const updatedAt = typeof session.updatedAt === "number"
+        ? session.updatedAt
+        : session.updatedAt?.toMillis?.() ?? null;
+
+      const inferredActive = lastActive > 0 && now.getTime() - lastActive <= activeSessionThresholdMs;
+      const explicitActive = typeof session.isActive === "boolean" ? session.isActive : null;
+      const isActive = explicitActive ?? inferredActive;
+
+      return {
+        sessionId: session.sessionId || doc.id,
+        userId: session.userId ?? null,
+        userEmail: session.userEmail ?? null,
+        displayName: session.displayName ?? null,
+        userAgent: session.userAgent ?? null,
+        platform: session.platform ?? null,
+        createdAt,
+        updatedAt,
+        lastActive,
+        isActive,
+        lastActiveAgoMs: lastActive > 0 ? now.getTime() - lastActive : null,
+      };
+    });
+
+    const liveSessions = activeSessionsRaw
+      .filter((session) => session.isActive && (!session.lastActive || now.getTime() - session.lastActive <= activeSessionThresholdMs))
+      .sort((a, b) => (b.lastActive || 0) - (a.lastActive || 0));
+
+    const activeSessionsCount = liveSessions.length;
+    const authenticatedSessionsCount = liveSessions.filter((session) => !!session.userId).length;
+    const guestSessionsCount = liveSessions.filter((session) => !session.userId).length;
+    const liveSessionsLimited = liveSessions.slice(0, 25);
+
     res.json({
       success: true,
       statistics: {
@@ -1026,6 +1997,7 @@ app.get("/api/admin/statistics", requireAdmin, async (req: AuthedRequest, res: R
           todayReports: todayReports.length,
           weekReports: weekReports.length,
           monthReports: monthReports.length,
+          yearReports: yearReports.length,
         },
         users: {
           total: allUsers.length,
@@ -1033,6 +2005,16 @@ app.get("/api/admin/statistics", requireAdmin, async (req: AuthedRequest, res: R
           withReports: usersWithReports.size,
           todayRegistered: todayUsers.length,
           weekRegistered: weekUsers.length,
+        },
+        sessions: {
+          totalSessions: typeof totalSessionsValue === "number" ? totalSessionsValue : activeSessionsSnapshot.size,
+          todaySessions: typeof todaySessionsValue === "number" ? todaySessionsValue : 0,
+          activeSessions: activeSessionsCount,
+          activeAuthenticated: authenticatedSessionsCount,
+          activeGuests: guestSessionsCount,
+          liveSessions: liveSessionsLimited,
+          lastUpdated: visitorUpdatedAt ?? now.getTime(),
+          activeThresholdMinutes: activeSessionThresholdMinutes,
         },
         locations,
         recentActivity: recentActivity.slice(0, 10),

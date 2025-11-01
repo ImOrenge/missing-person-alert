@@ -1,26 +1,124 @@
 {
+  "id": "/",
+  "scope": "/",
+  "lang": "ko",
   "short_name": "실종자알림",
   "name": "실시간 실종자 재난 알림",
+  "description": "실시간 실종자 및 긴급재난 정보를 지도에서 확인하세요",
+  "start_url": "/",
+  "display": "standalone",
+  "display_override": [
+    "standalone",
+    "fullscreen",
+    "browser"
+  ],
+  "orientation": "portrait-primary",
+  "theme_color": "#ff4d4f",
+  "background_color": "#ff4d4f",
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  },
+  "categories": [
+    "social",
+    "productivity",
+    "utilities"
+  ],
+  "prefer_related_applications": false,
   "icons": [
     {
-      "src": "favicon.ico",
-      "sizes": "64x64 32x32 24x24 16x16",
-      "type": "image/x-icon"
+      "src": "icons/pwa-icon-64.png",
+      "type": "image/png",
+      "sizes": "64x64"
     },
     {
-      "src": "logo192.png",
+      "src": "icons/pwa-icon-128.png",
+      "type": "image/png",
+      "sizes": "128x128"
+    },
+    {
+      "src": "icons/pwa-icon-192.png",
       "type": "image/png",
       "sizes": "192x192"
     },
     {
-      "src": "logo512.png",
+      "src": "icons/pwa-icon-256.png",
+      "type": "image/png",
+      "sizes": "256x256"
+    },
+    {
+      "src": "icons/pwa-icon-384.png",
+      "type": "image/png",
+      "sizes": "384x384"
+    },
+    {
+      "src": "icons/pwa-icon-512.png",
       "type": "image/png",
       "sizes": "512x512"
+    },
+    {
+      "src": "icons/pwa-icon-1024.png",
+      "type": "image/png",
+      "sizes": "1024x1024"
+    },
+    {
+      "src": "icons/pwa-icon-maskable-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/pwa-icon-maskable-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/pwa-icon-maskable-1024.png",
+      "type": "image/png",
+      "sizes": "1024x1024",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/icon-mono-light.svg",
+      "type": "image/svg+xml",
+      "sizes": "1024x1024",
+      "purpose": "monochrome"
     }
   ],
-  "start_url": ".",
-  "display": "standalone",
-  "theme_color": "#e74c3c",
-  "background_color": "#ffffff",
-  "description": "실시간 실종자 및 긴급재난 정보를 지도에서 확인하세요"
+  "share_target": {
+    "action": "/?share-target=1",
+    "method": "GET",
+    "enctype": "application/x-www-form-urlencoded",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
+  "shortcuts": [
+    {
+      "name": "실종자 지도",
+      "short_name": "지도",
+      "url": "/map",
+      "icons": [
+        {
+          "src": "icons/pwa-icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "알림 메시지",
+      "short_name": "알림",
+      "url": "/notifications",
+      "icons": [
+        {
+          "src": "icons/pwa-icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
 }

@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#ff4d4f" />
+    <meta name="supported-color-schemes" content="light" />
+    <title>오프라인 모드 | 실시간 실종자 알림</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --primary: #ff4d4f;
+        --bg: #f7f7f8;
+        --card: #ffffff;
+        --muted: #6b7280;
+        --text: #1f2937;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: 'Segoe UI', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        padding: 24px;
+      }
+      header {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-bottom: 24px;
+      }
+      header h1 {
+        margin: 0;
+        font-size: 1.5rem;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      header h1 span {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        background: var(--primary);
+        color: #fff;
+        border-radius: 10px;
+        font-size: 18px;
+        font-weight: 600;
+      }
+      .card {
+        background: var(--card);
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 16px 32px rgba(255, 77, 79, 0.08);
+        margin-bottom: 20px;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 9999px;
+        padding: 6px 12px;
+        background: rgba(255, 77, 79, 0.12);
+        color: var(--primary);
+        font-size: 0.85rem;
+        font-weight: 600;
+      }
+      ul {
+        padding-left: 20px;
+        margin: 12px 0;
+      }
+      li {
+        margin-bottom: 6px;
+        line-height: 1.5;
+      }
+      .offline-list {
+        list-style: none;
+        padding: 0;
+        margin: 12px 0 0;
+        display: grid;
+        gap: 12px;
+      }
+      .offline-item {
+        border-radius: 12px;
+        padding: 14px;
+        border: 1px solid rgba(255, 77, 79, 0.14);
+        background: rgba(255, 255, 255, 0.72);
+      }
+      .offline-item strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+      .timestamp {
+        font-size: 0.8rem;
+        color: var(--muted);
+        margin-top: 12px;
+      }
+      footer {
+        margin-top: 32px;
+        font-size: 0.8rem;
+        color: var(--muted);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #111827;
+          --card: #1f2937;
+          --muted: #9ca3af;
+          --text: #f9fafb;
+        }
+        body {
+          background: linear-gradient(160deg, #111827 0%, #1e293b 100%);
+          color: var(--text);
+        }
+        .card {
+          background: rgba(17, 24, 39, 0.92);
+          box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+          border: 1px solid rgba(255, 255, 255, 0.05);
+          backdrop-filter: blur(12px);
+        }
+        .offline-item {
+          background: rgba(255, 255, 255, 0.05);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1><span>🚨</span>오프라인 안내</h1>
+      <p>네트워크 연결이 없어도 최근에 확인한 핵심 정보를 계속 볼 수 있습니다.</p>
+    </header>
+
+    <article class="card">
+      <div class="badge">필수 연락처</div>
+      <ul>
+        <li>비상 신고 112</li>
+        <li>실종자 제보·상담 182</li>
+        <li>관제 센터: 02-1234-5678</li>
+      </ul>
+      <p>긴급한 상황에서는 즉시 112 또는 182로 연락해주세요.</p>
+    </article>
+
+    <article class="card">
+      <div class="badge">최근 실종자 요약</div>
+      <p>마지막 동기화 시점에 저장된 실종자 요약입니다.</p>
+      <ul id="offline-missing-list" class="offline-list"></ul>
+      <div id="offline-missing-empty" style="color: var(--muted); margin-top: 12px; display: none;">
+        아직 오프라인에서 사용할 요약이 없습니다. 인터넷에 연결된 상태에서 한 번 이상 목록을 열어주세요.
+      </div>
+      <div id="offline-missing-updated" class="timestamp"></div>
+    </article>
+
+    <article class="card">
+      <div class="badge">공지 & 안전 가이드</div>
+      <p id="offline-announcement-intro">최근 공지 및 안전 안내를 확인하세요.</p>
+      <ul id="offline-announcement-list" class="offline-list"></ul>
+      <div id="offline-announcement-empty" style="color: var(--muted); margin-top: 12px; display: none;">
+        저장된 공지가 없습니다. 인터넷 연결 후 공지사항을 한 번 이상 확인해주세요.
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="badge">오프라인 행동 요령</div>
+      <ul>
+        <li>주변 CCTV, 버스·택시 기사 등 목격자 확보가 중요합니다.</li>
+        <li>최근에 사용한 교통카드·금융기록, 모바일 메시지를 확인하세요.</li>
+        <li>관할 지구대 또는 182 신고센터에 즉시 알리고, 담당자 연락처를 메모해두세요.</li>
+      </ul>
+    </article>
+
+    <footer>
+      <span>오프라인 데이터는 기기에 안전하게 저장되며, 다음 온라인 접속 시 자동으로 최신 정보로 갱신됩니다.</span>
+      <span>마지막으로, 네트워크가 복구되면 새로고침하여 모든 기능을 다시 이용하세요.</span>
+    </footer>
+
+    <script>
+      (function () {
+        const missingList = document.getElementById('offline-missing-list');
+        const missingEmpty = document.getElementById('offline-missing-empty');
+        const missingUpdated = document.getElementById('offline-missing-updated');
+        const announcementList = document.getElementById('offline-announcement-list');
+        const announcementEmpty = document.getElementById('offline-announcement-empty');
+
+        const statusLabel = (status) => {
+          switch (status) {
+            case 'active':
+              return '수색중';
+            case 'found':
+              return '발견 완료';
+            case 'investigating':
+              return '조사중';
+            default:
+              return '정보 없음';
+          }
+        };
+
+        const renderMissing = () => {
+          try {
+            const raw = localStorage.getItem('mp-offline-missing-persons');
+            if (!raw) {
+              missingEmpty.style.display = 'block';
+              return;
+            }
+            const parsed = JSON.parse(raw);
+            const persons = Array.isArray(parsed?.data) ? parsed.data : [];
+            if (persons.length === 0) {
+              missingEmpty.style.display = 'block';
+              return;
+            }
+            const limit = Math.min(persons.length, 12);
+            for (let i = 0; i < limit; i++) {
+              const person = persons[i];
+              const item = document.createElement('li');
+              item.className = 'offline-item';
+              item.innerHTML = '<strong>' + (person.name || '이름 미상') + '</strong>' +
+                '<div>' + (person.address || '위치 정보 없음') + '</div>' +
+                (person.missingDate ? '<div>실종: ' + person.missingDate + '</div>' : '') +
+                (person.status ? '<div>상태: ' + statusLabel(person.status) + '</div>' : '');
+              missingList.appendChild(item);
+            }
+            if (parsed?.updatedAt) {
+              const date = new Date(parsed.updatedAt);
+              missingUpdated.textContent = '마지막 동기화: ' + date.toLocaleString('ko-KR');
+            }
+          } catch (error) {
+            missingEmpty.style.display = 'block';
+            console.warn('오프라인 실종자 목록을 불러오지 못했습니다.', error);
+          }
+        };
+
+        const renderAnnouncements = () => {
+          try {
+            const raw = localStorage.getItem('mp-offline-announcements');
+            if (!raw) {
+              announcementEmpty.style.display = 'block';
+              return;
+            }
+            const parsed = JSON.parse(raw);
+            const announcements = Array.isArray(parsed?.data) ? parsed.data : [];
+            if (announcements.length === 0) {
+              announcementEmpty.style.display = 'block';
+              return;
+            }
+            announcements.slice(0, 8).forEach((announcement) => {
+              const item = document.createElement('li');
+              item.className = 'offline-item';
+              item.innerHTML = '<strong>' + (announcement.title || '공지') + '</strong>' +
+                '<div>' + (announcement.text || '') + '</div>';
+              announcementList.appendChild(item);
+            });
+          } catch (error) {
+            announcementEmpty.style.display = 'block';
+            console.warn('오프라인 공지를 불러오지 못했습니다.', error);
+          }
+        };
+
+        renderMissing();
+        renderAnnouncements();
+      })();
+    </script>
+  </body>
+</html>

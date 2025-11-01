@@ -13,6 +13,13 @@ type Config = {
   onUpdate?: (registration: ServiceWorkerRegistration) => void;
 };
 
+const emitPwaEvent = (type: 'pwaReady' | 'pwaUpdateAvailable', registration: ServiceWorkerRegistration) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.dispatchEvent(new CustomEvent(type, { detail: registration }));
+};
+
 export function register(config?: Config) {
   if (process.env.NODE_ENV === 'production' && 'serviceWorker' in navigator) {
     const publicUrl = new URL(process.env.PUBLIC_URL || '', window.location.href);
@@ -25,8 +32,12 @@ export function register(config?: Config) {
 
       if (isLocalhost) {
         checkValidServiceWorker(swUrl, config);
-        navigator.serviceWorker.ready.then(() => {
+        navigator.serviceWorker.ready.then((registration) => {
           console.log('Service Worker is ready for offline use.');
+          emitPwaEvent('pwaReady', registration);
+          if (config?.onSuccess) {
+            config.onSuccess(registration);
+          }
         });
       } else {
         registerValidSW(swUrl, config);
@@ -48,11 +59,13 @@ function registerValidSW(swUrl: string, config?: Config) {
           if (installingWorker.state === 'installed') {
             if (navigator.serviceWorker.controller) {
               console.log('New content is available; please refresh.');
+              emitPwaEvent('pwaUpdateAvailable', registration);
               if (config && config.onUpdate) {
                 config.onUpdate(registration);
               }
             } else {
               console.log('Content is cached for offline use.');
+              emitPwaEvent('pwaReady', registration);
               if (config && config.onSuccess) {
                 config.onSuccess(registration);
               }

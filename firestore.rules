@@ -156,13 +156,14 @@ service cloud.firestore {
     }
 
     function validateUserTokenEntry(entry) {
-      return entry.keys().hasOnly([
-        'token',
-        'createdAt',
-        'lastSeenAt',
-        'userAgent',
-        'platform'
-      ]) &&
+      return entry is map &&
+        entry.keys().hasOnly([
+          'token',
+          'createdAt',
+          'lastSeenAt',
+          'userAgent',
+          'platform'
+        ]) &&
         entry.token is string && entry.token.size() > 0 &&
         entry.createdAt is timestamp &&
         entry.lastSeenAt is timestamp &&
@@ -182,7 +183,7 @@ service cloud.firestore {
         (!('lastPrunedAt' in data) || data.lastPrunedAt is timestamp) &&
         data.tokens is map &&
         data.tokens.size() <= 20 &&
-        data.tokens.values().all(entry => entry is map && validateUserTokenEntry(entry));
+        data.tokens.values().all(entry, validateUserTokenEntry(entry));
     }
 
     // 공지사항 컬렉션

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Bell, BellOff, ChevronLeft, ChevronRight, LogIn, LogOut, UserCircle, Plus, FileText, Shield, User as UserIcon, Menu, BarChart3 } from 'lucide-react';
+import { Bell, BellOff, ChevronLeft, ChevronRight, LogIn, LogOut, UserCircle, Plus, FileText, Shield, User as UserIcon, Menu, BarChart3, Home, LayoutGrid } from 'lucide-react';
 import EmergencyMap from './components/EmergencyMap';
 import Sidebar from './components/Sidebar';
 import FilterPanel from './components/FilterPanel';
@@ -11,7 +11,6 @@ import UserProfileModal from './components/UserProfileModal';
 import VerificationPromptModal from './components/VerificationPromptModal';
 import { PhoneAuthModal } from './components/PhoneAuthModal';
 import AnnouncementBanner from './components/AnnouncementBanner';
-import NewMissingPersonBanner from './components/NewMissingPersonBanner';
 import AnnouncementPopup from './components/AnnouncementPopup';
 import NotificationBell from './components/NotificationBell';
 import StatisticsModal from './components/StatisticsModal';
@@ -24,13 +23,23 @@ import { getBannerAnnouncements, getPopupAnnouncements } from './services/announ
 import type { User } from 'firebase/auth';
 import type { Announcement } from './types/announcement';
 import 'react-toastify/dist/ReactToastify.css';
-import { isAnnouncementPopupClosedForCurrentSession } from './utils/announcementStorage';
-import { usePresenceTracking } from './hooks/usePresenceTracking';
 import { onForegroundMessage } from './services/firebaseMessaging';
 import { detachFcmToken, getLocalTokenState } from './services/userTokenService';
 import { usePushNotifications, PUSH_PROMPT_STORAGE_KEY } from './hooks/usePushNotifications';
 import { useApiData } from './hooks/useApiData';
 import { getRegionStatsUpdateInfo } from './services/regionStatsService';
+import { useGuestId } from './hooks/useGuestId';
+import { setAnalyticsGuestId, setAnalyticsAuthenticatedUser, logLoginEvent, logLogoutEvent } from './services/analyticsService';
+import { logger } from './utils/logger';
+import { cacheMissingPersons, hydrateMissingPersonsFromCache, cacheAnnouncements } from './utils/offlineCache';
+import { hasUndismissedPopupForToday } from './utils/announcementPopupStorage';
+import type { MissingPerson, MissingPersonStatus } from './types';
+import { useActiveSessionTracker } from './hooks/useActiveSessionTracker';
+import { DesktopGridView } from './components/DesktopGridView';
+
+const GRID_VIEW_PREF_KEY = 'missing_person_desktop_grid_view';
+const INSTALL_PROMPT_DISMISSED_KEY = 'missing_person_install_prompt_snooze_until';
+const INSTALL_PROMPT_SNOOZE_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 
 function App() {
   const [showSidebar, setShowSidebar] = useState(true);
@@ -51,17 +60,46 @@ function App() {
   const [popupAnnouncements, setPopupAnnouncements] = useState<Announcement[]>([]);
   const [showPopup, setShowPopup] = useState(false);
   const pushPromptToastRef = useRef<React.ReactText | null>(null);
+  const installPromptRef = useRef<BeforeInstallPromptEvent | null>(null);
+  const installToastRef = useRef<React.ReactText | null>(null);
+  const swUpdateRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
+  const swUpdateToastRef = useRef<React.ReactText | null>(null);
+  const swRefreshingRef = useRef(false);
+  const shareTargetHandledRef = useRef(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [statsHasFreshData, setStatsHasFreshData] = useState(false);
   const [statsUpdatedAt, setStatsUpdatedAt] = useState<number | undefined>(undefined);
+  const [showInstallShortcut, setShowInstallShortcut] = useState(false);
+  const [showGridView, setShowGridView] = useState(false);
 
   useApiData();
+  useActiveSessionTracker(currentUser);
 
   const missingPersons = useEmergencyStore(state => state.missingPersons);
-
-  usePresenceTracking(currentUser);
+  const setMissingPersons = useEmergencyStore(state => state.setMissingPersons);
+  const filteredPersons = useEmergencyStore(state => state.getFilteredPersons());
+  const setSelectedPersonId = useEmergencyStore(state => state.setSelectedPersonId);
+  const setHoveredPersonId = useEmergencyStore(state => state.setHoveredPersonId);
+  const newPersonAlerts = useEmergencyStore(state => state.newPersonAlerts);
+  const shiftNewPersonAlert = useEmergencyStore(state => state.shiftNewPersonAlert);
 
   const { status: pushStatus, enablePush, syncExistingToken } = usePushNotifications(currentUser);
+  const { guestIdInfo, userType } = useGuestId(currentUser);
+  const [pendingPersonId, setPendingPersonId] = useState<string | null>(null);
+  const pendingPersonReasonRef = useRef<'deeplink' | 'notification' | null>(null);
+  const newAlertProcessingRef = useRef(false);
+  const activeAlertToastIdRef = useRef<React.ReactText | null>(null);
+  const alertsEnabledRef = useRef(alertsEnabled);
+  const newPersonAlertCount = newPersonAlerts.length;
+
+  // 게스트 사용자 닉네임 생성
+  const guestNickname = useMemo(() => {
+    if (!guestIdInfo) return '게스트';
+    const parts = guestIdInfo.guestId.split('_');
+    const lastPart = parts[parts.length - 1];
+    return `게스트-${lastPart.substring(0, 4).toUpperCase()}`;
+  }, [guestIdInfo]);
+
   const statsUpdatedLabel = useMemo(() => {
     if (!statsUpdatedAt) {
       return undefined;
@@ -73,24 +111,383 @@ function App() {
         hour12: false
       }).format(new Date(statsUpdatedAt));
     } catch (error) {
-      console.warn('통계 업데이트 시각 포맷 실패', error);
+      logger.warn('통계 업데이트 시각 포맷 실패', error);
       return undefined;
     }
   }, [statsUpdatedAt]);
+
+  useEffect(() => {
+    alertsEnabledRef.current = alertsEnabled;
+  }, [alertsEnabled]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const personId = params.get('personId');
+    if (personId) {
+      setPendingPersonId(personId);
+      pendingPersonReasonRef.current = 'deeplink';
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const stored = window.localStorage.getItem(GRID_VIEW_PREF_KEY);
+    if (stored === 'true') {
+      const isDesktop = window.matchMedia('(min-width: 768px)').matches;
+      if (isDesktop) {
+        setShowGridView(true);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const isDesktop = window.matchMedia('(min-width: 768px)').matches;
+    if (!isDesktop && !showGridView) {
+      return;
+    }
+    window.localStorage.setItem(GRID_VIEW_PREF_KEY, showGridView ? 'true' : 'false');
+  }, [showGridView]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const mediaQuery = window.matchMedia('(min-width: 768px)');
+    const handleChange = () => {
+      if (!mediaQuery.matches) {
+        setShowGridView(false);
+      }
+    };
+    mediaQuery.addEventListener('change', handleChange);
+    handleChange();
+    return () => {
+      mediaQuery.removeEventListener('change', handleChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (missingPersons.length === 0) {
+      const cached = hydrateMissingPersonsFromCache();
+      if (cached && cached.length > 0) {
+        const fallbackPersons: MissingPerson[] = cached.map((item, index) => {
+          const statusValue: MissingPersonStatus =
+            item.status === 'found' || item.status === 'investigating' ? (item.status as MissingPersonStatus) : 'active';
+          return {
+            id: item.id || `offline-${index}`,
+            name: item.name || '이름 미상',
+            age: 0,
+            gender: 'U',
+            location: {
+              lat: 0,
+              lng: 0,
+              address: item.address || '최근 위치 정보 없음'
+            },
+            description: '오프라인에서 확인된 요약 정보입니다.',
+            missingDate: item.missingDate ?? '',
+            type: 'unknown',
+            status: statusValue,
+            source: 'api'
+          };
+        });
+        setMissingPersons(fallbackPersons);
+      }
+    } else {
+      cacheMissingPersons(missingPersons);
+    }
+  }, [missingPersons, setMissingPersons]);
+
+  useEffect(() => {
+    if (!pendingPersonId) {
+      return;
+    }
+
+    const target = missingPersons.find((person) => person.id === pendingPersonId);
+    if (!target) {
+      return;
+    }
+
+    setSelectedPersonId(target.id);
+    setHoveredPersonId(target.id);
+
+    if (pendingPersonReasonRef.current === 'notification') {
+      toast.info(
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <strong style={{ fontSize: '13px', color: '#b91c1c' }}>새로운 실종자 알림</strong>
+          <span style={{ fontSize: '13px', color: '#1f2937' }}>
+            {target.name}님의 상세 정보를 열었습니다.
+          </span>
+        </div>,
+        { autoClose: 4000, position: 'bottom-right' }
+      );
+    }
+
+    if (typeof window !== 'undefined') {
+      try {
+        const currentUrl = new URL(window.location.href);
+        if (currentUrl.searchParams.has('personId')) {
+          currentUrl.searchParams.delete('personId');
+          window.history.replaceState(
+            null,
+            document.title,
+            `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`
+          );
+        }
+      } catch (error) {
+        logger.warn('딥링크 정리 실패', error);
+      }
+    }
+
+    pendingPersonReasonRef.current = null;
+    setPendingPersonId(null);
+  }, [pendingPersonId, missingPersons, setSelectedPersonId, setHoveredPersonId]);
+
+  useEffect(() => {
+    if (shareTargetHandledRef.current || typeof window === 'undefined') {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('share-target') !== '1') {
+      return;
+    }
+
+    shareTargetHandledRef.current = true;
+    const sharedTitle = params.get('title');
+    const sharedText = params.get('text');
+    const sharedUrl = params.get('url');
+
+    toast.info(
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <span style={{ fontSize: '13px', color: '#1f2937' }}>공유 받은 정보를 제보로 남기시겠어요?</span>
+        {sharedTitle && <strong style={{ fontSize: '13px' }}>{sharedTitle}</strong>}
+        {sharedText && <span style={{ fontSize: '12px', color: '#4b5563' }}>{sharedText}</span>}
+        {sharedUrl && (
+          <a
+            href={sharedUrl}
+            style={{ fontSize: '12px', color: '#dc2626', textDecoration: 'underline' }}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {sharedUrl}
+          </a>
+        )}
+      </div>,
+      { autoClose: 6000, position: 'bottom-right' }
+    );
+
+    if (currentUser) {
+      setShowReportModal(true);
+    } else {
+      setShowLoginModal(true);
+    }
+
+    if (window.history && window.history.replaceState) {
+      const cleanUrl = window.location.origin + window.location.pathname + window.location.hash;
+      window.history.replaceState({}, document.title, cleanUrl);
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
+      return;
+    }
+
+    const handleServiceWorkerMessage = (event: MessageEvent) => {
+      const { data } = event;
+      if (!data || typeof data !== 'object') {
+        return;
+      }
+
+      if (data.type === 'OPEN_MISSING_PERSON') {
+        const payload = data.payload || {};
+        const candidateId =
+          (typeof payload.missingPersonId === 'string' && payload.missingPersonId.trim().length > 0
+            ? payload.missingPersonId
+            : typeof payload.id === 'string'
+            ? payload.id
+            : null);
+
+        if (candidateId) {
+          setPendingPersonId(candidateId);
+          pendingPersonReasonRef.current = 'notification';
+
+          if (typeof window !== 'undefined' && typeof payload.url === 'string') {
+            try {
+              const targetUrl = new URL(payload.url, window.location.origin);
+              window.history.replaceState(
+                null,
+                document.title,
+                `${targetUrl.pathname}${targetUrl.search}${targetUrl.hash}`
+              );
+            } catch (error) {
+              logger.warn('알림 링크 처리 실패', error);
+            }
+          }
+        }
+      }
+    };
+
+    navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage);
+    };
+  }, [setPendingPersonId]);
+
+  const processNewPersonAlerts = useCallback(() => {
+    if (!alertsEnabledRef.current) {
+      return;
+    }
+
+    if (newAlertProcessingRef.current) {
+      return;
+    }
+
+    const nextAlert = shiftNewPersonAlert();
+    if (!nextAlert || !Array.isArray(nextAlert.persons) || nextAlert.persons.length === 0) {
+      return;
+    }
+
+    newAlertProcessingRef.current = true;
+    const persons = nextAlert.persons;
+    const topPersons = persons.slice(0, 3);
+    const extraCount = Math.max(0, persons.length - topPersons.length);
+    const primaryPerson = topPersons[0];
+
+    let toastId: React.ReactText;
+
+    const handleSelectPerson = (personId?: string) => {
+      if (!personId) {
+        return;
+      }
+      setSelectedPersonId(personId);
+      setHoveredPersonId(personId);
+      toast.dismiss(toastId);
+    };
+
+    const handleDismiss = () => {
+      toast.dismiss(toastId);
+    };
+
+    toastId = toast.info(
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div style={{ fontWeight: 700, color: '#b91c1c', fontSize: '14px' }}>
+          {persons.length === 1
+            ? '새로운 실종자 제보가 도착했습니다.'
+            : `새로운 실종자 ${persons.length}건이 업데이트되었습니다.`}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          {topPersons.map((person) => (
+            <div
+              key={person.id}
+              style={{
+                fontSize: '13px',
+                color: '#1f2937',
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: '16px'
+              }}
+            >
+              <span style={{ fontWeight: 600 }}>{person.name}</span>
+              <span style={{ color: '#6b7280', textAlign: 'right' }}>
+                {person.location?.address || '위치 미상'}
+              </span>
+            </div>
+          ))}
+          {extraCount > 0 && (
+            <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+              외 {extraCount}건의 실종 정보가 추가되었습니다.
+            </div>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+          {primaryPerson && (
+            <button
+              type="button"
+              onClick={() => handleSelectPerson(primaryPerson.id)}
+              style={{
+                flex: 1,
+                padding: '8px 12px',
+                borderRadius: '8px',
+                border: 'none',
+                backgroundColor: '#ef4444',
+                color: '#fff',
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              지도에서 보기
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleDismiss}
+            style={{
+              padding: '8px 12px',
+              borderRadius: '8px',
+              border: '1px solid #e5e7eb',
+              backgroundColor: '#fff',
+              color: '#374151',
+              fontWeight: 500,
+              cursor: 'pointer'
+            }}
+          >
+            닫기
+          </button>
+        </div>
+      </div>,
+      {
+        position: 'top-center',
+        autoClose: 10000,
+        closeOnClick: false,
+        pauseOnHover: true,
+        hideProgressBar: false,
+        onClose: () => {
+          activeAlertToastIdRef.current = null;
+          newAlertProcessingRef.current = false;
+          setTimeout(() => {
+            if (alertsEnabledRef.current) {
+              processNewPersonAlerts();
+            }
+          }, 200);
+        }
+      }
+    );
+
+    activeAlertToastIdRef.current = toastId;
+  }, [shiftNewPersonAlert, setSelectedPersonId, setHoveredPersonId]);
+
+  useEffect(() => {
+    if (!alertsEnabled) {
+      if (activeAlertToastIdRef.current) {
+        toast.dismiss(activeAlertToastIdRef.current);
+        activeAlertToastIdRef.current = null;
+      }
+      newAlertProcessingRef.current = false;
+      return;
+    }
+    processNewPersonAlerts();
+  }, [alertsEnabled, newPersonAlertCount, processNewPersonAlerts]);
 
   const handleEnablePush = useCallback(async () => {
     try {
       const result = await enablePush();
       if (result.status === 'enabled') {
         if (result.token) {
-          console.log('[FCM] 발급된 토큰:', result.token);
+          logger.log('[FCM] 발급된 토큰:', result.token);
         }
         toast.success('푸시 알림이 활성화되었습니다', { autoClose: 4000 });
       } else if (result.status === 'blocked') {
         toast.warning('브라우저 알림이 차단되어 있습니다. 설정에서 허용한 뒤 다시 시도해주세요.');
       }
     } catch (error: any) {
-      console.error('푸시 알림 설정 실패:', error);
+      logger.error('푸시 알림 설정 실패:', error);
       toast.error(error?.message || '푸시 알림 설정 중 오류가 발생했습니다');
     } finally {
       if (typeof window !== 'undefined') {
@@ -113,6 +510,290 @@ function App() {
     }
   }, []);
 
+  const dismissInstallPrompt = useCallback((reason?: 'later' | 'auto') => {
+    if (typeof window !== 'undefined' && reason === 'later') {
+      const snoozeUntil = Date.now() + INSTALL_PROMPT_SNOOZE_DURATION_MS;
+      window.localStorage.setItem(INSTALL_PROMPT_DISMISSED_KEY, String(snoozeUntil));
+    }
+    if (installToastRef.current && toast.isActive(installToastRef.current)) {
+      toast.dismiss(installToastRef.current);
+    }
+    installToastRef.current = null;
+    if (reason !== 'later') {
+      installPromptRef.current = null;
+    }
+  }, []);
+
+  const handleInstallApp = useCallback(async () => {
+    try {
+      const promptEvent = installPromptRef.current;
+      if (!promptEvent) {
+        toast.info('브라우저 메뉴에서 "홈 화면에 추가"를 선택해 설치할 수 있습니다.', { autoClose: 4000 });
+        return;
+      }
+      promptEvent.prompt();
+      const choice = await promptEvent.userChoice;
+      if (choice?.outcome === 'accepted') {
+        toast.success('앱 설치를 시작합니다.', { autoClose: 3500 });
+      } else {
+        toast.info('언제든지 앱 메뉴에서 다시 설치할 수 있습니다.', { autoClose: 3500 });
+      }
+    } catch (error) {
+      logger.warn('앱 설치 프롬프트 표시 실패', error);
+      toast.error('앱 설치 프롬프트를 여는 동안 문제가 발생했습니다.');
+    } finally {
+      dismissInstallPrompt();
+    }
+  }, [dismissInstallPrompt]);
+
+  const requestServiceWorkerUpdate = useCallback(() => {
+    const registration = swUpdateRegistrationRef.current;
+    if (!registration || !registration.waiting) {
+      toast.info('현재 적용할 업데이트가 없습니다.', { autoClose: 3000 });
+      return;
+    }
+    registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+    if (swUpdateToastRef.current && toast.isActive(swUpdateToastRef.current)) {
+      toast.update(swUpdateToastRef.current, {
+        render: '새로운 버전을 적용하는 중입니다...',
+        autoClose: 2000
+      });
+    } else {
+      toast.info('새로운 버전을 적용하는 중입니다...', { autoClose: 2000 });
+    }
+  }, []);
+
+  useEffect(() => {
+    const isInstallPromptSnoozed = () => {
+      if (typeof window === 'undefined') {
+        return false;
+      }
+      const stored = window.localStorage.getItem(INSTALL_PROMPT_DISMISSED_KEY);
+      if (!stored) {
+        return false;
+      }
+      const snoozeUntil = Number.parseInt(stored, 10);
+      if (!Number.isFinite(snoozeUntil)) {
+        window.localStorage.removeItem(INSTALL_PROMPT_DISMISSED_KEY);
+        return false;
+      }
+      if (snoozeUntil > Date.now()) {
+        return true;
+      }
+      window.localStorage.removeItem(INSTALL_PROMPT_DISMISSED_KEY);
+      return false;
+    };
+
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      installPromptRef.current = event as BeforeInstallPromptEvent;
+      setShowInstallShortcut(true);
+
+      if (isInstallPromptSnoozed()) {
+        return;
+      }
+
+      if (installToastRef.current && toast.isActive(installToastRef.current)) {
+        toast.dismiss(installToastRef.current);
+      }
+      installToastRef.current = toast.info(
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <span style={{ fontSize: '14px', color: '#1f2937' }}>
+            앱을 홈 화면에 설치해 오프라인에서도 빠르게 접근할 수 있습니다.
+          </span>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+            <button
+              onClick={() => dismissInstallPrompt('later')}
+              style={{
+                padding: '6px 12px',
+                fontSize: '12px',
+                borderRadius: '6px',
+                border: '1px solid #d1d5db',
+                backgroundColor: '#fff',
+                color: '#4b5563',
+                cursor: 'pointer'
+              }}
+            >
+              나중에
+            </button>
+            <button
+              onClick={handleInstallApp}
+              style={{
+                padding: '6px 14px',
+                fontSize: '12px',
+                borderRadius: '6px',
+                border: 'none',
+                backgroundColor: '#dc2626',
+                color: '#fff',
+                cursor: 'pointer',
+                fontWeight: 600
+              }}
+            >
+              설치하기
+            </button>
+          </div>
+        </div>,
+        {
+          position: 'bottom-right',
+          autoClose: false,
+          closeOnClick: false
+        }
+      );
+    };
+
+    const handleAppInstalled = () => {
+      dismissInstallPrompt();
+      toast.success('🎉 앱이 홈 화면에 추가되었습니다!', { autoClose: 4000 });
+      setShowInstallShortcut(false);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt as EventListener);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt as EventListener);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, [handleInstallApp, dismissInstallPrompt]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const checkInstallAvailability = () => {
+      try {
+        const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
+        const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(window.navigator.userAgent || '');
+        setShowInstallShortcut(isMobileDevice && !isStandalone);
+      } catch (error) {
+        logger.warn('홈 화면 추가 가능 여부 확인 실패', error);
+      }
+    };
+
+    checkInstallAvailability();
+
+    const mediaQuery = window.matchMedia('(display-mode: standalone)');
+    const handleDisplayModeChange = () => checkInstallAvailability();
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', handleDisplayModeChange);
+    } else if (typeof mediaQuery.addListener === 'function') {
+      mediaQuery.addListener(handleDisplayModeChange);
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkInstallAvailability();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      if (typeof mediaQuery.removeEventListener === 'function') {
+        mediaQuery.removeEventListener('change', handleDisplayModeChange);
+      } else if (typeof mediaQuery.removeListener === 'function') {
+        mediaQuery.removeListener(handleDisplayModeChange);
+      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleUpdateAvailable = (event: Event) => {
+      const registration = (event as CustomEvent<ServiceWorkerRegistration>).detail;
+      swUpdateRegistrationRef.current = registration;
+      if (swUpdateToastRef.current && toast.isActive(swUpdateToastRef.current)) {
+        toast.dismiss(swUpdateToastRef.current);
+      }
+      swUpdateToastRef.current = toast.info(
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <span style={{ fontSize: '14px', color: '#1f2937' }}>
+            새로운 버전이 준비되었습니다. 업데이트하면 최신 데이터를 바로 받을 수 있습니다.
+          </span>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+            <button
+              onClick={() => {
+                if (swUpdateToastRef.current && toast.isActive(swUpdateToastRef.current)) {
+                  toast.dismiss(swUpdateToastRef.current);
+                  swUpdateToastRef.current = null;
+                }
+              }}
+              style={{
+                padding: '6px 12px',
+                fontSize: '12px',
+                borderRadius: '6px',
+                border: '1px solid #d1d5db',
+                backgroundColor: '#fff',
+                color: '#4b5563',
+                cursor: 'pointer'
+              }}
+            >
+              나중에
+            </button>
+            <button
+              onClick={requestServiceWorkerUpdate}
+              style={{
+                padding: '6px 14px',
+                fontSize: '12px',
+                borderRadius: '6px',
+                border: 'none',
+                backgroundColor: '#dc2626',
+                color: '#fff',
+                cursor: 'pointer',
+                fontWeight: 600
+              }}
+            >
+              지금 업데이트
+            </button>
+          </div>
+        </div>,
+        {
+          position: 'bottom-right',
+          autoClose: false,
+          closeOnClick: false
+        }
+      );
+    };
+
+    const handleReady = () => {
+      if (swUpdateToastRef.current && toast.isActive(swUpdateToastRef.current)) {
+        toast.dismiss(swUpdateToastRef.current);
+        swUpdateToastRef.current = null;
+      }
+      toast.success('✅ 오프라인 모드가 준비되었습니다.', { autoClose: 3500 });
+    };
+
+    window.addEventListener('pwaUpdateAvailable', handleUpdateAvailable as EventListener);
+    window.addEventListener('pwaReady', handleReady);
+
+    return () => {
+      window.removeEventListener('pwaUpdateAvailable', handleUpdateAvailable as EventListener);
+      window.removeEventListener('pwaReady', handleReady);
+    };
+  }, [requestServiceWorkerUpdate]);
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.serviceWorker) {
+      return;
+    }
+
+    const handleControllerChange = () => {
+      if (swRefreshingRef.current) {
+        return;
+      }
+      swRefreshingRef.current = true;
+      window.location.reload();
+    };
+
+    navigator.serviceWorker.addEventListener('controllerchange', handleControllerChange);
+
+    return () => {
+      navigator.serviceWorker.removeEventListener('controllerchange', handleControllerChange);
+    };
+  }, []);
+
   useEffect(() => {
     let mounted = true;
 
@@ -123,12 +804,22 @@ function App() {
         setStatsHasFreshData(info.hasFreshData);
         setStatsUpdatedAt(info.updatedAt);
       } catch (error) {
-        console.warn('통계 최신 정보 조회 실패', error);
+        logger.warn('통계 최신 정보 조회 실패', error);
+        // 에러 발생 시에도 상태를 안전하게 유지
+        if (mounted) {
+          setStatsHasFreshData(false);
+        }
       }
     };
 
-    loadStatsInfo();
-    const interval = window.setInterval(loadStatsInfo, 60 * 60 * 1000);
+    loadStatsInfo().catch((err) => {
+      logger.error('통계 정보 초기 로드 실패', err);
+    });
+    const interval = window.setInterval(() => {
+      loadStatsInfo().catch((err) => {
+        logger.error('통계 정보 주기적 로드 실패', err);
+      });
+    }, 60 * 60 * 1000);
 
     return () => {
       mounted = false;
@@ -141,9 +832,9 @@ function App() {
     const initRecaptcha = async () => {
       try {
         await loadRecaptchaScript();
-        console.log('✅ reCAPTCHA 전역 초기화 완료');
+        logger.log('✅ reCAPTCHA 전역 초기화 완료');
       } catch (error) {
-        console.warn('⚠️ reCAPTCHA 초기화 실패 (제보 시 다시 시도됩니다):', error);
+        logger.warn('⚠️ reCAPTCHA 초기화 실패 (제보 시 다시 시도됩니다):', error);
       }
     };
 
@@ -157,6 +848,10 @@ function App() {
       if (user) {
         const adminAccess = hasAdminAccess(user.email, user.uid);
         setIsAdmin(adminAccess);
+
+        // Firebase Analytics 인증 사용자 설정
+        setAnalyticsAuthenticatedUser(user.uid, user.email);
+        logLoginEvent(user.providerData[0]?.providerId || 'unknown');
 
         if (adminAccess) {
           toast.success(`🛡️ 관리자 권한으로 로그인되었습니다!`);
@@ -186,11 +881,19 @@ function App() {
     return () => unsubscribe();
   }, []);
 
+  // Guest ID를 Firebase Analytics에 설정
+  useEffect(() => {
+    if (!currentUser && guestIdInfo) {
+      setAnalyticsGuestId(guestIdInfo.guestId);
+      logger.log(`👤 Guest ID 활성화: ${guestIdInfo.guestId} (${userType})`);
+    }
+  }, [currentUser, guestIdInfo, userType]);
+
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
 
     onForegroundMessage((payload) => {
-      console.log('[FCM] foreground 메시지 수신:', payload);
+      logger.log('[FCM] foreground 메시지 수신:', payload);
       const notification = (payload as any)?.notification;
       if (notification?.title || notification?.body) {
         toast.info(
@@ -232,11 +935,13 @@ function App() {
       syncExistingToken()
         .then((result) => {
           if (result.synced && result.token) {
-            console.log('[FCM] 기존 토큰:', result.token);
+            logger.log('[FCM] 기존 토큰:', result.token);
           }
         })
         .catch((error) => {
-          console.error('FCM 토큰 동기화 실패:', error);
+          logger.error('FCM 토큰 동기화 실패:', error);
+          // 토큰 동기화 실패 시 사용자에게 알림 (선택적)
+          // toast.warning('푸시 알림 설정을 확인해주세요');
         });
       return;
     }
@@ -320,9 +1025,7 @@ function App() {
       ]);
       setBannerAnnouncements(banners);
       setPopupAnnouncements(popups);
-
-      const shouldShowPopup = popups.length > 0 && !isAnnouncementPopupClosedForCurrentSession();
-      setShowPopup(shouldShowPopup);
+      setShowPopup(hasUndismissedPopupForToday(popups));
     };
 
     loadAnnouncements();
@@ -331,6 +1034,13 @@ function App() {
     const interval = setInterval(loadAnnouncements, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (bannerAnnouncements.length === 0 && popupAnnouncements.length === 0) {
+      return;
+    }
+    cacheAnnouncements([...bannerAnnouncements, ...popupAnnouncements]);
+  }, [bannerAnnouncements, popupAnnouncements]);
 
   // 배너 공지사항 자동 슬라이드 (입력 필드에 포커스가 없을 때만)
   useEffect(() => {
@@ -360,10 +1070,13 @@ function App() {
         try {
           await detachFcmToken(currentUser.uid, tokenToDetach);
         } catch (error) {
-          console.warn('푸시 토큰 해제 실패 (무시 가능):', error);
+          logger.warn('푸시 토큰 해제 실패 (무시 가능):', error);
         }
       }
     }
+
+    // Firebase Analytics 로그아웃 이벤트
+    logLogoutEvent();
 
     const result = await firebaseLogout();
     if (result.success) {
@@ -401,9 +1114,14 @@ function App() {
 
     // 사용자 정보 새로고침
     const auth = require('firebase/auth').getAuth();
-    auth.currentUser?.reload().then(() => {
-      setCurrentUser(auth.currentUser);
-    });
+    auth.currentUser?.reload()
+      .then(() => {
+        setCurrentUser(auth.currentUser);
+      })
+      .catch((error: Error) => {
+        logger.error('사용자 정보 새로고침 실패:', error);
+        toast.error('사용자 정보 업데이트에 실패했습니다');
+      });
   };
 
   return (
@@ -455,27 +1173,40 @@ function App() {
               )}
             </button>
             {currentUser ? (
-              <button
-                onClick={async () => {
-                  setShowMobileMenu(false);
-                  await handleLogout();
-                }}
-                className="flex items-center gap-1.5 rounded-lg bg-red-800 px-3 py-1.5 text-sm transition-colors hover:bg-red-900"
-              >
-                <LogOut size={16} />
-                <span className="text-sm">로그아웃</span>
-              </button>
+              <>
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-red-800 rounded-lg text-sm">
+                  {isAdmin && <Shield size={14} color="#fbbf24" />}
+                  <UserCircle size={16} />
+                  <span className="max-w-[100px] truncate">{currentUser.displayName || currentUser.email}</span>
+                </div>
+                <button
+                  onClick={async () => {
+                    setShowMobileMenu(false);
+                    await handleLogout();
+                  }}
+                  className="flex items-center gap-1.5 rounded-lg bg-red-800 px-3 py-1.5 text-sm transition-colors hover:bg-red-900"
+                >
+                  <LogOut size={16} />
+                  <span className="text-sm">로그아웃</span>
+                </button>
+              </>
             ) : (
-              <button
-                onClick={() => {
-                  setShowMobileMenu(false);
-                  setShowLoginModal(true);
-                }}
-                className="flex items-center gap-1.5 rounded-lg bg-red-800 px-3 py-1.5 text-sm transition-colors hover:bg-red-900"
-              >
-                <LogIn size={16} />
-                <span className="text-sm">로그인</span>
-              </button>
+              <>
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-red-800/80 rounded-lg text-sm">
+                  <UserCircle size={16} />
+                  <span className="text-xs opacity-90">{guestNickname}</span>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowMobileMenu(false);
+                    setShowLoginModal(true);
+                  }}
+                  className="flex items-center gap-1.5 rounded-lg bg-red-800 px-3 py-1.5 text-sm transition-colors hover:bg-red-900"
+                >
+                  <LogIn size={16} />
+                  <span className="text-sm">로그인</span>
+                </button>
+              </>
             )}
           </div>
 
@@ -506,6 +1237,22 @@ function App() {
                       {alertsEnabled ? 'ON' : 'OFF'}
                     </span>
                   </button>
+
+                  {showInstallShortcut && (
+                    <button
+                      onClick={() => {
+                        setShowMobileMenu(false);
+                        handleInstallApp();
+                      }}
+                      className="mt-1 w-full flex items-center justify-between px-4 py-2 hover:bg-gray-100 transition-colors"
+                    >
+                      <span className="flex items-center gap-3 text-sm">
+                        <Home size={18} className="text-red-500" />
+                        <span>홈 화면에 추가하기</span>
+                      </span>
+                      <span className="text-[11px] font-medium text-gray-400">PWA</span>
+                    </button>
+                  )}
 
                   <div className="px-4 py-2 border-t border-gray-200">
                     <span className="flex items-center gap-2 text-sm font-medium text-gray-700">
@@ -636,6 +1383,15 @@ function App() {
             </button>
             <NotificationBell />
             <button
+              onClick={() => setShowGridView(true)}
+              className="flex items-center gap-2 rounded-lg bg-white/10 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-white/20"
+              title="실종자 격자 보기 열기"
+              aria-label="실종자 격자 보기 열기"
+            >
+              <LayoutGrid size={18} />
+              <span className="hidden lg:inline">격자 보기</span>
+            </button>
+            <button
               onClick={handleOpenStatistics}
               className="flex items-center gap-2 rounded-lg bg-white/10 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-white/20"
               aria-label="지역별 실종자 통계 보기"
@@ -690,13 +1446,19 @@ function App() {
                 </button>
               </div>
             ) : (
-              <button
-                onClick={() => setShowLoginModal(true)}
-                className="flex items-center gap-2 px-3 py-1.5 bg-red-800 hover:bg-red-900 rounded-lg transition-colors"
-              >
-                <LogIn size={18} />
-                <span className="text-sm">로그인</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-red-800/80 rounded-full">
+                  <UserCircle size={18} />
+                  <span className="text-sm opacity-90">{guestNickname}</span>
+                </div>
+                <button
+                  onClick={() => setShowLoginModal(true)}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-red-800 hover:bg-red-900 rounded-lg transition-colors"
+                >
+                  <LogIn size={18} />
+                  <span className="text-sm">로그인</span>
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -714,7 +1476,6 @@ function App() {
 
         {/* 지도 */}
         <div className="flex-1 relative">
-          <NewMissingPersonBanner />
           <EmergencyMap />
         </div>
 
@@ -733,21 +1494,6 @@ function App() {
           </>
         )}
       </div>
-
-      <button
-        onClick={handleOpenStatistics}
-        className="fixed bottom-20 left-6 flex items-center gap-2 rounded-full bg-white px-5 py-3 font-semibold text-red-600 shadow-lg ring-1 ring-red-100 transition-all hover:scale-105 hover:bg-red-50 z-40"
-        aria-label="지역별 실종자 통계 모달 열기"
-        title={statsUpdatedLabel ? `업데이트: ${statsUpdatedLabel}` : '지역별 실종자 통계 보기'}
-      >
-        <BarChart3 size={20} />
-        <span>통계 보기</span>
-        {statsHasFreshData && (
-          <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-600">
-            New
-          </span>
-        )}
-      </button>
 
       {/* 제보하기 버튼 (로그인 시에만 표시) */}
       {currentUser && (
@@ -827,12 +1573,31 @@ function App() {
         </div>
       )}
 
+      <DesktopGridView
+        isOpen={showGridView}
+        onClose={() => setShowGridView(false)}
+        persons={filteredPersons}
+      />
+
       {/* 공지사항 팝업 */}
       {showPopup && popupAnnouncements.length > 0 && (
         <AnnouncementPopup
           announcements={popupAnnouncements}
           onClose={() => setShowPopup(false)}
         />
+      )}
+
+      {/* 개발 환경: Guest ID 정보 표시 */}
+      {process.env.NODE_ENV === 'development' && guestIdInfo && !currentUser && (
+        <div className="fixed bottom-4 left-4 bg-gray-900 text-white px-4 py-2 rounded-lg shadow-lg text-xs font-mono z-50 max-w-xs">
+          <div className="font-semibold mb-1">🔍 개발자 정보</div>
+          <div>Guest ID: {guestIdInfo.guestId}</div>
+          <div>생성: {guestIdInfo.createdAt?.toLocaleString('ko-KR')}</div>
+          <div>타입: {userType}</div>
+          {guestIdInfo.isTemporary && (
+            <div className="text-yellow-400 mt-1">⚠️ 임시 ID (localStorage 접근 불가)</div>
+          )}
+        </div>
       )}
     </div>
   );

@@ -3,6 +3,7 @@ const cheerio = require('cheerio');
 const NodeGeocoder = require('node-geocoder');
 const firebaseService = require('./firebaseService');
 const storageService = require('./storageService');
+const { sendMissingPersonAlert } = require('./pushNotificationService');
 
 class APIPoller {
   constructor() {
@@ -37,6 +38,11 @@ class APIPoller {
       }
 
       console.log(`🔑 인증정보: esntlId=${esntlId}, authKey=${authKey.substring(0, 4)}****`);
+
+      const hadExistingRecords = await firebaseService.hasAnyMissingPersons().catch((error) => {
+        console.error('⚠️ 기존 실종자 데이터 확인 실패:', error.message);
+        return true; // 문제 발생 시 알림 생략을 피하기 위해 true로 처리
+      });
 
       let allItems = [];
       let currentPage = 1;
@@ -150,7 +156,13 @@ class APIPoller {
 
       // Firebase에 저장
       if (transformedItems.length > 0) {
-        const { created = 0, updated = 0 } = await firebaseService.saveMissingPersons(transformedItems);
+        const {
+          created = 0,
+          updated = 0,
+          createdPersons = []
+        } = await firebaseService.saveMissingPersons(transformedItems, {
+          captureCreatedPersons: true
+        });
         const totalChanges = created + updated;
 
         if (totalChanges > 0) {
@@ -159,6 +171,12 @@ class APIPoller {
           this.lastFetchTime = new Date();
         } else {
           console.log('⏭️  저장할 신규/갱신 데이터 없음');
+        }
+
+        if (createdPersons.length > 0) {
+          await this.dispatchNewMissingPersonAlerts(createdPersons, {
+            skip: !hadExistingRecords
+          });
         }
       }
 
@@ -178,6 +196,142 @@ class APIPoller {
       if (error.response) {
         console.error('응답 상태:', error.response.status);
         console.error('응답 데이터:', error.response.data);
+      }
+    }
+  }
+
+  getTimestampMillis(value) {
+    if (!value) {
+      return 0;
+    }
+
+    try {
+      if (typeof value === 'number') {
+        return value;
+      }
+
+      if (value instanceof Date) {
+        return value.getTime();
+      }
+
+      if (typeof value === 'string') {
+        const parsed = Date.parse(value);
+        return Number.isNaN(parsed) ? 0 : parsed;
+      }
+
+      if (typeof value.toMillis === 'function') {
+        return value.toMillis();
+      }
+
+      if (typeof value.toDate === 'function') {
+        return value.toDate().getTime();
+      }
+    } catch (error) {
+      console.warn('타임스탬프 파싱 실패:', error.message);
+    }
+
+    return 0;
+  }
+
+  normalizeMissingPersonForAlert(person) {
+    if (!person) {
+      return person;
+    }
+
+    const normalized = { ...person };
+
+    const toIsoString = (value) => {
+      if (!value) {
+        return value;
+      }
+      if (typeof value === 'string') {
+        return value;
+      }
+      if (value instanceof Date) {
+        return value.toISOString();
+      }
+      if (typeof value.toDate === 'function') {
+        try {
+          return value.toDate().toISOString();
+        } catch (error) {
+          console.warn('날짜 변환 실패:', error.message);
+          return value;
+        }
+      }
+      return value;
+    };
+
+    if (person.createdAt) {
+      normalized.createdAt = toIsoString(person.createdAt);
+    }
+
+    if (person.updatedAt) {
+      normalized.updatedAt = toIsoString(person.updatedAt);
+    }
+
+    if (person.missingDate) {
+      normalized.missingDate = toIsoString(person.missingDate);
+    }
+
+    return normalized;
+  }
+
+  async dispatchNewMissingPersonAlerts(persons, options = {}) {
+    if (!persons || persons.length === 0) {
+      return;
+    }
+
+    if (options.skip) {
+      console.log(`ℹ️ 초기 동기화로 판단되어 신규 ${persons.length}건에 대한 푸시 알림을 생략합니다.`);
+      return;
+    }
+
+    const resolvedMax = Number(process.env.API_POLL_ALERT_MAX_PER_RUN);
+    const maxPerRun = Number.isFinite(resolvedMax) && resolvedMax >= 0
+      ? Math.floor(resolvedMax)
+      : 10;
+    const limit = maxPerRun === 0 ? 0 : Math.min(maxPerRun, persons.length);
+
+    const resolvedDelay = Number(process.env.API_POLL_ALERT_DELAY_MS);
+    const delayMs = Number.isFinite(resolvedDelay) && resolvedDelay >= 0
+      ? resolvedDelay
+      : 300;
+
+    const sorted = [...persons].sort((a, b) => {
+      const bTime = this.getTimestampMillis(b.createdAt) || this.getTimestampMillis(b.updatedAt) || this.getTimestampMillis(b.missingDate);
+      const aTime = this.getTimestampMillis(a.createdAt) || this.getTimestampMillis(a.updatedAt) || this.getTimestampMillis(a.missingDate);
+      return bTime - aTime;
+    });
+
+    let dispatched = 0;
+
+    for (const person of sorted) {
+      if (dispatched >= limit) {
+        break;
+      }
+
+      try {
+        const stats = await sendMissingPersonAlert(this.normalizeMissingPersonForAlert(person));
+        console.log(
+          `📣 신규 실종자 푸시 발송 완료: ${person.id} (성공 ${stats.successCount}, 실패 ${stats.failureCount}, 대상 ${stats.totalTokens})`
+        );
+      } catch (error) {
+        console.error(`❌ 신규 실종자 푸시 발송 실패 (${person.id}):`, error.message);
+      }
+
+      dispatched++;
+
+      if (delayMs > 0 && dispatched < limit) {
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+
+    const skipped = sorted.length - limit;
+    if (skipped > 0) {
+      if (limit === 0) {
+        console.log('ℹ️ 환경설정(API_POLL_ALERT_MAX_PER_RUN=0)으로 인해 이번 사이클 푸시 발송이 비활성화되었습니다.');
+      } else {
+        console.log(`ℹ️ 푸시 발송 한도(${limit})에 도달하여 ${skipped}건은 이번 사이클에서 생략되었습니다.`);
       }
     }
   }

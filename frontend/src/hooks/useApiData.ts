@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useEmergencyStore } from '../stores/emergencyStore';
 import type { MissingPerson } from '../types';
 import { firestore, collection, query, orderBy, onSnapshot } from '../services/firebase';
+import type { DocumentSnapshot, DocumentData } from 'firebase/firestore';
 
 export function useApiData() {
   const setMissingPersons = useEmergencyStore(state => state.setMissingPersons);
@@ -23,14 +24,16 @@ export function useApiData() {
       setConnectionStatus(true);
       initialLoadRef.current = true;
 
-      const convertDocToPerson = (docSnap: any): MissingPerson => {
+      const convertDocToPerson = (docSnap: DocumentSnapshot<DocumentData>): MissingPerson => {
         const data = docSnap.data();
         const normalizeTimestamp = (value: unknown): number | undefined => {
           if (typeof value === 'number') return value;
-          if (value && typeof (value as any).toMillis === 'function') {
+          // Firestore Timestamp 타입
+          if (value && typeof value === 'object' && 'toMillis' in value && typeof (value as { toMillis: () => number }).toMillis === 'function') {
             return (value as { toMillis: () => number }).toMillis();
           }
-          if (value && typeof (value as any).seconds === 'number') {
+          // seconds 필드가 있는 객체
+          if (value && typeof value === 'object' && 'seconds' in value && typeof (value as { seconds: number }).seconds === 'number') {
             return ((value as { seconds: number }).seconds) * 1000;
           }
           return undefined;
@@ -44,16 +47,43 @@ export function useApiData() {
             }
           : { lat: 0, lng: 0, address: '대한민국' };
 
-        const photos = Array.isArray(data?.photos)
-          ? data.photos.filter((url: unknown) => typeof url === 'string' && url.trim().length > 0)
+        const photos: string[] = Array.isArray(data?.photos)
+          ? (data?.photos.filter((url: unknown) => typeof url === 'string' && url.trim().length > 0) as string[])
           : data?.photo
           ? [data.photo]
           : [];
-        const primaryPhoto =
+        const primaryPhoto: string | undefined =
           photos.length > 0
             ? photos[0]
-            : typeof data?.photo === 'string' && data.photo.trim()
+            : typeof data?.photo === 'string' && data?.photo.trim()
             ? data.photo
+            : undefined;
+        const viewCount =
+          typeof data?.viewCount === 'number'
+            ? data.viewCount
+            : typeof data?.viewCount === 'string'
+            ? Number(data.viewCount) || 0
+            : 0;
+        const rawViewStats =
+          data?.viewStats && typeof data.viewStats === 'object'
+            ? (data.viewStats as Record<string, unknown>)
+            : undefined;
+        const viewStats = rawViewStats
+            ? {
+                total:
+                  typeof rawViewStats.total === 'number'
+                    ? (rawViewStats.total as number)
+                    : typeof rawViewStats.total === 'string'
+                    ? Number(rawViewStats.total) || viewCount
+                    : viewCount,
+                lastViewed: normalizeTimestamp(rawViewStats.lastViewed),
+                uniqueViewers:
+                  typeof rawViewStats.uniqueViewers === 'number'
+                    ? (rawViewStats.uniqueViewers as number)
+                    : typeof rawViewStats.uniqueViewers === 'string'
+                    ? Number(rawViewStats.uniqueViewers) || undefined
+                    : undefined
+              }
             : undefined;
 
         return {
@@ -77,7 +107,18 @@ export function useApiData() {
           faceShape: data?.faceShape,
           hairShape: data?.hairShape,
           hairColor: data?.hairColor,
-          reportedBy: data?.reportedBy
+          reportedBy: data?.reportedBy,
+          commentCount:
+            typeof data?.commentCount === 'number'
+              ? data.commentCount
+              : typeof data?.commentsCount === 'number'
+              ? data.commentsCount
+              : typeof data?.commentStats?.total === 'number'
+              ? data.commentStats.total
+              : undefined,
+          commentStats: data?.commentStats,
+          viewCount,
+          viewStats
         };
       };
 

@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="500" viewBox="0 0 1500 500">
+  <defs>
+    <linearGradient id="bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff4d4f"/>
+      <stop offset="100%" stop-color="#b91c1c"/>
+    </linearGradient>
+  </defs>
+  <rect width="1500" height="500" fill="url(#bg-gradient)"/>
+  <g fill="#ffffff" font-family="Segoe UI, Apple SD Gothic Neo, sans-serif">
+    <text x="120" y="210" font-size="72" font-weight="600" letter-spacing="6">
+      REAL-TIME MISSING PERSON ALERTS
+    </text>
+    <text x="120" y="325" font-size="44" opacity="0.85">
+      실시간으로 전파되는 실종 소식을 확인하고 함께 찾아주세요
+    </text>
+  </g>
+  <circle cx="1230" cy="250" r="180" fill="rgba(255,255,255,0.12)"/>
+  <circle cx="1260" cy="250" r="120" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="6"/>
+  <filter id="icon-shadow" x="-50%" y="-50%" width="200%" height="200%">
+    <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="rgba(0,0,0,0.28)"/>
+  </filter>
+  <image
+    href="../frontend/public/icons/pwa-icon-maskable-512.png"
+    x="1120"
+    y="120"
+    width="280"
+    height="280"
+    preserveAspectRatio="xMidYMid meet"
+    filter="url(#icon-shadow)"
+  />
+</svg>
