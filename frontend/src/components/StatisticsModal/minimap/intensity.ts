@@ -28,8 +28,9 @@ export interface BuildIntensityMapOptions {
 export const DEFAULT_INTENSITY_BUCKETS: IntensityBucket[] = [
   { id: 'very-low', label: '0~5%', minRatio: 0, maxRatio: 0.05 },
   { id: 'low', label: '5~15%', minRatio: 0.05, maxRatio: 0.15 },
-  { id: 'medium', label: '15~30%', minRatio: 0.15, maxRatio: 0.3 },
-  { id: 'high', label: '30~50%', minRatio: 0.3, maxRatio: 0.5 },
+  { id: 'medium-low', label: '15~30%', minRatio: 0.15, maxRatio: 0.3 },
+  { id: 'medium', label: '30~50%', minRatio: 0.3, maxRatio: 0.5 },
+  { id: 'medium-high', label: '50~70%', minRatio: 0.5, maxRatio: 0.7 },
   { id: 'very-high', label: '70% 이상', minRatio: 0.7, maxRatio: 1.0000000001 }
 ];
 

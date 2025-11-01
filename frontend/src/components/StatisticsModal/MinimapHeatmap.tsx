@@ -22,7 +22,15 @@ export interface MinimapHeatmapProps {
 
 const SILHOUETTE_URL = `${process.env.PUBLIC_URL || ''}/maps/korea-silhouette.svg`;
 const BASE_REGION_FILL = '#e2e8f0';
-const BUCKET_FILLS = ['#ffffff', '#fff7cc', '#fdba74', '#f97316', '#dc2626'] as const;
+const GRADIENT_STOPS = Object.freeze([
+  { stop: 0, color: '#fff7cc' },
+  { stop: 0.15, color: '#fde047' },
+  { stop: 0.35, color: '#fbbf24' },
+  { stop: 0.55, color: '#f97316' },
+  { stop: 0.75, color: '#ef4444' },
+  { stop: 1, color: '#991b1b' }
+] as const);
+const GRADIENT_BACKGROUND = `linear-gradient(90deg, ${GRADIENT_STOPS.map(({ stop, color }) => `${color} ${Math.round(stop * 100)}%`).join(', ')})`;
 const REGION_STROKE_COLOR = 'rgba(15,23,42,0.52)';
 const REGION_STROKE_WIDTH = '1.1';
 const BASE_RELIEF_FILTER = 'drop-shadow(0.4px 0.6px 0.9px rgba(15,23,42,0.32)) drop-shadow(-0.45px -0.6px 0.8px rgba(255,255,255,0.35))';
@@ -38,6 +46,79 @@ const PERCENT_FORMATTER = new Intl.NumberFormat('ko-KR', {
 const buildGroupSelector = (value: string): string => {
   const safe = value.replace(/"/g, '\\"');
   return `g[id="${safe}"]`;
+};
+
+const clamp01 = (value: number): number => {
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+  if (value >= 1) {
+    return 1;
+  }
+  return value;
+};
+
+const normalizeHexColor = (hex: string): string => {
+  const trimmed = hex.trim();
+  const value = trimmed.startsWith('#') ? trimmed.slice(1) : trimmed;
+  if (value.length === 3) {
+    return value
+      .split('')
+      .map((char) => char + char)
+      .join('')
+      .toLowerCase();
+  }
+  if (value.length === 6) {
+    return value.toLowerCase();
+  }
+  return '000000';
+};
+
+const hexToRgb = (hex: string): [number, number, number] => {
+  const normalized = normalizeHexColor(hex);
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+  return [
+    Number.isFinite(red) ? red : 0,
+    Number.isFinite(green) ? green : 0,
+    Number.isFinite(blue) ? blue : 0
+  ];
+};
+
+const componentToHex = (component: number): string => {
+  const value = Math.min(255, Math.max(0, Math.round(component)));
+  return value.toString(16).padStart(2, '0');
+};
+
+const mixColors = (fromColor: string, toColor: string, t: number): string => {
+  const [fromR, fromG, fromB] = hexToRgb(fromColor);
+  const [toR, toG, toB] = hexToRgb(toColor);
+  const red = fromR + (toR - fromR) * t;
+  const green = fromG + (toG - fromG) * t;
+  const blue = fromB + (toB - fromB) * t;
+  return `#${componentToHex(red)}${componentToHex(green)}${componentToHex(blue)}`;
+};
+
+const getGradientFill = (ratio: number): string => {
+  const stops = GRADIENT_STOPS;
+  if (!Number.isFinite(ratio) || ratio <= 0) {
+    return stops[0]?.color ?? BASE_REGION_FILL;
+  }
+  const clamped = clamp01(ratio);
+  for (let index = 0; index < stops.length - 1; index += 1) {
+    const current = stops[index];
+    const next = stops[index + 1];
+    if (!current || !next) {
+      continue;
+    }
+    if (clamped >= current.stop && clamped <= next.stop) {
+      const range = next.stop - current.stop || 1;
+      const localT = (clamped - current.stop) / range;
+      return mixColors(current.color, next.color, clamp01(localT));
+    }
+  }
+  return stops[stops.length - 1]?.color ?? '#991b1b';
 };
 
 const applyRegionFill = (group: SVGGElement, fill: string) => {
@@ -272,14 +353,16 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({
       elements.forEach((group, regionId) => {
         const intensity = intensityMap[regionId];
         if (intensity) {
-          const fill = BUCKET_FILLS[intensity.bucketIndex] ?? BUCKET_FILLS[BUCKET_FILLS.length - 1];
+          const fill = getGradientFill(intensity.ratio);
           applyRegionFill(group, fill);
           group.dataset.bucketId = intensity.bucket.id;
           group.dataset.ratio = intensity.ratio.toFixed(4);
+          group.dataset.fillColor = fill;
         } else {
-          applyRegionFill(group, BUCKET_FILLS[0]);
+          applyRegionFill(group, BASE_REGION_FILL);
           group.dataset.bucketId = 'none';
           group.dataset.ratio = '0';
+          group.removeAttribute('data-fill-color');
         }
       });
     },
@@ -891,6 +974,30 @@ const MinimapHeatmapBase: React.FC<MinimapHeatmapProps> = ({
           {`데이터 ${regions.length}개 · 매핑 ${mappedRegionCount}개 · 활성 ${activeRegionCount}개`}
         </div>
       )}
+      <div className="mt-3 flex justify-center md:mt-4">
+        <div className="w-full max-w-[min(100%,360px)]">
+          <div className="flex items-center justify-between text-[9px] font-medium text-slate-500 md:text-[10px]">
+            <span>낮음</span>
+            <span>중간</span>
+            <span>높음</span>
+          </div>
+          <div
+            className="mt-1 h-2 w-full rounded-full ring-1 ring-slate-200/70"
+            style={{ background: GRADIENT_BACKGROUND }}
+            aria-hidden
+          />
+          <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-[9px] text-slate-400 md:mt-1.5 md:text-[10px]">
+            <span className="flex items-center gap-1">
+              <span className="h-3 w-3 rounded-[3px] border border-slate-200" style={{ backgroundColor: BASE_REGION_FILL }} />
+              데이터 없음
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="h-3 w-3 rounded-[3px] border border-slate-200" style={{ backgroundColor: getGradientFill(1) }} />
+              전체 대비 최대
+            </span>
+          </div>
+        </div>
+      </div>
       {unmatchedRegions.length > 0 && (
         <div className="mt-2 rounded-lg bg-amber-50 px-2 py-1.5 text-[10px] text-amber-700 md:mt-3 md:rounded-xl md:px-3 md:py-2 md:text-xs">
           {`SVG 매핑 누락: ${unmatchedRegions.join(', ')}`}
