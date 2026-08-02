@@ -9,8 +9,11 @@
 <%@page import="java.io.IOException"%>
 
 <%
-    String esntlId = "10011616";
-    String authKey = "d4dce53abbc84060";
+    String esntlId = System.getenv("SAFE182_ESNTL_ID");
+    String authKey = System.getenv("SAFE182_AUTH_KEY");
+    if (esntlId == null || esntlId.isBlank() || authKey == null || authKey.isBlank()) {
+        throw new IllegalStateException("SAFE182_ESNTL_ID and SAFE182_AUTH_KEY must be configured");
+    }
     String rowSize = "10";
     String pageNum = "1";
     String[] writngTrgetDscds = {"010", "060", "070"};

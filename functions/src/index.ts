@@ -6,6 +6,7 @@ import express, {NextFunction, Request, Response} from "express";
 import cors from "cors";
 import axios from "axios";
 import {onDocumentWritten} from "firebase-functions/v2/firestore";
+import {defineSecret} from "firebase-functions/params";
 import {
   CommentReport,
   CommentReportReason,
@@ -27,6 +28,8 @@ admin.initializeApp();
 const app = express();
 type AuthedRequest = Request & {user?: admin.auth.DecodedIdToken};
 const db = admin.firestore();
+const safe182EsntlId = defineSecret("SAFE182_ESNTL_ID");
+const safe182AuthKey = defineSecret("SAFE182_AUTH_KEY");
 
 const REGION_DAILY_DOC = () => db.collection("stats").doc("regionDaily");
 const REGION_METADATA_DOC = () => db.collection("stats").doc("regionMetadata");
@@ -788,6 +791,55 @@ const mapCommentDoc = (doc: FirebaseFirestore.DocumentSnapshot<FirebaseFirestore
   };
 };
 
+const normalizeCommentImageUrls = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0 && item.length <= 2048)
+    .slice(0, 3);
+};
+
+const notifyCommentReply = async (parent: MissingPersonComment, reply: MissingPersonComment) => {
+  if (!parent.userId || parent.userId === reply.userId) return;
+
+  const notificationRef = db.collection(NOTIFICATION_COLLECTION).doc();
+  await notificationRef.set({
+    notificationId: notificationRef.id,
+    userId: parent.userId,
+    commentId: parent.commentId,
+    missingPersonId: reply.missingPersonId,
+    replyCommentId: reply.commentId,
+    type: "reply",
+    isRead: false,
+    createdAt: admin.firestore.Timestamp.now(),
+  });
+
+  try {
+    const tokenSnap = await db.collection("userTokens").doc(parent.userId).get();
+    const tokenData = tokenSnap.data() || {};
+    const tokens = Object.keys((tokenData.tokens || {}) as Record<string, unknown>);
+    if (tokens.length === 0) return;
+
+    await admin.messaging().sendEachForMulticast({
+      tokens,
+      notification: {
+        title: "새 답글이 달렸습니다",
+        body: `${reply.nickname}: ${reply.content.slice(0, 80)}`,
+      },
+      data: {
+        intent: "community-reply",
+        commentId: parent.commentId,
+        replyCommentId: reply.commentId,
+        missingPersonId: reply.missingPersonId,
+        url: `/?view=community&personId=${encodeURIComponent(reply.missingPersonId)}&commentId=${encodeURIComponent(parent.commentId)}`,
+      },
+    });
+  } catch (error: any) {
+    logger.warn("답글 푸시 알림 발송 실패 (인앱 알림은 유지)", error?.message || error);
+  }
+};
+
 // 헬스 체크
 app.get("/health", (req: Request, res: Response) => {
   res.json({
@@ -1245,6 +1297,32 @@ const getViewHandler = async (req: Request, res: Response) => {
 app.get("/api/views/:id", getViewHandler);
 app.get("/views/:id", getViewHandler);
 
+app.get("/api/community/feed", async (req: Request, res: Response) => {
+  try {
+    const {type, order = "latest", missingPersonId, limit = "100"} = req.query;
+    const size = Math.min(parseInt(limit as string, 10) || 100, 200);
+    let queryRef = db.collection(COMMENT_COLLECTION) as FirebaseFirestore.Query<FirebaseFirestore.DocumentData>;
+
+    if (order === "popular") {
+      queryRef = queryRef.orderBy("likes", "desc");
+    } else {
+      queryRef = queryRef.orderBy("createdAt", "desc");
+    }
+
+    const snapshot = await queryRef.limit(size).get();
+    const comments = snapshot.docs
+      .map(mapCommentDoc)
+      .filter((comment) => !comment.isDeleted && !comment.isHidden)
+      .filter((comment) => !type || comment.type === type)
+      .filter((comment) => !missingPersonId || comment.missingPersonId === missingPersonId);
+
+    res.json({success: true, count: comments.length, comments});
+  } catch (error: any) {
+    logger.error("소통 피드 조회 실패", error);
+    res.status(500).json({success: false, error: "소통 피드를 불러오지 못했습니다"});
+  }
+});
+
 app.get("/api/comments/:missingPersonId", async (req: Request, res: Response) => {
   try {
     const {missingPersonId} = req.params;
@@ -1289,7 +1367,7 @@ app.post(
   rateLimit((req) => req.user?.uid ?? "anonymous"),
   async (req: AuthedRequest, res: Response) => {
     try {
-      const {missingPersonId, content, type, isAnonymous = false} = req.body || {};
+      const {missingPersonId, content, type, isAnonymous = false, imageUrls} = req.body || {};
 
       if (!missingPersonId || typeof missingPersonId !== "string") {
         return res.status(400).json({success: false, error: "missingPersonId가 필요합니다"});
@@ -1301,6 +1379,11 @@ app.post(
       if (!["sighting", "question", "support"].includes(commentType)) {
         return res.status(400).json({success: false, error: "지원하지 않는 댓글 유형입니다"});
       }
+
+      if (Array.isArray(imageUrls) && imageUrls.length > 3) {
+        return res.status(400).json({success: false, error: "사진은 최대 3장까지 첨부할 수 있습니다"});
+      }
+      const safeImageUrls = normalizeCommentImageUrls(imageUrls);
 
       const userId = req.user?.uid as string;
       const userRecord = await admin.auth().getUser(userId);
@@ -1320,6 +1403,9 @@ app.post(
         isAnonymous,
         content: content.trim(),
         type: commentType as any,
+        parentCommentId: null,
+        imageUrls: safeImageUrls,
+        replyCount: 0,
         createdAt: now,
         updatedAt: now,
         likes: 0,
@@ -1338,6 +1424,87 @@ app.post(
     } catch (error: any) {
       logger.error("댓글 작성 실패", error);
       res.status(500).json({success: false, error: "댓글 작성 중 오류가 발생했습니다"});
+    }
+  }
+);
+
+app.post(
+  "/api/comments/:commentId/replies",
+  authenticate,
+  ensureRecaptcha,
+  rateLimit((req) => req.user?.uid ?? "anonymous"),
+  async (req: AuthedRequest, res: Response) => {
+    try {
+      const {commentId} = req.params;
+      const {content, isAnonymous = false, imageUrls} = req.body || {};
+
+      if (!content || typeof content !== "string" || content.trim().length < 10) {
+        return res.status(400).json({success: false, error: "답글은 10자 이상이어야 합니다"});
+      }
+      if (Array.isArray(imageUrls) && imageUrls.length > 3) {
+        return res.status(400).json({success: false, error: "사진은 최대 3장까지 첨부할 수 있습니다"});
+      }
+
+      const parentRef = db.collection(COMMENT_COLLECTION).doc(commentId);
+      const parentSnap = await parentRef.get();
+      if (!parentSnap.exists) {
+        return res.status(404).json({success: false, error: "원문을 찾을 수 없습니다"});
+      }
+
+      const parent = mapCommentDoc(parentSnap as any);
+      if (parent.isDeleted || parent.isHidden) {
+        return res.status(410).json({success: false, error: "숨겨진 글에는 답글을 작성할 수 없습니다"});
+      }
+      if (parent.parentCommentId) {
+        return res.status(400).json({success: false, error: "답글에는 다시 답글을 달 수 없습니다"});
+      }
+
+      const userId = req.user?.uid as string;
+      const userRecord = await admin.auth().getUser(userId);
+      const nickname = isAnonymous
+        ? buildAnonymousName()
+        : (userRecord.displayName || userRecord.email || userRecord.phoneNumber || buildAnonymousName());
+      const now = admin.firestore.Timestamp.now();
+      const replyRef = db.collection(COMMENT_COLLECTION).doc();
+      const reply: MissingPersonComment = {
+        commentId: replyRef.id,
+        missingPersonId: parent.missingPersonId,
+        userId,
+        nickname,
+        isAnonymous,
+        content: content.trim(),
+        type: parent.type,
+        parentCommentId: parent.commentId,
+        imageUrls: normalizeCommentImageUrls(imageUrls),
+        replyCount: 0,
+        createdAt: now,
+        updatedAt: now,
+        likes: 0,
+        likedBy: [],
+        isEdited: false,
+        isDeleted: false,
+        reported: false,
+        reportCount: 0,
+        reportedBy: [],
+        isHidden: false,
+      };
+
+      await db.runTransaction(async (tx) => {
+        const currentParentSnap = await tx.get(parentRef);
+        if (!currentParentSnap.exists) throw new Error("PARENT_NOT_FOUND");
+        const currentParent = currentParentSnap.data() as MissingPersonComment;
+        tx.set(replyRef, reply);
+        tx.update(parentRef, {replyCount: (currentParent.replyCount || 0) + 1, updatedAt: now});
+      });
+
+      void notifyCommentReply(parent, reply);
+      res.status(201).json({success: true, comment: reply});
+    } catch (error: any) {
+      if (error?.message === "PARENT_NOT_FOUND") {
+        return res.status(404).json({success: false, error: "원문을 찾을 수 없습니다"});
+      }
+      logger.error("답글 작성 실패", error);
+      res.status(500).json({success: false, error: "답글 작성 중 오류가 발생했습니다"});
     }
   }
 );
@@ -2482,13 +2649,17 @@ export const pollMissingPersonsAPI = onSchedule({
   region: "asia-northeast3",
   memory: "512MiB",
   timeoutSeconds: 540, // 9분
+  secrets: [safe182EsntlId, safe182AuthKey],
 }, async () => {
   try {
     logger.info("🔍 안전드림 182 API 정기 폴링 시작...");
 
-    // 환경변수에서 인증정보 가져오기
-    const esntlId = process.env.SAFE182_ESNTL_ID || "10000847";
-    const authKey = process.env.SAFE182_AUTH_KEY || "f16ae98f22b44441";
+    const esntlId = safe182EsntlId.value();
+    const authKey = safe182AuthKey.value();
+
+    if (!esntlId || !authKey) {
+      throw new Error("SAFE182 credentials are not configured");
+    }
 
     let allItems: any[] = [];
     let currentPage = 1;

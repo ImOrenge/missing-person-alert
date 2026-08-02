@@ -13,17 +13,22 @@ import {
 } from 'lucide-react';
 import { useRegionStatsData, type RegionStatsRange } from '../../hooks/useRegionStatsData';
 import type { AggregatedRegionStats } from '../../hooks/useRegionStatsData';
-import type { RegionSubStatSummary } from '../../types/regionStats';
 import { MinimapHeatmap } from './MinimapHeatmap';
+import {
+  aggregateSubRegionsForRange,
+  computeHasFreshData,
+  computeTopRegions,
+  formatKoreanDateTime,
+  formatRelativeTime,
+  useModalBodyScroll,
+  usePrefersReducedMotion
+} from './utils';
+import type { AggregatedSubRegionStats } from './utils';
 
 interface StatisticsModalProps {
   isOpen: boolean;
   onClose: () => void;
-}
-
-interface AggregatedSubRegionStats extends RegionSubStatSummary {
-  totalInRange: number;
-  activeInRange: number;
+  isPage?: boolean;
 }
 
 const RANGE_OPTIONS: { id: RegionStatsRange; label: string }[] = [
@@ -47,128 +52,6 @@ const DATA_SOURCE_LABEL = '경찰청 실종아동찾기센터 SAFE182';
 const PRIVACY_GUIDE_URL = 'https://www.safe182.go.kr/notice/sub.do?menukey=5002';
 const FEEDBACK_EMAIL = 'mailto:support@missing-person.kr?subject=%5B%EC%B4%9D%EA%B3%84%5D%20%ED%86%B5%EA%B3%84%20%EB%AA%A8%EB%8B%AC%20%ED%94%BC%EB%93%9C%EB%B0%B1';
 const SUPPORT_CONTACT_LABEL = '긴급 신고 112 · 실종 제보 182';
-
-const formatKoreanDateTime = (timestamp?: number): string | null => {
-  if (!timestamp) return null;
-  try {
-    return new Intl.DateTimeFormat('ko-KR', {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-      hour12: false
-    }).format(new Date(timestamp));
-  } catch (error) {
-    console.warn('날짜 포맷팅 실패', error);
-    return null;
-  }
-};
-
-const formatRelativeTime = (timestamp?: number): string | null => {
-  if (!timestamp) return null;
-  const diff = Date.now() - timestamp;
-  if (diff < 60_000) return '방금 전';
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}분 전`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}시간 전`;
-  return `${Math.floor(diff / 86_400_000)}일 전`;
-};
-
-const parseDateKey = (value: string): Date | null => {
-  if (!value) return null;
-  const iso = `${value}T00:00:00Z`;
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? null : date;
-};
-
-const isDateWithinRange = (dateKey: string, range: RegionStatsRange): boolean => {
-  if (range === 'all') {
-    return true;
-  }
-
-  const target = parseDateKey(dateKey);
-  if (!target) {
-    return false;
-  }
-
-  const now = new Date();
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const days = range === 'day' ? 1 : range === 'week' ? 7 : 30;
-  start.setUTCDate(start.getUTCDate() - (days - 1));
-
-  return target >= start;
-};
-
-const aggregateSubRegionsForRange = (subRegions: RegionSubStatSummary[], range: RegionStatsRange): AggregatedSubRegionStats[] => {
-  return subRegions
-    .map((subRegion) => {
-      if (range === 'all') {
-        return {
-          ...subRegion,
-          totalInRange: subRegion.totalCases,
-          activeInRange: subRegion.activeCases
-        };
-      }
-
-      const totals = subRegion.daily.reduce(
-        (acc, entry) => {
-          if (isDateWithinRange(entry.date, range)) {
-            acc.total += entry.totalCases;
-            acc.active += entry.activeCases;
-          }
-          return acc;
-        },
-        { total: 0, active: 0 }
-      );
-
-      return {
-        ...subRegion,
-        totalInRange: totals.total,
-        activeInRange: totals.active
-      };
-    })
-    .sort((a, b) => b.totalInRange - a.totalInRange || a.name.localeCompare(b.name));
-};
-
-const usePrefersReducedMotion = (): boolean => {
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-      return;
-    }
-
-    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const handleChange = () => setPrefersReducedMotion(mediaQuery.matches);
-
-    handleChange();
-    mediaQuery.addEventListener('change', handleChange);
-
-    return () => {
-      mediaQuery.removeEventListener('change', handleChange);
-    };
-  }, []);
-
-  return prefersReducedMotion;
-};
-
-const useModalBodyScroll = (isOpen: boolean) => {
-  useEffect(() => {
-    if (isOpen) {
-      const previousOverflow = document.body.style.overflow;
-      document.body.style.overflow = 'hidden';
-      return () => {
-        document.body.style.overflow = previousOverflow;
-      };
-    }
-    return () => undefined;
-  }, [isOpen]);
-};
-
-const computeHasFreshData = (updatedAt?: number) => {
-  if (!updatedAt) return false;
-  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-  return Date.now() - updatedAt < ONE_DAY_MS;
-};
-
-const computeTopRegions = (regions: AggregatedRegionStats[]) => regions.slice(0, 3);
 
 interface RegionBarChartProps {
   data: AggregatedRegionStats[];
@@ -203,23 +86,21 @@ const RegionBarChart: React.FC<RegionBarChartProps> = ({ data, selectedId, onSel
             type="button"
             disabled={!clickable}
             onClick={() => onSelect?.(region.regionId)}
-            className={`group w-full rounded-xl border px-4 py-3 text-left shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${
-              isSelected ? 'border-red-200 bg-red-50/60' : 'border-gray-100 bg-white'
+            className={`group w-full border-b px-1 py-4 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${
+              isSelected ? 'border-red-300 bg-red-50/40' : 'border-slate-200 bg-transparent'
             } ${
               clickable
                 ? reduceMotion
                   ? ''
-                  : 'transition hover:translate-y-[-1px] hover:shadow-md disabled:hover:translate-y-0 disabled:hover:shadow-sm'
+                  : 'transition hover:bg-slate-50 disabled:hover:bg-transparent'
                 : 'cursor-default'
             }`}
             aria-pressed={isSelected}
           >
             <div className="flex items-center justify-between text-sm font-medium text-slate-700">
               <span className="flex items-center gap-2">
-                <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
-                  isSelected ? 'bg-red-500 text-white' : 'bg-red-100 text-red-600'
-                }`}>
-                  {region.regionName.slice(0, 2)}
+                <span className={`text-xs font-black tracking-wide ${isSelected ? 'text-red-600' : 'text-slate-400'}`}>
+                  {String(data.indexOf(region) + 1).padStart(2, '0')}
                 </span>
                 {region.regionName}
               </span>
@@ -284,23 +165,21 @@ const SubRegionBarChart: React.FC<SubRegionBarChartProps> = ({ data, selectedId,
             key={subRegion.subRegionId}
             type="button"
             onClick={() => onSelect?.(subRegion.subRegionId)}
-            className={`w-full rounded-xl border px-4 py-3 text-left shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${
-              isSelected ? 'border-blue-200 bg-blue-50/70' : 'border-gray-100 bg-white'
+            className={`w-full border-b px-1 py-4 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+              isSelected ? 'border-blue-300 bg-blue-50/40' : 'border-slate-200 bg-transparent'
             } ${
               onSelect
                 ? reduceMotion
                   ? ''
-                  : 'transition hover:translate-y-[-1px] hover:shadow-md'
+                  : 'transition hover:bg-slate-50'
                 : 'cursor-default'
             }`}
             aria-pressed={isSelected}
           >
             <div className="flex items-center justify-between text-sm font-medium text-slate-700">
               <span className="flex items-center gap-2">
-                <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
-                  isSelected ? 'bg-blue-500 text-white' : 'bg-blue-100 text-blue-600'
-                }`}>
-                  {subRegion.name.slice(0, 2)}
+                <span className={`text-xs font-black tracking-wide ${isSelected ? 'text-blue-600' : 'text-slate-400'}`}>
+                  {String(data.indexOf(subRegion) + 1).padStart(2, '0')}
                 </span>
                 {subRegion.name}
               </span>
@@ -338,10 +217,10 @@ const SubRegionBarChart: React.FC<SubRegionBarChartProps> = ({ data, selectedId,
 const SummaryMetric: React.FC<{ label: string; value: number; accent?: 'primary' | 'neutral' }> = ({ label, value, accent = 'neutral' }) => {
   const accentClasses =
     accent === 'primary'
-      ? 'bg-red-50 text-red-600 ring-1 ring-red-100'
-      : 'bg-slate-50 text-slate-600 ring-1 ring-slate-100';
+      ? 'border-l-2 border-red-500 text-red-600'
+      : 'border-l-2 border-slate-300 text-slate-600';
   return (
-    <div className={`flex flex-col gap-1 rounded-xl px-4 py-3 text-sm font-medium ${accentClasses}`}>
+    <div className={`flex flex-col gap-1 px-4 py-1 text-sm font-medium ${accentClasses}`}>
       <span className="text-xs uppercase tracking-wide text-slate-400">{label}</span>
       <span className="text-xl font-semibold">{value.toLocaleString()}건</span>
     </div>
@@ -466,14 +345,14 @@ const TrendComparisonPanel: React.FC<TrendComparisonPanelProps> = ({ sourceLabel
   return (
     <>
       {/* 모바일 버전 */}
-      <section className="rounded-xl bg-white p-2.5 shadow-sm ring-1 ring-slate-100 md:hidden">
+      <section className="border-t border-slate-200 pt-4 md:hidden">
         <div className="flex items-center justify-between">
           <h4 className="text-xs font-semibold text-slate-700">기간별 추이</h4>
           <span className="text-[9px] text-slate-400">기준: {sourceLabel}</span>
         </div>
-        <div className="mt-2 grid grid-cols-2 gap-1.5">
+        <div className="mt-2 grid grid-cols-2 gap-x-4">
           {windows.map((window) => (
-            <div key={window.id} className="rounded-lg border border-slate-100 bg-slate-50/70 p-2">
+            <div key={window.id} className="border-b border-slate-200 py-3">
               <div className="flex items-center justify-between text-[10px] text-slate-400">
                 <span>{window.label}</span>
                 <span
@@ -494,14 +373,14 @@ const TrendComparisonPanel: React.FC<TrendComparisonPanelProps> = ({ sourceLabel
       </section>
 
       {/* 데스크톱 버전 */}
-      <section className="hidden rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100 md:block">
+      <section className="hidden border-t border-slate-200 pt-5 md:block">
         <div className="flex items-center justify-between">
           <h4 className="text-sm font-semibold text-slate-700">기간별 신고 추이 비교</h4>
           <span className="text-xs text-slate-400">기준: {sourceLabel}</span>
         </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="mt-4 grid gap-x-8 gap-y-5 md:grid-cols-2">
           {windows.map((window) => (
-            <div key={window.id} className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
+            <div key={window.id} className="border-b border-slate-200 pb-4">
               <div className="flex items-center justify-between text-xs text-slate-400">
                 <span>{window.label}</span>
                 <span
@@ -524,7 +403,7 @@ const TrendComparisonPanel: React.FC<TrendComparisonPanelProps> = ({ sourceLabel
   );
 };
 
-const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) => {
+const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose, isPage = false }) => {
   const [range, setRange] = useState<RegionStatsRange>('week');
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
   const [selectedSubRegionId, setSelectedSubRegionId] = useState<string | null>(null);
@@ -539,7 +418,7 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
   const { loading, error, stats, metadata, regions, totals, refreshedAt, lastFetchedAt, refresh } = useRegionStatsData(isOpen, range);
   const prefersReducedMotion = usePrefersReducedMotion();
 
-  useModalBodyScroll(isOpen);
+  useModalBodyScroll(isOpen && !isPage);
 
   useEffect(() => {
     if (!isOpen) {
@@ -949,19 +828,24 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-stretch justify-center bg-slate-900/70 px-0 py-0 backdrop-blur-sm sm:px-4 sm:py-10"
+      className={isPage
+        ? 'relative flex min-h-full items-stretch justify-center bg-transparent px-0 py-0'
+        : 'fixed inset-0 z-[100] flex items-stretch justify-center bg-slate-900/70 px-0 py-0 backdrop-blur-sm sm:px-4 sm:py-10'}
       style={modalOverlayStyle}
       onMouseDown={(event) => {
+        if (isPage) return;
         if (event.target === event.currentTarget) {
           onClose();
         }
       }}
     >
       <div
-        role="dialog"
-        aria-modal="true"
+        role={isPage ? 'region' : 'dialog'}
+        aria-modal={isPage ? undefined : true}
         aria-labelledby="region-stats-modal-title"
-        className="relative flex h-full min-h-0 w-full max-w-5xl flex-col overflow-hidden bg-white shadow-2xl ring-1 ring-slate-900/10 sm:rounded-3xl"
+        className={isPage
+          ? 'relative flex min-h-0 w-full flex-col overflow-hidden bg-transparent'
+          : 'relative flex h-full min-h-0 w-full max-w-5xl flex-col overflow-hidden bg-white shadow-2xl ring-1 ring-slate-900/10 sm:rounded-3xl'}
         style={modalContentStyle}
         onMouseDown={(event) => event.stopPropagation()}
       >
@@ -1000,7 +884,7 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
                 type="button"
                 onClick={onClose}
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-slate-400 shadow-sm ring-1 ring-slate-200"
-                aria-label="모달 닫기"
+                aria-label={isPage ? '대시보드로 돌아가기' : '모달 닫기'}
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -1072,14 +956,14 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
               type="button"
               onClick={onClose}
               className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-slate-400 shadow-sm ring-1 ring-slate-200 transition hover:text-slate-600"
-              aria-label="모달 닫기"
+                aria-label={isPage ? '대시보드로 돌아가기' : '모달 닫기'}
             >
               <X className="h-4 w-4" />
             </button>
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto bg-slate-50 px-3 py-3 md:px-6 md:py-6">
+        <div className={`flex-1 min-h-0 overflow-y-auto px-3 py-3 md:px-10 md:py-8 ${isPage ? 'bg-transparent' : 'bg-[#fbfcfe]'}`}>
           {!showSkeleton && error && (
             <div className="mb-4 flex items-center gap-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">
               <AlertCircle className="h-5 w-5" />
@@ -1102,12 +986,12 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
           ) : (
             <div className="flex flex-col gap-3 md:gap-5">
               {/* 모바일: 요약 메트릭과 상위 지역을 컴팩트하게 */}
-              <div className="grid grid-cols-2 gap-2 md:hidden">
-                <div className="flex flex-col gap-1 rounded-xl bg-red-50 px-3 py-2 text-xs ring-1 ring-red-100">
+              <div className="grid grid-cols-2 gap-x-4 border-y border-slate-200 py-3 md:hidden">
+                <div className="flex flex-col gap-1 border-l-2 border-red-500 px-3 py-1 text-xs">
                   <span className="text-[10px] uppercase tracking-wide text-slate-400">총 신고</span>
                   <span className="text-base font-semibold text-red-600">{totals.totalCases.toLocaleString()}</span>
                 </div>
-                <div className="flex flex-col gap-1 rounded-xl bg-slate-50 px-3 py-2 text-xs ring-1 ring-slate-100">
+                <div className="flex flex-col gap-1 border-l-2 border-slate-300 px-3 py-1 text-xs">
                   <span className="text-[10px] uppercase tracking-wide text-slate-400">활성</span>
                   <span className="text-base font-semibold text-slate-600">{totals.activeCases.toLocaleString()}</span>
                 </div>
@@ -1120,19 +1004,19 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
               </div>
 
               {/* 모바일: 상위 지역 컴팩트 버전 */}
-              <div className="space-y-2 rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-100 md:hidden">
+              <div className="space-y-3 border-y border-slate-200 py-4 md:hidden">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-semibold text-slate-700">상위 지역 Top 3</h3>
                 </div>
-                <div className="flex flex-col gap-1.5">
+                <div className="flex flex-col">
                   {topRegions.length > 0 ? (
                     topRegions.map((region, index) => (
                       <div
                         key={region.regionId}
-                        className="flex items-center justify-between rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-600"
+                        className="flex items-center justify-between border-b border-slate-200 py-2.5 text-xs font-medium text-slate-600"
                       >
                         <span className="flex items-center gap-1.5">
-                          <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-semibold text-white">
+                          <span className="text-[10px] font-black text-red-500">
                             {index + 1}
                           </span>
                           {region.regionName}
@@ -1149,7 +1033,7 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
               </div>
 
               {/* 데스크톱: 기존 스타일 유지 */}
-              <div className="hidden space-y-3 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-100 md:block">
+              <div className="hidden space-y-5 border-l border-slate-200 pl-6 md:col-span-5 md:block">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-slate-700">상위 영향 지역</h3>
                   <span className="text-xs text-slate-400">선택한 기간 기준 Top 3</span>
@@ -1159,10 +1043,10 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
                     topRegions.map((region, index) => (
                       <div
                         key={region.regionId}
-                        className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600"
+                        className="flex items-center justify-between border-b border-slate-200 py-3 text-sm font-medium text-slate-600"
                       >
                         <span className="flex items-center gap-2">
-                          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-xs font-semibold text-white">
+                          <span className="text-xs font-black text-red-500">
                             {index + 1}
                           </span>
                           {region.regionName}
@@ -1226,7 +1110,7 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
                       mode={heatmapMode}
                       onModeChange={setHeatmapMode}
                     />
-                    <details className="rounded-xl bg-white p-2.5 text-[10px] text-slate-500 shadow-sm ring-1 ring-slate-100">
+                    <details className="border-b border-slate-200 py-3 text-[10px] text-slate-500">
                       <summary className="flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-slate-600">
                         <Info className="h-3 w-3" />
                         데이터 안내
@@ -1240,7 +1124,7 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    <div className="rounded-xl bg-white p-3 shadow-lg ring-1 ring-slate-100">
+                    <div className="border-y border-slate-200 py-3">
                       <div className="flex flex-col gap-2 border-b border-slate-100 pb-2">
                         <div className="flex flex-col gap-1">
                           <nav className="flex items-center gap-1 text-[10px] text-slate-400" aria-label="지역 탐색">
@@ -1257,13 +1141,13 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
                             {selectedRegionAggregated && (
                               <>
                                 <ChevronRight className="h-2.5 w-2.5" aria-hidden />
-                                <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-slate-500">{selectedRegionAggregated.regionName}</span>
+                            <span className="text-slate-500">{selectedRegionAggregated.regionName}</span>
                               </>
                             )}
                             {selectedSubRegionAggregated && (
                               <>
                                 <ChevronRight className="h-2.5 w-2.5" aria-hidden />
-                                <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-blue-600">{selectedSubRegionAggregated.name}</span>
+                                <span className="text-blue-600">{selectedSubRegionAggregated.name}</span>
                               </>
                             )}
                           </nav>
@@ -1297,11 +1181,11 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
 
                       {selectedRegionAggregated && (
                         <div className="mt-2 grid grid-cols-2 gap-2">
-                          <div className="flex flex-col gap-1 rounded-lg bg-red-50 px-2.5 py-2 text-xs ring-1 ring-red-100">
+                          <div className="flex flex-col gap-1 border-l-2 border-red-500 px-2.5 py-1 text-xs">
                             <span className="text-[9px] uppercase tracking-wide text-slate-400">선택 신고</span>
                             <span className="text-sm font-semibold text-red-600">{selectedRegionAggregated.totalInRange.toLocaleString()}</span>
                           </div>
-                          <div className="flex flex-col gap-1 rounded-lg bg-slate-50 px-2.5 py-2 text-xs ring-1 ring-slate-100">
+                          <div className="flex flex-col gap-1 border-l-2 border-slate-300 px-2.5 py-1 text-xs">
                             <span className="text-[9px] uppercase tracking-wide text-slate-400">활성</span>
                             <span className="text-sm font-semibold text-slate-600">{selectedRegionAggregated.activeInRange.toLocaleString()}</span>
                           </div>
@@ -1340,7 +1224,7 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
                     </div>
 
                     {selectedSubRegionAggregated && (
-                      <div className="rounded-xl bg-white p-2.5 shadow-sm ring-1 ring-slate-100">
+                      <div className="border-t border-slate-200 pt-3">
                         <div className="flex items-center justify-between">
                           <h4 className="text-xs font-semibold text-slate-700">{selectedSubRegionAggregated.name} 최근 추이</h4>
                           {selectedSubRegionAggregated.latestCaseDate && (
@@ -1349,7 +1233,7 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
                         </div>
                         <div className="mt-2 space-y-1 text-[10px] text-slate-500">
                           {selectedSubRegionAggregated.daily.slice(-7).map((entry) => (
-                            <div key={entry.date} className="flex items-center justify-between rounded-md bg-slate-50 px-2 py-1.5">
+                            <div key={entry.date} className="flex items-center justify-between border-b border-slate-200 py-1.5">
                               <span>{entry.date}</span>
                               <span className="font-semibold text-slate-700">{entry.totalCases.toLocaleString()}건</span>
                             </div>
@@ -1362,10 +1246,10 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
               </div>
 
               {/* 데스크톱: 지도와 차트 세로 배치 */}
-              <div className="hidden md:flex md:flex-col md:gap-6">
+              <div className="hidden md:col-span-12 md:grid md:grid-cols-12 md:gap-x-10 md:gap-y-10">
                 {/* 상단: 지도 패널 */}
-                <div className="space-y-4">
-                  <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
+                <div className="space-y-5 md:col-span-7 md:row-span-2">
+                  <div className="border-b border-slate-200 pb-6">
                     <div className="mb-3 flex items-center justify-between text-sm font-semibold text-slate-700">
                       <span>지도 히트맵</span>
                       <span className="text-xs font-normal text-slate-400">클릭하여 선택</span>
@@ -1384,7 +1268,7 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
                       onModeChange={setHeatmapMode}
                     />
                   </div>
-                  <details className="rounded-2xl bg-white p-4 text-xs text-slate-500 shadow-sm ring-1 ring-slate-100" open>
+                  <details className="border-b border-slate-200 pb-5 text-xs text-slate-500" open>
                     <summary className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-600">
                       <Info className="h-4 w-4" />
                       데이터 안내
@@ -1398,9 +1282,9 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
                 </div>
 
                 {/* 하단: 차트 패널 */}
-                <div className="space-y-4">
-                  <div className="rounded-2xl bg-white p-5 shadow-lg ring-1 ring-slate-100">
-                    <div className="flex flex-col gap-3 border-b border-slate-100 pb-3">
+                <div className="space-y-5 md:col-span-5 md:border-l md:border-slate-200 md:pl-8">
+                  <div>
+                    <div className="flex flex-col gap-3 border-b border-slate-200 pb-4">
                       <div className="flex flex-col gap-1">
                         <nav className="flex items-center gap-1 text-xs text-slate-400" aria-label="지역 탐색">
                           <button
@@ -1431,7 +1315,7 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
                         </h3>
                       </div>
                       <div className="flex items-center gap-2">
-                        <select
+                          <select
                           value={selectedRegionId ?? ''}
                           onChange={(event) => {
                             const value = event.target.value;
@@ -1442,7 +1326,7 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
                               handleRegionSelect(value);
                             }
                           }}
-                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 focus:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-200"
+                          className="rounded-none border-0 border-b border-slate-300 bg-transparent px-0 py-2 text-sm text-slate-600 focus:border-red-400 focus:outline-none focus:ring-0"
                         >
                           <option value="">전체 지역 보기</option>
                           {regionOptions.map((region) => (
@@ -1455,13 +1339,13 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
                     </div>
 
                     {selectedRegionAggregated && (
-                      <div className="mt-4 grid grid-cols-2 gap-3">
+                      <div className="mt-5 grid grid-cols-2 gap-5">
                         <SummaryMetric label="선택 지역 신고" value={selectedRegionAggregated.totalInRange} accent="primary" />
                         <SummaryMetric label="선택 지역 활성" value={selectedRegionAggregated.activeInRange} />
                       </div>
                     )}
 
-                    <div className="mt-4">
+                    <div className="mt-5">
                       {loading && (
                         <div className="mb-4 flex items-center gap-2 text-xs text-slate-400">
                           <RefreshCw className="h-3.5 w-3.5 animate-spin" />
@@ -1493,7 +1377,7 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
                   </div>
 
                   {selectedSubRegionAggregated && (
-                    <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-100">
+                    <div className="border-t border-slate-200 pt-5">
                       <div className="flex items-center justify-between">
                         <h4 className="text-sm font-semibold text-slate-700">{selectedSubRegionAggregated.name} 최근 추이</h4>
                         {selectedSubRegionAggregated.latestCaseDate && (
@@ -1502,7 +1386,7 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
                       </div>
                       <div className="mt-3 space-y-2 text-xs text-slate-500">
                         {selectedSubRegionAggregated.daily.slice(-7).map((entry) => (
-                          <div key={entry.date} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+                          <div key={entry.date} className="flex items-center justify-between border-b border-slate-200 py-2">
                             <span>{entry.date}</span>
                             <span className="font-semibold text-slate-700">{entry.totalCases.toLocaleString()}건</span>
                           </div>
@@ -1516,7 +1400,7 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
           )}
         </div>
 
-        <div className="border-t border-slate-200 bg-white/95 px-4 py-4 text-xs text-slate-500 shadow-inner sm:px-6" role="contentinfo">
+        <div className={`border-t border-slate-200 px-4 py-4 text-xs text-slate-500 sm:px-6 ${isPage ? 'bg-transparent' : 'bg-white/95 shadow-inner'}`} role="contentinfo">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <span className="inline-flex items-center gap-1">
@@ -1563,7 +1447,7 @@ const StatisticsModal: React.FC<StatisticsModalProps> = ({ isOpen, onClose }) =>
                   type="button"
                   onClick={onClose}
                   className="flex flex-1 items-center justify-center rounded-full bg-red-600 px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-red-700 sm:flex-none"
-                  aria-label="통계 모달 닫기"
+                  aria-label={isPage ? '대시보드로 돌아가기' : '통계 모달 닫기'}
                 >
                   닫기
                 </button>

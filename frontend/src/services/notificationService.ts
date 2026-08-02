@@ -8,6 +8,8 @@ export interface CommentNotification {
   notificationId: string;
   userId: string;
   commentId: string;
+  missingPersonId?: string;
+  replyCommentId?: string;
   type: CommentNotificationType;
   isRead: boolean;
   createdAt: Timestamp;

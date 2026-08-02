@@ -10,6 +10,9 @@ export interface MissingPersonComment {
   isAnonymous: boolean;
   content: string;
   type: CommentType;
+  parentCommentId?: string | null;
+  imageUrls?: string[];
+  replyCount?: number;
   createdAt: Timestamp;
   updatedAt: Timestamp;
   likes: number;
@@ -41,6 +44,8 @@ export interface CommentNotification {
   notificationId: string;
   userId: string;
   commentId: string;
+  missingPersonId?: string;
+  replyCommentId?: string;
   type: CommentNotificationType;
   isRead: boolean;
   createdAt: Timestamp;

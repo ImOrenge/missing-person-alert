@@ -18,6 +18,9 @@ export interface CommentDto {
   isAnonymous: boolean;
   content: string;
   type: CommentType;
+  parentCommentId?: string | null;
+  imageUrls?: string[];
+  replyCount?: number;
   createdAt: string;
   updatedAt: string;
   likes: number;
@@ -63,6 +66,9 @@ const mapComment = (raw: any): CommentModel => ({
   isAnonymous: raw.isAnonymous,
   content: raw.content,
   type: raw.type,
+  parentCommentId: raw.parentCommentId ?? null,
+  imageUrls: Array.isArray(raw.imageUrls) ? raw.imageUrls : [],
+  replyCount: typeof raw.replyCount === 'number' ? raw.replyCount : 0,
   createdAt: toDate(raw.createdAt),
   updatedAt: toDate(raw.updatedAt),
   likes: raw.likes ?? 0,
@@ -89,6 +95,57 @@ export interface FetchCommentsOptions {
   order?: 'latest' | 'popular';
   limit?: number;
 }
+
+export interface CommunityFeedOptions {
+  order?: 'latest' | 'popular';
+  type?: CommentType;
+  missingPersonId?: string;
+  fallbackMissingPersonIds?: string[];
+  limit?: number;
+}
+
+export const fetchCommunityFeed = async (options: CommunityFeedOptions = {}) => {
+  const params = new URLSearchParams();
+  if (options.order) params.append('order', options.order);
+  if (options.type) params.append('type', options.type);
+  if (options.missingPersonId) params.append('missingPersonId', options.missingPersonId);
+  if (options.limit) params.append('limit', String(options.limit));
+
+  const fallbackIds = options.missingPersonId
+    ? [options.missingPersonId]
+    : (options.fallbackMissingPersonIds || []).slice(0, 24);
+  const fetchFallback = async () => {
+    if (fallbackIds.length === 0) throw new Error('community-feed-endpoint-unavailable');
+
+    const results = await Promise.allSettled(fallbackIds.map((id) => fetchComments(id, {
+      type: options.type,
+      order: options.order,
+      limit: Math.min(options.limit || 50, 50)
+    })));
+    const comments = results.flatMap((result) => result.status === 'fulfilled' ? result.value : []);
+    const unique = new Map(comments.map((comment) => [comment.commentId, comment]));
+    return Array.from(unique.values()).sort((left, right) => options.order === 'popular'
+      ? right.likes - left.likes || right.createdAt.getTime() - left.createdAt.getTime()
+      : right.createdAt.getTime() - left.createdAt.getTime()).slice(0, options.limit || 100);
+  };
+
+  // During local development, use the existing per-person endpoint when the
+  // new aggregate route has not been deployed yet. This keeps the console
+  // clean while still showing the same shared comment collection.
+  if (process.env.NODE_ENV === 'development' && fallbackIds.length > 0) {
+    return fetchFallback();
+  }
+
+  try {
+    const response = await fetch(`${API_BASE}/api/community/feed?${params.toString()}`);
+    if (!response.ok) throw new Error('community-feed-endpoint-unavailable');
+    const data = await response.json();
+    return (data.comments as any[]).map(mapComment);
+  } catch (primaryError) {
+    if (fallbackIds.length === 0) throw primaryError;
+    return fetchFallback();
+  }
+};
 
 export const fetchComments = async (missingPersonId: string, options: FetchCommentsOptions = {}) => {
   const params = new URLSearchParams();
@@ -119,6 +176,7 @@ export const createComment = async (missingPersonId: string, payload: {
   content: string;
   type: CommentType;
   isAnonymous: boolean;
+  imageUrls?: string[];
 }) => {
   await loadRecaptchaScript();
   const [token, recaptcha] = await Promise.all([
@@ -138,13 +196,49 @@ export const createComment = async (missingPersonId: string, payload: {
       missingPersonId,
       content: payload.content,
       type: payload.type,
-      isAnonymous: payload.isAnonymous
+      isAnonymous: payload.isAnonymous,
+      imageUrls: payload.imageUrls ?? []
     })
   });
 
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.error || '댓글 작성에 실패했습니다');
+  }
+
+  const data = await response.json();
+  return mapComment(data.comment);
+};
+
+export const createReply = async (commentId: string, payload: {
+  content: string;
+  isAnonymous: boolean;
+  imageUrls?: string[];
+}) => {
+  await loadRecaptchaScript();
+  const [token, recaptcha] = await Promise.all([
+    getAuthToken(),
+    executeRecaptcha('comment_reply')
+  ]);
+
+  const response = await fetch(`${API_BASE}/api/comments/${commentId}/replies`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      'x-recaptcha-token': recaptcha,
+      'x-recaptcha-action': 'comment'
+    },
+    body: JSON.stringify({
+      content: payload.content,
+      isAnonymous: payload.isAnonymous,
+      imageUrls: payload.imageUrls ?? []
+    })
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || '답글 등록에 실패했습니다');
   }
 
   const data = await response.json();

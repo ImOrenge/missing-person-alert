@@ -8,6 +8,9 @@ export interface MissingPersonComment {
   isAnonymous: boolean;
   content: string;
   type: CommentType;
+  parentCommentId?: string | null;
+  imageUrls?: string[];
+  replyCount?: number;
   createdAt: FirebaseFirestore.Timestamp;
   updatedAt: FirebaseFirestore.Timestamp;
   likes: number;
@@ -26,6 +29,8 @@ export type CommentReportStatus = 'pending' | 'resolved' | 'dismissed';
 export interface CommentReport {
   reportId: string;
   commentId: string;
+  missingPersonId?: string;
+  replyCommentId?: string;
   reportedBy: string;
   reason: CommentReportReason;
   description?: string;

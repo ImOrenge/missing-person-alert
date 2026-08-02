@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { Filter, User, Clock, MapPin, X, MessageCircle, Search, Eye } from 'lucide-react';
 import { useEmergencyStore } from '../stores/emergencyStore';
 import type { MissingPersonStatus } from '../types';
@@ -87,19 +87,11 @@ const getStatusStyle = (status?: MissingPersonStatus | null): string => {
 };
 
 export default function Sidebar({ onShowFilters, showFilters, onClose }: Props) {
-  const missingPersons = useEmergencyStore(state => state.missingPersons);
-  const filters = useEmergencyStore(state => state.filters);
-  const sortOrder = useEmergencyStore(state => state.sortOrder);
+  const filteredPersons = useEmergencyStore(state => state.getFilteredPersons());
   const selectedPersonId = useEmergencyStore(state => state.selectedPersonId);
   const hoveredPersonId = useEmergencyStore(state => state.hoveredPersonId);
   const setSelectedPersonId = useEmergencyStore(state => state.setSelectedPersonId);
   const setHoveredPersonId = useEmergencyStore(state => state.setHoveredPersonId);
-  const getFilteredPersons = useEmergencyStore(state => state.getFilteredPersons);
-
-  // useMemo로 필터링 결과 캐싱
-  const filteredPersons = useMemo(() => {
-    return getFilteredPersons();
-  }, [missingPersons, filters, sortOrder, getFilteredPersons]);
 
   return (
     <div className="w-full h-full md:w-80 bg-white md:border-r border-gray-200 flex flex-col shadow-lg">

@@ -23,7 +23,7 @@ const typeLabels: Record<string, { icon: React.ReactNode; text: (notification: C
   }
 };
 
-const NotificationBell: React.FC = () => {
+const NotificationBell: React.FC<{ onOpenCommunity?: (personId?: string) => void }> = ({ onOpenCommunity }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [notifications, setNotifications] = useState<CommentNotificationModel[]>([]);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
@@ -138,13 +138,15 @@ const NotificationBell: React.FC = () => {
                 return (
                   <div
                     key={notification.notificationId}
+                    onClick={() => onOpenCommunity?.(notification.missingPersonId)}
                     style={{
                       padding: '12px 16px',
                       borderBottom: '1px solid #f5f5f5',
                       backgroundColor: isRead ? 'white' : 'rgba(231, 76, 60, 0.08)',
                       display: 'flex',
                       gap: '10px',
-                      alignItems: 'flex-start'
+                      alignItems: 'flex-start',
+                      cursor: onOpenCommunity ? 'pointer' : 'default'
                     }}
                   >
                     <div style={{ marginTop: '2px' }}>

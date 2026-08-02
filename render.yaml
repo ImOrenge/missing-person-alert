@@ -9,13 +9,9 @@ services:
         value: production
       - key: PORT
         value: 3000
-      - key: WS_PORT
-        value: 8080
       - key: SAFE182_ESNTL_ID
-        value: 10011616
+        sync: false
       - key: SAFE182_AUTH_KEY
-        value: d4dce53abbc84060
-      - key: POLL_INTERVAL_EMERGENCY
-        value: 600000
-      - key: POLL_INTERVAL_GENERAL
-        value: 30000
+        sync: false
+      - key: API_POLL_INTERVAL_MINUTES
+        value: 10

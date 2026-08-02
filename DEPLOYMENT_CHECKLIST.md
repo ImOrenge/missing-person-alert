@@ -16,8 +16,8 @@
 배포 플랫폼(Vercel, Heroku, AWS 등)에서 다음 환경변수를 설정해야 합니다:
 
 ```bash
-SAFE182_ESNTL_ID=10000847
-SAFE182_AUTH_KEY=f16ae98f22b44441
+SAFE182_ESNTL_ID=<your-safe182-esntl-id>
+SAFE182_AUTH_KEY=<your-safe182-auth-key>
 NODE_ENV=production
 ```
 
@@ -28,22 +28,24 @@ NODE_ENV=production
 
 #### Heroku 환경변수 설정
 ```bash
-heroku config:set SAFE182_ESNTL_ID=10000847
-heroku config:set SAFE182_AUTH_KEY=f16ae98f22b44441
+heroku config:set SAFE182_ESNTL_ID=<your-safe182-esntl-id>
+heroku config:set SAFE182_AUTH_KEY=<your-safe182-auth-key>
 ```
 
-#### Firebase Functions 환경변수
+#### Firebase Functions 비밀값
 ```bash
-firebase functions:config:set safe182.esntl_id="10000847"
-firebase functions:config:set safe182.auth_key="f16ae98f22b44441"
+firebase functions:secrets:set SAFE182_ESNTL_ID
+firebase functions:secrets:set SAFE182_AUTH_KEY
 ```
+
+각 명령 실행 시 값을 대화형으로 입력한 뒤 Functions를 다시 배포합니다. 실제 값은 명령 인자나 문서에 기록하지 않습니다.
 
 ### 2. 로그 확인
 
 수정된 코드는 다음과 같은 상세 로그를 출력합니다:
 
 ```
-🔑 API 인증정보: esntlId=10000847, authKey=f16a****
+🔑 API 인증정보가 환경변수에서 로드됨
 📡 안전드림 API 요청 시작...
 ✅ 안전드림 API 응답 수신: result=00, msg=정상
 ```
@@ -124,7 +126,7 @@ timeout: 30000  // 15초 → 30초
 
 안전드림 API 인증키가 유효한지 확인:
 - 경찰청 안전드림 홈페이지에서 API 키 발급 상태 확인
-- 테스트용 키: `esntlId=10000847`, `authKey=f16ae98f22b44441`
+- SAFE182에서 발급한 현재 자격 증명을 배포 플랫폼의 비밀 환경변수로 설정
 
 ## 디버깅 체크리스트
 

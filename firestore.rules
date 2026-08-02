@@ -34,6 +34,9 @@ service cloud.firestore {
         'isAnonymous',
         'content',
         'type',
+        'parentCommentId',
+        'imageUrls',
+        'replyCount',
         'createdAt',
         'updatedAt',
         'likes',
@@ -52,6 +55,9 @@ service cloud.firestore {
         data.isAnonymous is bool &&
         data.content is string && data.content.size() >= 10 && data.content.size() <= 500 &&
         data.type in ['sighting', 'question', 'support'] &&
+        (!('parentCommentId' in data) || data.parentCommentId == null || (data.parentCommentId is string && data.parentCommentId.size() > 0)) &&
+        (!('imageUrls' in data) || (data.imageUrls is list && data.imageUrls.size() <= 3 && data.imageUrls.all(url, url is string && url.size() > 0 && url.size() <= 2048))) &&
+        (!('replyCount' in data) || (data.replyCount is int && data.replyCount >= 0)) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp &&
         data.likes is int && data.likes >= 0 &&
@@ -71,6 +77,9 @@ service cloud.firestore {
         data.likes == 0 &&
         data.likedBy.size() == 0 &&
         data.isEdited == false &&
+        (!('parentCommentId' in data) || data.parentCommentId == null) &&
+        (!('imageUrls' in data) || data.imageUrls.size() <= 3) &&
+        (!('replyCount' in data) || data.replyCount == 0) &&
         data.isDeleted == false &&
         data.reported == false &&
         data.reportCount == 0 &&
@@ -89,6 +98,9 @@ service cloud.firestore {
         data.reported == resource.data.reported &&
         data.reportCount == resource.data.reportCount &&
         data.reportedBy == resource.data.reportedBy &&
+        (((('parentCommentId' in data) && ('parentCommentId' in resource.data)) && data.parentCommentId == resource.data.parentCommentId) || ((!('parentCommentId' in data)) && (!('parentCommentId' in resource.data)))) &&
+        (((('imageUrls' in data) && ('imageUrls' in resource.data)) && data.imageUrls == resource.data.imageUrls) || ((!('imageUrls' in data)) && (!('imageUrls' in resource.data)))) &&
+        (((('replyCount' in data) && ('replyCount' in resource.data)) && data.replyCount == resource.data.replyCount) || ((!('replyCount' in data)) && (!('replyCount' in resource.data)))) &&
         data.isHidden == resource.data.isHidden &&
         data.type == resource.data.type;
     }
@@ -118,6 +130,8 @@ service cloud.firestore {
         'notificationId',
         'userId',
         'commentId',
+        'missingPersonId',
+        'replyCommentId',
         'type',
         'isRead',
         'createdAt'

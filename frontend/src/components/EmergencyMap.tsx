@@ -8,7 +8,7 @@ const GOOGLE_MAPS_API_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY || '';
 const MAP_ID = process.env.REACT_APP_MAP_ID || '';
 
 // 마커 애니메이션을 처리하는 내부 컴포넌트
-function MapContent() {
+function MapContent({ onOpenCommunity }: { onOpenCommunity?: (personId: string) => void }) {
   const map = useMap();
   const getFilteredPersons = useEmergencyStore((state) => state.getFilteredPersons);
   const selectedPersonId = useEmergencyStore((state) => state.selectedPersonId);
@@ -65,6 +65,7 @@ function MapContent() {
             isHighlighted={isHovered}
             onClick={() => setSelectedPersonId(person.id)}
             onClose={() => setSelectedPersonId(null)}
+            onOpenCommunity={onOpenCommunity}
           />
         );
       })}
@@ -72,7 +73,7 @@ function MapContent() {
   );
 }
 
-export default function EmergencyMap() {
+export default function EmergencyMap({ onOpenCommunity }: { onOpenCommunity?: (personId: string) => void }) {
   const missingPersons = useEmergencyStore((state) => state.missingPersons);
   const getFilteredPersons = useEmergencyStore((state) => state.getFilteredPersons);
 
@@ -148,7 +149,7 @@ export default function EmergencyMap() {
           fullscreenControl={true}
           className="h-full w-full"
         >
-          <MapContent />
+          <MapContent onOpenCommunity={onOpenCommunity} />
         </Map>
       </APIProvider>
 

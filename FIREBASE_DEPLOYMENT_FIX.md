@@ -24,8 +24,8 @@ cd backend
 heroku create missing-person-backend
 
 # 환경변수 설정
-heroku config:set SAFE182_ESNTL_ID=10000847
-heroku config:set SAFE182_AUTH_KEY=f16ae98f22b44441
+heroku config:set SAFE182_ESNTL_ID=<your-safe182-esntl-id>
+heroku config:set SAFE182_AUTH_KEY=<your-safe182-auth-key>
 heroku config:set FIREBASE_PROJECT_ID=missing-person-alram
 heroku config:set NODE_ENV=production
 heroku config:set FRONTEND_URL=https://missing-person-alram.web.app
@@ -45,8 +45,8 @@ git push heroku main
    - **Start Command**: `npm start`
 4. Environment Variables 추가:
    ```
-   SAFE182_ESNTL_ID=10000847
-   SAFE182_AUTH_KEY=f16ae98f22b44441
+   SAFE182_ESNTL_ID=<your-safe182-esntl-id>
+   SAFE182_AUTH_KEY=<your-safe182-auth-key>
    FIREBASE_PROJECT_ID=missing-person-alram
    NODE_ENV=production
    FRONTEND_URL=https://missing-person-alram.web.app

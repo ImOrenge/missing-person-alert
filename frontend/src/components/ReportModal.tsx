@@ -9,6 +9,7 @@ import { loadGoogleMapsScript } from '../utils/googleMapsLoader';
 interface Props {
   isOpen: boolean;
   onClose: () => void;
+  isPage?: boolean;
 }
 
 type LocationSelection = {
@@ -337,21 +338,22 @@ const LocationSearchModal: React.FC<LocationSearchModalProps> = ({ isOpen, onClo
   );
 };
 
-export default function ReportModal({ isOpen, onClose }: Props) {
+const createInitialFormState = () => ({
+  name: '',
+  age: '',
+  gender: 'M',
+  type: 'missing_child' as MissingPersonType,
+  description: '',
+  photo: ''
+});
+
+export default function ReportModal({ isOpen, onClose, isPage = false }: Props) {
   const addMissingPerson = useEmergencyStore((state) => state.addMissingPerson);
   const enqueueNewPersonAlert = useEmergencyStore((state) => state.enqueueNewPersonAlert);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRecaptchaReady, setIsRecaptchaReady] = useState(false);
 
-  const initialFormState = {
-    name: '',
-    age: '',
-    gender: 'M',
-    type: 'missing_child' as MissingPersonType,
-    description: '',
-    photo: ''
-  };
-  const [formData, setFormData] = useState(initialFormState);
+  const [formData, setFormData] = useState(createInitialFormState);
   const [address, setAddress] = useState('');
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
@@ -377,7 +379,7 @@ export default function ReportModal({ isOpen, onClose }: Props) {
 
   useEffect(() => {
     if (!isOpen) {
-      setFormData({ ...initialFormState });
+      setFormData(createInitialFormState());
       setAddress('');
       setLatitude(null);
       setLongitude(null);
@@ -502,7 +504,7 @@ export default function ReportModal({ isOpen, onClose }: Props) {
       toast.success('실종자 제보가 성공적으로 등록되었습니다');
 
       // 폼 리셋
-      setFormData({ ...initialFormState });
+      setFormData(createInitialFormState());
       setAddress('');
       setLatitude(null);
       setLongitude(null);
@@ -523,30 +525,31 @@ export default function ReportModal({ isOpen, onClose }: Props) {
     <>
       <div
         style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.7)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 2000,
-          padding: '20px'
+          position: isPage ? 'static' : 'fixed',
+          top: isPage ? undefined : 0,
+          left: isPage ? undefined : 0,
+          right: isPage ? undefined : 0,
+          bottom: isPage ? undefined : 0,
+          backgroundColor: isPage ? 'transparent' : 'rgba(0, 0, 0, 0.7)',
+          display: isPage ? 'block' : 'flex',
+          alignItems: isPage ? undefined : 'center',
+          justifyContent: isPage ? undefined : 'center',
+          zIndex: isPage ? undefined : 2000,
+          padding: isPage ? 0 : '20px'
         }}
-        onClick={onClose}
+        onClick={isPage ? undefined : onClose}
       >
         <div
           style={{
             backgroundColor: 'white',
-            borderRadius: '12px',
-            padding: '30px',
-            maxWidth: '600px',
+            borderRadius: isPage ? '16px' : '12px',
+            padding: isPage ? '24px' : '30px',
+            maxWidth: isPage ? 'none' : '600px',
             width: '100%',
-            maxHeight: '90vh',
-            overflowY: 'auto',
-            boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
+            maxHeight: isPage ? undefined : '90vh',
+            overflowY: isPage ? undefined : 'auto',
+            boxShadow: isPage ? '0 1px 3px rgba(15,23,42,0.08)' : '0 10px 40px rgba(0,0,0,0.3)',
+            border: isPage ? '1px solid #e2e8f0' : undefined
           }}
           onClick={(e) => e.stopPropagation()}
         >

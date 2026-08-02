@@ -8,7 +8,6 @@ import {
 import { ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 import { MissingPerson } from '../types';
 import ShareModal from './ShareModal';
-import CommentsPanel from './MissingPersonComments/CommentsPanel';
 import { useViewCount, formatViewCount } from '../hooks/useViewCount';
 
 const getInitialViewport = () => {
@@ -32,6 +31,7 @@ interface Props {
   isHighlighted?: boolean;
   onClick: () => void;
   onClose: () => void;
+  onOpenCommunity?: (personId: string) => void;
 }
 
 // 유형별 색상
@@ -74,12 +74,11 @@ function getTypeLabel(type: string): string {
   }
 }
 
-const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, onClick, onClose }: Props) => {
+const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, onClick, onClose, onOpenCommunity }: Props) => {
   const [markerRef, marker] = useAdvancedMarkerRef();
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [viewport, setViewport] = useState(() => getInitialViewport());
   const [headerHeight, setHeaderHeight] = useState(() => getHeaderHeight());
-  const [activeTab, setActiveTab] = useState<'details' | 'comments'>('details');
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
   const [hiddenPhotoIndexes, setHiddenPhotoIndexes] = useState<number[]>([]);
 
@@ -197,7 +196,6 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
         <InfoWindow
           anchor={marker}
           onCloseClick={() => {
-            setActiveTab('details');
             onClose();
           }}
           maxWidth={infoWindowMaxWidth}
@@ -354,42 +352,39 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
             </div>
 
             <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-              <button
-                onClick={() => setActiveTab('details')}
+              <div
                 style={{
                   flex: 1,
                   padding: isMobile ? '8px' : '10px',
                   borderRadius: '8px',
-                  border: activeTab === 'details' ? 'none' : '1px solid #dcdde1',
-                  backgroundColor: activeTab === 'details' ? '#3498db' : 'white',
-                  color: activeTab === 'details' ? 'white' : '#7f8c8d',
+                  backgroundColor: '#3498db',
+                  color: 'white',
                   fontSize: isMobile ? '12px' : '14px',
-                  fontWeight: activeTab === 'details' ? 'bold' : 'normal',
-                  cursor: 'pointer'
+                  fontWeight: 'bold',
+                  textAlign: 'center'
                 }}
               >
                 상세 정보
-              </button>
+              </div>
               <button
-                onClick={() => setActiveTab('comments')}
+                onClick={() => onOpenCommunity?.(person.id)}
                 style={{
                   flex: 1,
                   padding: isMobile ? '8px' : '10px',
                   borderRadius: '8px',
-                  border: activeTab === 'comments' ? 'none' : '1px solid #dcdde1',
-                  backgroundColor: activeTab === 'comments' ? '#e74c3c' : 'white',
-                  color: activeTab === 'comments' ? 'white' : '#7f8c8d',
+                  border: 'none',
+                  backgroundColor: '#e74c3c',
+                  color: 'white',
                   fontSize: isMobile ? '12px' : '14px',
-                  fontWeight: activeTab === 'comments' ? 'bold' : 'normal',
+                  fontWeight: 'bold',
                   cursor: 'pointer'
                 }}
               >
-                근황 공유
+                소통 피드 열기
               </button>
             </div>
 
-            {activeTab === 'details' ? (
-              <>
+            <>
                 <div
                   style={{
                     fontSize: isMobile ? '11px' : '14px',
@@ -516,9 +511,6 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
                   </button>
                 </div>
               </>
-            ) : (
-              <CommentsPanel missingPersonId={person.id} />
-            )}
           </div>
         </InfoWindow>
       )}

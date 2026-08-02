@@ -7,9 +7,10 @@ import { MissingPerson } from '../types';
 interface Props {
   isOpen: boolean;
   onClose: () => void;
+  isPage?: boolean;
 }
 
-export default function MyReportsModal({ isOpen, onClose }: Props) {
+export default function MyReportsModal({ isOpen, onClose, isPage = false }: Props) {
   const [reports, setReports] = useState<MissingPerson[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -108,30 +109,31 @@ export default function MyReportsModal({ isOpen, onClose }: Props) {
   return (
     <div
       style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.7)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 2000,
-        padding: '20px'
+        position: isPage ? 'static' : 'fixed',
+        top: isPage ? undefined : 0,
+        left: isPage ? undefined : 0,
+        right: isPage ? undefined : 0,
+        bottom: isPage ? undefined : 0,
+        backgroundColor: isPage ? 'transparent' : 'rgba(0, 0, 0, 0.7)',
+        display: isPage ? 'block' : 'flex',
+        alignItems: isPage ? undefined : 'center',
+        justifyContent: isPage ? undefined : 'center',
+        zIndex: isPage ? undefined : 2000,
+        padding: isPage ? 0 : '20px'
       }}
-      onClick={onClose}
+      onClick={isPage ? undefined : onClose}
     >
       <div
         style={{
           backgroundColor: 'white',
-          borderRadius: '12px',
-          padding: '30px',
-          maxWidth: '800px',
+          borderRadius: isPage ? '16px' : '12px',
+          padding: isPage ? '24px' : '30px',
+          maxWidth: isPage ? 'none' : '800px',
           width: '100%',
-          maxHeight: '90vh',
-          overflowY: 'auto',
-          boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
+          maxHeight: isPage ? undefined : '90vh',
+          overflowY: isPage ? undefined : 'auto',
+          boxShadow: isPage ? '0 1px 3px rgba(15,23,42,0.08)' : '0 10px 40px rgba(0,0,0,0.3)',
+          border: isPage ? '1px solid #e2e8f0' : undefined
         }}
         onClick={(e) => e.stopPropagation()}
       >

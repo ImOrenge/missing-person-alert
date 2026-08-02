@@ -22,8 +22,8 @@
 
 ```bash
 # 안전드림 API 인증키
-SAFE182_ESNTL_ID=10000847
-SAFE182_AUTH_KEY=f16ae98f22b44441
+SAFE182_ESNTL_ID=<your-safe182-esntl-id>
+SAFE182_AUTH_KEY=<your-safe182-auth-key>
 
 # Firebase 설정
 FIREBASE_PROJECT_ID=missing-person-alram
@@ -53,8 +53,8 @@ PORT=3000
 heroku create your-app-name
 
 # 환경변수 설정
-heroku config:set SAFE182_ESNTL_ID=10000847
-heroku config:set SAFE182_AUTH_KEY=f16ae98f22b44441
+heroku config:set SAFE182_ESNTL_ID=<your-safe182-esntl-id>
+heroku config:set SAFE182_AUTH_KEY=<your-safe182-auth-key>
 heroku config:set FIREBASE_PROJECT_ID=missing-person-alram
 heroku config:set NODE_ENV=production
 heroku config:set FRONTEND_URL=https://your-frontend.vercel.app
@@ -76,6 +76,8 @@ git push heroku main
    - **Start Command**: `cd backend && npm start`
 4. Environment Variables 추가 (위 환경변수 모두 설정)
 5. **Create Web Service** 클릭
+
+`render.yaml`의 `sync: false` 항목은 Render 대시보드에서 직접 입력해야 하며 Git에 값을 기록하지 않습니다.
 
 ### Railway 배포
 
@@ -241,8 +243,8 @@ cd frontend && npm start    # http://localhost:3001
 REACT_APP_API_URL=https://your-backend-app.herokuapp.com
 
 # 백엔드 환경변수
-SAFE182_ESNTL_ID=10000847
-SAFE182_AUTH_KEY=f16ae98f22b44441
+SAFE182_ESNTL_ID=<your-safe182-esntl-id>
+SAFE182_AUTH_KEY=<your-safe182-auth-key>
 ```
 
 프론트엔드는 `REACT_APP_API_URL`에 설정된 전체 URL로 백엔드에 요청합니다.

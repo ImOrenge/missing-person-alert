@@ -8,8 +8,6 @@ import MyReportsModal from './components/MyReportsModal';
 import AdminDashboard from './components/AdminDashboard';
 import LoginModal from './components/LoginModal';
 import UserProfileModal from './components/UserProfileModal';
-import VerificationPromptModal from './components/VerificationPromptModal';
-import { PhoneAuthModal } from './components/PhoneAuthModal';
 import AnnouncementBanner from './components/AnnouncementBanner';
 import AnnouncementPopup from './components/AnnouncementPopup';
 import NotificationBell from './components/NotificationBell';
@@ -36,22 +34,44 @@ import { hasUndismissedPopupForToday } from './utils/announcementPopupStorage';
 import type { MissingPerson, MissingPersonStatus } from './types';
 import { useActiveSessionTracker } from './hooks/useActiveSessionTracker';
 import { DesktopGridView } from './components/DesktopGridView';
+import DashboardHome from './components/DashboardHome';
+import CommunityFeed from './components/CommunityFeed';
+import PageShell from './components/PageShell';
+import type { AppSection } from './components/AppSidebar';
 
 const GRID_VIEW_PREF_KEY = 'missing_person_desktop_grid_view';
 const INSTALL_PROMPT_DISMISSED_KEY = 'missing_person_install_prompt_snooze_until';
 const INSTALL_PROMPT_SNOOZE_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 
+type AppView = 'dashboard' | 'map' | 'community' | 'statistics' | 'profile' | 'reports' | 'admin' | 'report';
+
+const getViewFromLocation = (): AppView => {
+  if (typeof window === 'undefined') return 'dashboard';
+  const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
+  const legacyView = new URLSearchParams(window.location.search).get('view');
+  if (pathname === '/statistics' || legacyView === 'statistics') return 'statistics';
+  if (pathname === '/profile' || legacyView === 'profile') return 'profile';
+  if (pathname === '/reports' || legacyView === 'reports') return 'reports';
+  if (pathname === '/reports/new' || legacyView === 'report') return 'report';
+  if (pathname === '/admin' || pathname.startsWith('/admin/')) return 'admin';
+  if (pathname === '/community' || legacyView === 'community') return 'community';
+  if (pathname === '/map' || legacyView === 'map') return 'map';
+  return 'dashboard';
+};
+
+const getPathForView = (view: AppView, personId?: string) => {
+  const path = view === 'dashboard' ? '/' : view === 'report' ? '/reports/new' : `/${view}`;
+  if (personId && (view === 'map' || view === 'community' || view === 'report')) {
+    return `${path}?personId=${encodeURIComponent(personId)}`;
+  }
+  return path;
+};
+
 function App() {
+  const [activeView, setActiveView] = useState<AppView>(getViewFromLocation);
   const [showSidebar, setShowSidebar] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
-  const [showReportModal, setShowReportModal] = useState(false);
-  const [showMyReportsModal, setShowMyReportsModal] = useState(false);
-  const [showAdminDashboard, setShowAdminDashboard] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
-  const [showUserProfile, setShowUserProfile] = useState(false);
-  const [showVerificationPrompt, setShowVerificationPrompt] = useState(false);
-  const [showPhoneAuth, setShowPhoneAuth] = useState(false);
-  const [showStatisticsModal, setShowStatisticsModal] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [alertsEnabled, setAlertsEnabled] = useState(true);
@@ -71,6 +91,7 @@ function App() {
   const [statsUpdatedAt, setStatsUpdatedAt] = useState<number | undefined>(undefined);
   const [showInstallShortcut, setShowInstallShortcut] = useState(false);
   const [showGridView, setShowGridView] = useState(false);
+  const [communityPersonId, setCommunityPersonId] = useState<string | null>(null);
 
   useApiData();
   useActiveSessionTracker(currentUser);
@@ -80,6 +101,7 @@ function App() {
   const filteredPersons = useEmergencyStore(state => state.getFilteredPersons());
   const setSelectedPersonId = useEmergencyStore(state => state.setSelectedPersonId);
   const setHoveredPersonId = useEmergencyStore(state => state.setHoveredPersonId);
+  const updateFilters = useEmergencyStore(state => state.updateFilters);
   const newPersonAlerts = useEmergencyStore(state => state.newPersonAlerts);
   const shiftNewPersonAlert = useEmergencyStore(state => state.shiftNewPersonAlert);
 
@@ -91,6 +113,16 @@ function App() {
   const activeAlertToastIdRef = useRef<React.ReactText | null>(null);
   const alertsEnabledRef = useRef(alertsEnabled);
   const newPersonAlertCount = newPersonAlerts.length;
+
+  const navigateTo = useCallback((view: AppView, personId?: string, replace = false) => {
+    const nextUrl = getPathForView(view, personId);
+    if (typeof window !== 'undefined') {
+      const method = replace ? 'replaceState' : 'pushState';
+      window.history[method]({}, document.title, nextUrl);
+    }
+    setCommunityPersonId(view === 'community' ? personId || null : null);
+    setActiveView(view);
+  }, []);
 
   // 게스트 사용자 닉네임 생성
   const guestNickname = useMemo(() => {
@@ -121,15 +153,23 @@ function App() {
   }, [alertsEnabled]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    const params = new URLSearchParams(window.location.search);
-    const personId = params.get('personId');
-    if (personId) {
-      setPendingPersonId(personId);
-      pendingPersonReasonRef.current = 'deeplink';
-    }
+    if (typeof window === 'undefined') return;
+
+    const syncLocation = () => {
+      const nextView = getViewFromLocation();
+      const params = new URLSearchParams(window.location.search);
+      setActiveView(nextView);
+      setCommunityPersonId(nextView === 'community' ? params.get('personId') : null);
+      const personId = params.get('personId');
+      if (personId && (nextView === 'map' || nextView === 'community')) {
+        setPendingPersonId(personId);
+        pendingPersonReasonRef.current = 'deeplink';
+      }
+    };
+
+    syncLocation();
+    window.addEventListener('popstate', syncLocation);
+    return () => window.removeEventListener('popstate', syncLocation);
   }, []);
 
   useEffect(() => {
@@ -283,7 +323,7 @@ function App() {
     );
 
     if (currentUser) {
-      setShowReportModal(true);
+      navigateTo('report');
     } else {
       setShowLoginModal(true);
     }
@@ -292,7 +332,7 @@ function App() {
       const cleanUrl = window.location.origin + window.location.pathname + window.location.hash;
       window.history.replaceState({}, document.title, cleanUrl);
     }
-  }, [currentUser]);
+  }, [currentUser, navigateTo]);
 
   useEffect(() => {
     if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
@@ -307,6 +347,10 @@ function App() {
 
       if (data.type === 'OPEN_MISSING_PERSON') {
         const payload = data.payload || {};
+        if (payload.intent === 'community-reply') {
+          navigateTo('community', typeof payload.missingPersonId === 'string' ? payload.missingPersonId : undefined);
+          return;
+        }
         const candidateId =
           (typeof payload.missingPersonId === 'string' && payload.missingPersonId.trim().length > 0
             ? payload.missingPersonId
@@ -338,7 +382,7 @@ function App() {
     return () => {
       navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage);
     };
-  }, [setPendingPersonId]);
+  }, [navigateTo]);
 
   const processNewPersonAlerts = useCallback(() => {
     if (!alertsEnabledRef.current) {
@@ -865,7 +909,7 @@ function App() {
           setTimeout(() => {
             const isFirstLogin = sessionStorage.getItem('phone_prompt_shown') !== 'true';
             if (isFirstLogin) {
-              setShowUserProfile(true);
+              navigateTo('profile');
               sessionStorage.setItem('phone_prompt_shown', 'true');
               toast.info('📱 실종자 제보를 위해 전화번호 인증이 필요합니다', { autoClose: 5000 });
             }
@@ -879,7 +923,7 @@ function App() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [navigateTo]);
 
   // Guest ID를 Firebase Analytics에 설정
   useEffect(() => {
@@ -1096,36 +1140,170 @@ function App() {
     // 전화번호 인증 확인
     if (!currentUser.phoneNumber) {
       // UserProfileModal을 띄워서 전화번호 인증 유도
-      setShowUserProfile(true);
+      navigateTo('profile');
       toast.warning('📱 실종자 제보를 위해 먼저 전화번호 인증이 필요합니다', { autoClose: 5000 });
       return;
     }
 
-    setShowReportModal(true);
+    navigateTo('report');
   };
 
   const handleOpenStatistics = () => {
-    setShowStatisticsModal(true);
+    navigateTo('statistics');
   };
 
-  const handlePhoneAuthSuccess = () => {
-    setShowPhoneAuth(false);
-    toast.success('전화번호 인증이 완료되었습니다!');
+  const handleOpenMap = useCallback((personId?: string) => {
+    if (personId) {
+      setSelectedPersonId(personId);
+      setHoveredPersonId(personId);
+    }
+    setShowSidebar(true);
+    navigateTo('map', personId);
+  }, [navigateTo, setHoveredPersonId, setSelectedPersonId]);
 
-    // 사용자 정보 새로고침
-    const auth = require('firebase/auth').getAuth();
-    auth.currentUser?.reload()
-      .then(() => {
-        setCurrentUser(auth.currentUser);
-      })
-      .catch((error: Error) => {
-        logger.error('사용자 정보 새로고침 실패:', error);
-        toast.error('사용자 정보 업데이트에 실패했습니다');
-      });
-  };
+  const handleOpenCommunity = useCallback((personId?: string) => {
+    navigateTo('community', personId);
+  }, [navigateTo]);
+
+  const handleOpenRegion = useCallback((region: string) => {
+    updateFilters({ regions: [region] });
+    setShowSidebar(true);
+    navigateTo('map');
+  }, [navigateTo, updateFilters]);
+
+  const handleSidebarNavigate = useCallback((section: AppSection) => {
+    if (section === 'grid') {
+      setShowGridView(true);
+      return;
+    }
+    navigateTo(section as AppView);
+  }, [navigateTo]);
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-gray-50">
+      {activeView === 'dashboard' ? (
+        <DashboardHome
+          persons={missingPersons}
+          announcements={[...bannerAnnouncements, ...popupAnnouncements]}
+          currentUser={currentUser}
+          isAdmin={isAdmin}
+          statsUpdatedLabel={statsUpdatedLabel}
+          pushStatus={pushStatus}
+          onOpenMap={handleOpenMap}
+          onOpenCommunity={handleOpenCommunity}
+          onOpenRegion={handleOpenRegion}
+          onOpenStatistics={handleOpenStatistics}
+          onOpenGrid={() => setShowGridView(true)}
+          onOpenReport={handleReportClick}
+          onOpenMyReports={() => navigateTo('reports')}
+          onOpenLogin={() => setShowLoginModal(true)}
+          onOpenProfile={() => navigateTo('profile')}
+          onOpenAdmin={() => navigateTo('admin')}
+          onLogout={handleLogout}
+          onEnablePush={handleEnablePush}
+        />
+      ) : activeView === 'community' ? (
+        <CommunityFeed
+          persons={missingPersons}
+          currentUser={currentUser}
+          isAdmin={isAdmin}
+          initialMissingPersonId={communityPersonId}
+          onBack={() => navigateTo('dashboard')}
+          onOpenMap={handleOpenMap}
+          onOpenLogin={() => setShowLoginModal(true)}
+          onOpenProfile={() => navigateTo('profile')}
+          onOpenAdmin={() => navigateTo('admin')}
+          onLogout={handleLogout}
+        />
+      ) : activeView === 'statistics' ? (
+        <PageShell
+          activeSection="statistics"
+          currentUser={!!currentUser}
+          isAdmin={isAdmin}
+          title="지역 통계"
+          description="기간과 지역별 실종자 현황을 지도와 차트로 확인하세요."
+          onNavigate={handleSidebarNavigate}
+          onLogin={() => setShowLoginModal(true)}
+        >
+          <StatisticsModal isOpen onClose={() => navigateTo('dashboard')} isPage />
+        </PageShell>
+      ) : activeView === 'profile' ? (
+        <PageShell
+          activeSection="profile"
+          currentUser={!!currentUser}
+          isAdmin={isAdmin}
+          title="내 정보"
+          description="프로필, 전화번호 인증, 푸시 알림과 계정 설정을 관리하세요."
+          onNavigate={handleSidebarNavigate}
+          onLogin={() => setShowLoginModal(true)}
+        >
+          {currentUser ? (
+            <UserProfileModal isOpen onClose={() => navigateTo('dashboard')} isPage />
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+              <UserCircle className="mx-auto text-slate-300" size={44} />
+              <h2 className="mt-4 text-xl font-black text-slate-950">로그인이 필요합니다</h2>
+              <p className="mt-2 text-sm text-slate-500">내 정보 페이지를 사용하려면 로그인해주세요.</p>
+              <button type="button" onClick={() => setShowLoginModal(true)} className="mt-5 rounded-lg bg-[#10213a] px-4 py-2 text-sm font-bold text-white">로그인</button>
+            </div>
+          )}
+        </PageShell>
+      ) : activeView === 'reports' ? (
+        <PageShell
+          activeSection="reports"
+          currentUser={!!currentUser}
+          isAdmin={isAdmin}
+          title="내 제보"
+          description="내가 등록한 실종자 제보와 처리 상태를 확인하세요."
+          onNavigate={handleSidebarNavigate}
+          onLogin={() => setShowLoginModal(true)}
+        >
+          {currentUser ? (
+            <MyReportsModal isOpen onClose={() => navigateTo('dashboard')} isPage />
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+              <FileText className="mx-auto text-slate-300" size={44} />
+              <h2 className="mt-4 text-xl font-black text-slate-950">로그인이 필요합니다</h2>
+              <p className="mt-2 text-sm text-slate-500">내 제보를 확인하려면 로그인해주세요.</p>
+              <button type="button" onClick={() => setShowLoginModal(true)} className="mt-5 rounded-lg bg-[#10213a] px-4 py-2 text-sm font-bold text-white">로그인</button>
+            </div>
+          )}
+        </PageShell>
+      ) : activeView === 'admin' ? (
+        <PageShell
+          activeSection="admin"
+          currentUser={!!currentUser}
+          isAdmin={isAdmin}
+          title="관리자"
+          description="제보·사용자·공지·댓글 신고를 관리합니다."
+          onNavigate={handleSidebarNavigate}
+          onLogin={() => setShowLoginModal(true)}
+        >
+          {isAdmin ? (
+            <AdminDashboard isOpen onClose={() => navigateTo('dashboard')} isPage />
+          ) : (
+            <div className="rounded-2xl border border-red-100 bg-white p-8 text-center shadow-sm">
+              <Shield className="mx-auto text-red-300" size={44} />
+              <h2 className="mt-4 text-xl font-black text-slate-950">관리자 권한이 필요합니다</h2>
+              <p className="mt-2 text-sm text-slate-500">이 페이지에 접근할 수 있는 권한이 없습니다.</p>
+              <button type="button" onClick={() => navigateTo('dashboard')} className="mt-5 rounded-lg bg-[#10213a] px-4 py-2 text-sm font-bold text-white">현황으로 돌아가기</button>
+            </div>
+          )}
+        </PageShell>
+      ) : activeView === 'report' ? (
+        <PageShell
+          activeSection="reports"
+          currentUser={!!currentUser}
+          isAdmin={isAdmin}
+          title="실종자 제보"
+          description="확인 가능한 정보와 위치를 정확히 남겨주세요."
+          onNavigate={handleSidebarNavigate}
+          onLogin={() => setShowLoginModal(true)}
+        >
+          {currentUser ? <ReportModal isOpen onClose={() => navigateTo('dashboard')} isPage /> : <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm"><h2 className="text-xl font-black text-slate-950">로그인이 필요합니다</h2><button type="button" onClick={() => setShowLoginModal(true)} className="mt-5 rounded-lg bg-[#10213a] px-4 py-2 text-sm font-bold text-white">로그인</button></div>}
+        </PageShell>
+      ) : (
+        <>
       {/* 상단 헤더 */}
       <header className="bg-gradient-to-r from-red-600 to-red-700 text-white shadow-lg z-50">
         {/* 모바일: 두 줄로 분리 */}
@@ -1133,6 +1311,14 @@ function App() {
           {/* 첫 번째 줄: 타이틀과 메뉴 토글 */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-red-500">
             <div className="flex items-center gap-2 flex-1">
+              <button
+                onClick={() => navigateTo('dashboard')}
+                className="p-2 hover:bg-red-700 rounded-lg transition-colors"
+                title="현황 대시보드로 이동"
+                aria-label="현황 대시보드로 이동"
+              >
+                <Home size={19} />
+              </button>
               <button
                 onClick={() => setShowSidebar(!showSidebar)}
                 className="p-2 hover:bg-red-700 rounded-lg transition-colors"
@@ -1256,7 +1442,7 @@ function App() {
 
                   <div className="px-4 py-2 border-t border-gray-200">
                     <span className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                      <NotificationBell />
+                      <NotificationBell onOpenCommunity={handleOpenCommunity} />
                       알림 센터
                     </span>
                   </div>
@@ -1284,7 +1470,7 @@ function App() {
                         </button>
                         <button
                           onClick={() => {
-                            setShowMyReportsModal(true);
+                            navigateTo('reports');
                             setShowMobileMenu(false);
                           }}
                           className="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
@@ -1294,7 +1480,7 @@ function App() {
                         </button>
                         <button
                           onClick={() => {
-                            setShowUserProfile(true);
+                            navigateTo('profile');
                             setShowMobileMenu(false);
                           }}
                           className="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
@@ -1315,7 +1501,7 @@ function App() {
                         {isAdmin && (
                           <button
                             onClick={() => {
-                              setShowAdminDashboard(true);
+                              navigateTo('admin');
                               setShowMobileMenu(false);
                             }}
                             className="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
@@ -1361,6 +1547,14 @@ function App() {
         <div className="hidden md:flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
             <button
+              onClick={() => navigateTo('dashboard')}
+              className="p-2 hover:bg-red-700 rounded-lg transition-colors"
+              title="현황 대시보드로 이동"
+              aria-label="현황 대시보드로 이동"
+            >
+              <Home size={22} />
+            </button>
+            <button
               onClick={() => setShowSidebar(!showSidebar)}
               className="p-2 hover:bg-red-700 rounded-lg transition-colors"
             >
@@ -1381,7 +1575,7 @@ function App() {
             >
               {alertsEnabled ? <Bell size={20} /> : <BellOff size={20} />}
             </button>
-            <NotificationBell />
+            <NotificationBell onOpenCommunity={handleOpenCommunity} />
             <button
               onClick={() => setShowGridView(true)}
               className="flex items-center gap-2 rounded-lg bg-white/10 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-white/20"
@@ -1411,7 +1605,7 @@ function App() {
               <div className="flex items-center gap-2">
                 {isAdmin && (
                   <button
-                    onClick={() => setShowAdminDashboard(true)}
+                    onClick={() => navigateTo('admin')}
                     className="p-2 hover:bg-red-700 rounded-lg transition-colors bg-yellow-500 hover:bg-yellow-600"
                     title="관리자 대시보드"
                   >
@@ -1419,20 +1613,20 @@ function App() {
                   </button>
                 )}
                 <button
-                  onClick={() => setShowMyReportsModal(true)}
+                  onClick={() => navigateTo('reports')}
                   className="p-2 hover:bg-red-700 rounded-lg transition-colors"
                   title="내 제보 기록"
                 >
                   <FileText size={20} />
                 </button>
                 <button
-                  onClick={() => setShowUserProfile(true)}
+                  onClick={() => navigateTo('profile')}
                   className="p-2 hover:bg-red-700 rounded-lg transition-colors"
                   title="내 프로필"
                 >
                   <UserIcon size={20} />
                 </button>
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-red-800 rounded-full cursor-pointer" onClick={() => setShowUserProfile(true)}>
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-red-800 rounded-full cursor-pointer" onClick={() => navigateTo('profile')}>
                   {isAdmin && <Shield size={16} color="#fbbf24" />}
                   <UserCircle size={18} />
                   <span className="text-sm">{currentUser.displayName || currentUser.email}</span>
@@ -1476,7 +1670,7 @@ function App() {
 
         {/* 지도 */}
         <div className="flex-1 relative">
-          <EmergencyMap />
+          <EmergencyMap onOpenCommunity={handleOpenCommunity} />
         </div>
 
         {/* 필터 패널 (오버레이 - 모바일은 전체 화면, 데스크톱은 적당한 크기) */}
@@ -1505,48 +1699,12 @@ function App() {
           <span className="font-semibold">실종자 제보</span>
         </button>
       )}
-
-      {/* 모달들 */}
-      <StatisticsModal
-        isOpen={showStatisticsModal}
-        onClose={() => setShowStatisticsModal(false)}
-      />
-
-      <ReportModal
-        isOpen={showReportModal}
-        onClose={() => setShowReportModal(false)}
-      />
-
-      <MyReportsModal
-        isOpen={showMyReportsModal}
-        onClose={() => setShowMyReportsModal(false)}
-      />
-
-      <AdminDashboard
-        isOpen={showAdminDashboard}
-        onClose={() => setShowAdminDashboard(false)}
-      />
+        </>
+      )}
 
       <LoginModal
         isOpen={showLoginModal}
         onClose={() => setShowLoginModal(false)}
-      />
-
-      <UserProfileModal
-        isOpen={showUserProfile}
-        onClose={() => setShowUserProfile(false)}
-      />
-
-      <VerificationPromptModal
-        isOpen={showVerificationPrompt}
-        onClose={() => setShowVerificationPrompt(false)}
-        onVerify={() => setShowPhoneAuth(true)}
-      />
-
-      <PhoneAuthModal
-        isOpen={showPhoneAuth}
-        onClose={() => setShowPhoneAuth(false)}
-        onSuccess={handlePhoneAuthSuccess}
       />
 
       {/* 토스트 알림 */}
@@ -1563,7 +1721,7 @@ function App() {
       />
 
       {/* 공지사항 배너 (하단) */}
-      {bannerAnnouncements.length > 0 && (
+      {activeView === 'map' && bannerAnnouncements.length > 0 && (
         <div className="fixed bottom-0 left-0 right-0 z-30">
           <AnnouncementBanner
             announcement={bannerAnnouncements[currentAnnouncementIndex]}

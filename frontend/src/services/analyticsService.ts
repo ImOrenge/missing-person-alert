@@ -125,6 +125,31 @@ export function logReportSubmission(reportType: 'api' | 'user_report'): void {
   });
 }
 
+export interface CoupangAdTrackingParams {
+  unitId: string;
+  placement: string;
+  creativeType?: string;
+  productId?: string;
+}
+
+const toCoupangAdParams = ({ unitId, placement, creativeType, productId }: CoupangAdTrackingParams) => ({
+  ad_network: 'coupang_partners',
+  ad_unit_id: unitId,
+  ad_placement: placement,
+  ...(creativeType ? { ad_creative_type: creativeType } : {}),
+  ...(productId ? { product_id: productId } : {})
+});
+
+/** 쿠팡파트너스 광고 단위가 화면에 충분히 노출된 시점을 기록합니다. */
+export function logCoupangAdImpression(params: CoupangAdTrackingParams): void {
+  logCustomEvent('affiliate_ad_impression', toCoupangAdParams(params));
+}
+
+/** 쿠팡파트너스 광고 단위의 outbound 클릭을 기록합니다. */
+export function logCoupangAdClick(params: CoupangAdTrackingParams): void {
+  logCustomEvent('affiliate_ad_click', toCoupangAdParams(params));
+}
+
 /**
  * 로그인 이벤트
  */
