@@ -91,7 +91,7 @@ npx playwright test
 - 백엔드: Render 등 Node.js 호스팅
 - API·스케줄 작업: Firebase Functions
 
-GitHub Actions는 `frontend/`의 의존성을 설치하고 프로덕션 빌드를 만든 뒤 Firebase Hosting에 배포합니다. SAFE182와 Firebase Admin 자격 증명은 저장소 파일이 아니라 배포 플랫폼의 비밀 환경변수로 설정해야 합니다. Firebase Functions의 SAFE182 값은 `firebase functions:secrets:set SAFE182_ESNTL_ID`와 `firebase functions:secrets:set SAFE182_AUTH_KEY`로 등록합니다.
+GitHub Actions는 `frontend/`의 의존성을 설치하고 프로덕션 빌드를 만든 뒤 Firebase Hosting에 배포합니다. 빌드 시 필요한 `REACT_APP_GOOGLE_MAPS_API_KEY`, `REACT_APP_MAP_ID`, `REACT_APP_RECAPTCHA_SITE_KEY` 등은 GitHub 저장소 `Settings → Secrets and variables → Actions`에 같은 이름의 Repository secret으로 등록해야 합니다. SAFE182와 Firebase Admin 자격 증명은 저장소 파일이 아니라 배포 플랫폼의 비밀 환경변수로 설정해야 합니다. Firebase Functions의 SAFE182 값은 `firebase functions:secrets:set SAFE182_ESNTL_ID`와 `firebase functions:secrets:set SAFE182_AUTH_KEY`로 등록합니다.
 
 자세한 설정은 `DEPLOYMENT_GUIDE.md`, `DEPLOYMENT_CHECKLIST.md`, `FIREBASE_ADMIN_SETUP.md`를 참고하세요.
 

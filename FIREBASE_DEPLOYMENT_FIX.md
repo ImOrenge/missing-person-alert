@@ -72,7 +72,7 @@ cd frontend
 REACT_APP_API_URL=https://missing-person-backend.herokuapp.com
 
 # Google Maps
-REACT_APP_GOOGLE_MAPS_API_KEY=AIzaSyDH8db3PpyrrArqVdfHPMxCkagLH4U9raI
+REACT_APP_GOOGLE_MAPS_API_KEY=your_google_maps_api_key
 REACT_APP_MAP_ID=b4a95831991f48f9423b0d8e
 
 # Firebase
