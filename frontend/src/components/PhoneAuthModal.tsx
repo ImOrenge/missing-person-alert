@@ -4,7 +4,6 @@ import {
   initRecaptcha,
   sendPhoneVerificationCode,
   linkPhoneNumber,
-  verifyPhoneCode,
   clearRecaptcha,
   type ConfirmationResult
 } from '../services/firebase';
@@ -20,11 +19,18 @@ import { toast } from 'react-toastify';
 interface PhoneAuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: () => void;
-  mode?: 'signup' | 'link'; // signup: 회원가입 시 전화번호 인증만, link: 기존 계정에 연결
+  onSuccess: () => void | Promise<void>;
+  mode?: 'signup' | 'link'; // signup: 가입 흐름(새로고침 없음), link: 기존 계정 연결
+  initialPhoneNumber?: string;
 }
 
-export const PhoneAuthModal: React.FC<PhoneAuthModalProps> = ({ isOpen, onClose, onSuccess, mode = 'link' }) => {
+export const PhoneAuthModal: React.FC<PhoneAuthModalProps> = ({
+  isOpen,
+  onClose,
+  onSuccess,
+  mode = 'link',
+  initialPhoneNumber = ''
+}) => {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
@@ -34,6 +40,7 @@ export const PhoneAuthModal: React.FC<PhoneAuthModalProps> = ({ isOpen, onClose,
 
   useEffect(() => {
     if (isOpen) {
+      setPhoneNumber(initialPhoneNumber);
       // reCAPTCHA 초기화 - 더 긴 지연시간으로 DOM 준비 보장
       const timer = setTimeout(() => {
         try {
@@ -60,7 +67,7 @@ export const PhoneAuthModal: React.FC<PhoneAuthModalProps> = ({ isOpen, onClose,
       // 모달이 닫힐 때 정리
       clearRecaptcha();
     }
-  }, [isOpen]);
+  }, [isOpen, initialPhoneNumber]);
 
   // 카운트다운 타이머
   useEffect(() => {
@@ -140,23 +147,17 @@ export const PhoneAuthModal: React.FC<PhoneAuthModalProps> = ({ isOpen, onClose,
 
     setLoading(true);
     try {
-      let result;
-
-      if (mode === 'signup') {
-        // 회원가입 모드: 전화번호 인증만 확인 (계정 연결 안 함)
-        result = await verifyPhoneCode(confirmationResult, verificationCode);
-      } else {
-        // 계정 연결 모드: 기존 계정에 전화번호 연결
-        result = await linkPhoneNumber(confirmationResult, verificationCode);
-      }
+      // 가입 흐름에서도 이메일 계정을 먼저 만든 뒤 동일 계정에 전화번호를 연결한다.
+      // 전화번호 인증으로 별도 Firebase 사용자가 생성되는 것을 방지한다.
+      const result = await linkPhoneNumber(confirmationResult, verificationCode);
 
       if (result.success) {
         // 인증 성공 시 시도 기록 초기화
         clearAuthAttempts(phoneNumber);
 
         toast.success(result.message);
+        await onSuccess();
         handleClose();
-        onSuccess();
 
         // 계정 연결 모드일 때만 페이지 새로고침
         if (mode === 'link') {

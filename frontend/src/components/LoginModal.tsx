@@ -4,6 +4,7 @@ import {
   loginWithEmail,
   loginWithGoogle,
   registerWithEmail,
+  deleteCurrentAccount,
   initRecaptcha,
   resolveMFAWithPhone,
   completeMFASignIn,
@@ -79,11 +80,11 @@ export default function LoginModal({ isOpen, onClose }: Props) {
   const [showPhoneAuth, setShowPhoneAuth] = useState(false);
   const [pendingRegistration, setPendingRegistration] = useState<{
     email: string;
-    password: string;
     name: string;
     nickname: string;
     address: string;
     phoneNumber: string;
+    userId: string;
     agreements: {
       privacy: boolean;
       pushNotification: boolean;
@@ -147,14 +148,21 @@ export default function LoginModal({ isOpen, onClose }: Props) {
           return;
         }
 
-        // 전화번호 인증 먼저 진행
+        // Firebase 전화번호 연결은 인증된 사용자가 필요하므로 이메일 계정을 먼저 만든다.
+        const registrationResult = await registerWithEmail(email, password);
+        if (!registrationResult.success || !registrationResult.user) {
+          toast.error(registrationResult.error || '회원가입에 실패했습니다');
+          setLoading(false);
+          return;
+        }
+
         setPendingRegistration({
           email,
-          password,
           name,
           nickname,
           address,
           phoneNumber,
+          userId: registrationResult.user.uid,
           agreements: {
             privacy: true,
             pushNotification: agreePushUsage
@@ -227,21 +235,23 @@ export default function LoginModal({ isOpen, onClose }: Props) {
 
     setLoading(true);
     try {
-      const result = await registerWithEmail(
-        pendingRegistration.email,
-        pendingRegistration.password
-      );
+      const { auth, firestore, doc, setDoc, Timestamp } = await import('../services/firebase');
+      const currentUser = auth.currentUser;
+      if (!currentUser || currentUser.uid !== pendingRegistration.userId) {
+        throw new Error('회원가입 인증 세션이 일치하지 않습니다. 다시 시도해주세요');
+      }
 
-      if (result.success && result.user) {
+      if (currentUser.phoneNumber) {
         // Firestore에 사용자 정보 저장
-        const { firestore, doc, setDoc, Timestamp } = await import('../services/firebase');
-        const userRef = doc(firestore, 'users', result.user.uid);
+        const userRef = doc(firestore, 'users', currentUser.uid);
 
         await setDoc(userRef, {
           name: pendingRegistration.name,
           nickname: pendingRegistration.nickname,
           address: pendingRegistration.address || '',
-          phoneNumber: pendingRegistration.phoneNumber || '',
+          phoneNumber: currentUser.phoneNumber,
+          phoneVerified: true,
+          phoneVerifiedAt: Timestamp.now(),
           email: pendingRegistration.email,
           agreements: {
             privacy: {
@@ -271,7 +281,7 @@ export default function LoginModal({ isOpen, onClose }: Props) {
         setAgreePushUsage(false);
         onClose();
       } else {
-        toast.error(result.error || '회원가입에 실패했습니다');
+        throw new Error('인증된 전화번호를 확인할 수 없습니다');
       }
     } catch (error: any) {
       console.error('회원가입 오류:', error);
@@ -671,12 +681,26 @@ export default function LoginModal({ isOpen, onClose }: Props) {
     {/* 전화번호 인증 모달 */}
     <PhoneAuthModal
       isOpen={showPhoneAuth}
-      onClose={() => {
+      onClose={async () => {
         setShowPhoneAuth(false);
+
+        // 인증 전에 취소한 경우 방금 생성한 미완료 이메일 계정을 남기지 않는다.
+        const { auth } = await import('../services/firebase');
+        if (
+          pendingRegistration &&
+          auth.currentUser?.uid === pendingRegistration.userId &&
+          !auth.currentUser.phoneNumber
+        ) {
+          const cleanupResult = await deleteCurrentAccount();
+          if (!cleanupResult.success) {
+            console.error('미완료 회원가입 계정 정리 실패:', cleanupResult.message);
+          }
+        }
         setPendingRegistration(null);
       }}
       onSuccess={handlePhoneAuthSuccess}
       mode="signup"
+      initialPhoneNumber={pendingRegistration?.phoneNumber}
     />
 
     {showPrivacyPolicy && (
