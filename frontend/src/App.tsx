@@ -16,7 +16,6 @@ import { useEmergencyStore } from './stores/emergencyStore';
 import { ToastContainer, toast } from 'react-toastify';
 import { onAuthChange, logout as firebaseLogout } from './services/firebase';
 import { hasAdminAccess } from './utils/adminUtils';
-import { loadRecaptchaScript } from './utils/recaptcha';
 import { getBannerAnnouncements, getPopupAnnouncements } from './services/announcementService';
 import type { User } from 'firebase/auth';
 import type { Announcement } from './types/announcement';
@@ -869,20 +868,6 @@ function App() {
       mounted = false;
       window.clearInterval(interval);
     };
-  }, []);
-
-  // reCAPTCHA 전역 초기화
-  useEffect(() => {
-    const initRecaptcha = async () => {
-      try {
-        await loadRecaptchaScript();
-        logger.log('✅ reCAPTCHA 전역 초기화 완료');
-      } catch (error) {
-        logger.warn('⚠️ reCAPTCHA 초기화 실패 (제보 시 다시 시도됩니다):', error);
-      }
-    };
-
-    initRecaptcha();
   }, []);
 
   // Firebase 인증 상태 감지

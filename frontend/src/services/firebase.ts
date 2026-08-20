@@ -231,9 +231,14 @@ export const initRecaptcha = (containerId: string) => {
 /**
  * 전화번호로 SMS 인증 코드 전송
  */
-export const sendPhoneVerificationCode = async (phoneNumber: string) => {
+export const sendPhoneVerificationCode = async (
+  phoneNumber: string,
+  verifier?: RecaptchaVerifier
+) => {
+  const activeVerifier = verifier ?? recaptchaVerifier;
+
   try {
-    if (!recaptchaVerifier) {
+    if (!activeVerifier) {
       throw new Error('reCAPTCHA가 초기화되지 않았습니다');
     }
 
@@ -245,7 +250,7 @@ export const sendPhoneVerificationCode = async (phoneNumber: string) => {
     // 국제 전화번호 형식 확인 (예: +82 10-1234-5678)
     const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+82${phoneNumber.replace(/^0/, '')}`;
 
-    const confirmationResult = await linkWithPhoneNumber(currentUser, formattedPhone, recaptchaVerifier);
+    const confirmationResult = await linkWithPhoneNumber(currentUser, formattedPhone, activeVerifier);
 
     return {
       success: true,
@@ -256,9 +261,16 @@ export const sendPhoneVerificationCode = async (phoneNumber: string) => {
     console.error('SMS 전송 실패:', error);
 
     // reCAPTCHA 재설정
-    if (recaptchaVerifier) {
-      recaptchaVerifier.clear();
-      recaptchaVerifier = null;
+    if (activeVerifier) {
+      try {
+        activeVerifier.clear();
+      } catch (clearError) {
+        console.warn('실패한 reCAPTCHA 정리 중 오류:', clearError);
+      } finally {
+        if (recaptchaVerifier === activeVerifier) {
+          recaptchaVerifier = null;
+        }
+      }
     }
 
     return {
@@ -357,10 +369,18 @@ export const linkPhoneNumber = async (confirmationResult: ConfirmationResult, co
 /**
  * reCAPTCHA 정리
  */
-export const clearRecaptcha = () => {
-  if (recaptchaVerifier) {
-    recaptchaVerifier.clear();
-    recaptchaVerifier = null;
+export const clearRecaptcha = (verifier?: RecaptchaVerifier) => {
+  const verifierToClear = verifier ?? recaptchaVerifier;
+  if (!verifierToClear) return;
+
+  try {
+    verifierToClear.clear();
+  } catch (clearError) {
+    console.warn('reCAPTCHA 정리 중 오류:', clearError);
+  } finally {
+    if (recaptchaVerifier === verifierToClear) {
+      recaptchaVerifier = null;
+    }
   }
 };
 

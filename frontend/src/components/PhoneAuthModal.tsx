@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Phone, Lock } from 'lucide-react';
 import {
   initRecaptcha,
   sendPhoneVerificationCode,
   linkPhoneNumber,
   clearRecaptcha,
+  type RecaptchaVerifier,
   type ConfirmationResult
 } from '../services/firebase';
 import {
@@ -37,6 +38,7 @@ export const PhoneAuthModal: React.FC<PhoneAuthModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<'phone' | 'code'>('phone');
   const [countdown, setCountdown] = useState(0);
+  const verifierRef = useRef<RecaptchaVerifier | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -46,6 +48,7 @@ export const PhoneAuthModal: React.FC<PhoneAuthModalProps> = ({
         try {
           console.log('🔄 reCAPTCHA 초기화 시도...');
           const verifier = initRecaptcha('recaptcha-container');
+          verifierRef.current = verifier;
 
           // reCAPTCHA 렌더링
           verifier.render().then((widgetId: any) => {
@@ -62,10 +65,11 @@ export const PhoneAuthModal: React.FC<PhoneAuthModalProps> = ({
 
       return () => {
         clearTimeout(timer);
+        if (verifierRef.current) {
+          clearRecaptcha(verifierRef.current);
+          verifierRef.current = null;
+        }
       };
-    } else {
-      // 모달이 닫힐 때 정리
-      clearRecaptcha();
     }
   }, [isOpen, initialPhoneNumber]);
 
@@ -108,7 +112,10 @@ export const PhoneAuthModal: React.FC<PhoneAuthModalProps> = ({
       // 시도 기록
       recordAuthAttempt(phoneNumber);
 
-      const result = await sendPhoneVerificationCode(phoneNumber);
+      const result = await sendPhoneVerificationCode(
+        phoneNumber,
+        verifierRef.current ?? undefined
+      );
 
       if (result.success && result.confirmationResult) {
         setConfirmationResult(result.confirmationResult);
@@ -116,11 +123,14 @@ export const PhoneAuthModal: React.FC<PhoneAuthModalProps> = ({
         setCountdown(180); // 3분 카운트다운
         toast.success(result.message);
       } else {
+        verifierRef.current = null;
         toast.error(result.message || 'SMS 전송에 실패했습니다');
         // reCAPTCHA 재초기화
-        setTimeout(() => {
+        setTimeout(async () => {
           try {
-            initRecaptcha('recaptcha-container');
+            const verifier = initRecaptcha('recaptcha-container');
+            verifierRef.current = verifier;
+            await verifier.render();
           } catch (error) {
             console.error('reCAPTCHA 재초기화 실패:', error);
           }
@@ -190,7 +200,10 @@ export const PhoneAuthModal: React.FC<PhoneAuthModalProps> = ({
     setConfirmationResult(null);
     setStep('phone');
     setCountdown(0);
-    clearRecaptcha();
+    if (verifierRef.current) {
+      clearRecaptcha(verifierRef.current);
+      verifierRef.current = null;
+    }
     onClose();
   };
 
