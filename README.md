@@ -91,7 +91,18 @@ npx playwright test
 - 백엔드: Render 등 Node.js 호스팅
 - API·스케줄 작업: Firebase Functions
 
-GitHub Actions는 `frontend/`의 의존성을 설치하고 프로덕션 빌드를 만든 뒤 Firebase Hosting에 배포합니다. 빌드 시 필요한 `REACT_APP_GOOGLE_MAPS_API_KEY`, `REACT_APP_MAP_ID`, `REACT_APP_RECAPTCHA_SITE_KEY` 등은 GitHub 저장소 `Settings → Secrets and variables → Actions`에 같은 이름의 Repository secret으로 등록해야 합니다. SAFE182와 Firebase Admin 자격 증명은 저장소 파일이 아니라 배포 플랫폼의 비밀 환경변수로 설정해야 합니다. Firebase Functions의 SAFE182 값은 `firebase functions:secrets:set SAFE182_ESNTL_ID`와 `firebase functions:secrets:set SAFE182_AUTH_KEY`로 등록합니다.
+GitHub Actions는 `frontend/`의 의존성을 설치하고 프로덕션 빌드를 만든 뒤 Firebase Hosting에 배포합니다. 빌드 시 필요한 `REACT_APP_GOOGLE_MAPS_API_KEY`, `REACT_APP_MAP_ID`, `REACT_APP_RECAPTCHA_SITE_KEY` 등은 GitHub 저장소 `Settings → Secrets and variables → Actions`에 같은 이름의 Repository secret으로 등록해야 합니다. SAFE182, NAVER API HUB, Firebase Admin 자격 증명은 저장소 파일이 아니라 배포 플랫폼의 비밀 환경변수로 설정해야 합니다.
+
+```bash
+firebase functions:secrets:set SAFE182_ESNTL_ID
+firebase functions:secrets:set SAFE182_AUTH_KEY
+firebase functions:secrets:set NAVER_API_HUB_CLIENT_ID
+firebase functions:secrets:set NAVER_API_HUB_CLIENT_SECRET
+```
+
+NAVER 뉴스는 Functions v2 `syncNaverNewsJob`이 30분마다 `실종`을 날짜순으로 검색하며, Firestore `newsArticles`에 20일간 임시 보관합니다. `cleanupExpiredNaverNewsJob`은 만료 문서를 매일 삭제합니다. 검색 결과는 `/api/news`, 대시보드 최대 5건, `/news` 목록에서만 표시하며 AI 추출·자동 사건 매칭에 사용하지 않습니다.
+
+실종자 카드의 `NAVER 뉴스 검색`은 `/api/missing-persons/:caseId/news-search`를 호출합니다. 서버가 공식 공개 데이터의 이름·광역/기초 지역·인상착의를 정규화한 뒤 `이름 + 실종`, `이름 + 지역 + 실종`, `이름 + 인상착의 + 실종` 질의를 만들고, 중복 제거한 원본 검색결과를 `/news?caseId=...`에서 표시합니다. 기사-사건 관계·점수·검증 결과는 저장하지 않습니다. 비공개·마스킹 이름은 검색하지 않으며 계획된 NAVER 요청 수를 반영한 전체/사건별 일일 호출 한도를 적용합니다.
 
 자세한 설정은 `DEPLOYMENT_GUIDE.md`, `DEPLOYMENT_CHECKLIST.md`, `FIREBASE_ADMIN_SETUP.md`를 참고하세요.
 

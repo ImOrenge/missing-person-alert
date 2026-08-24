@@ -2,51 +2,64 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { User } from 'firebase/auth';
 import {
   ArrowRight,
-  BarChart3,
   Bell,
-  CheckCircle2,
   ChevronRight,
-  FileText,
-  Grid3X3,
+  Clock3,
+  ClipboardCheck,
   Home,
   Info,
-  LogIn,
-  LogOut,
+  LocateFixed,
   Map as MapIcon,
   MapPin,
   MessageCircle,
-  Menu,
+  PhoneCall,
   Plus,
   Search,
-  Shield,
+  ShieldCheck,
   Siren,
   UserCircle,
-  Users,
-  X,
 } from 'lucide-react';
 import type { Announcement } from '../types/announcement';
 import type { MissingPerson, MissingPersonType } from '../types';
+import type { NaverNewsItem } from '../types/news';
 import DashboardMiniMap from './DashboardMiniMap';
+import NewsSummarySection from './news/NewsSummarySection';
+import { useDashboardPreferences } from '../features/dashboard/use-dashboard-preferences';
+import DashboardSectionSurface from '../features/dashboard/DashboardSectionSurface';
+import { fetchPublicMapReports } from '../services/exploreService';
+import { listOwnReportsV2 } from '../services/reportingService';
+import type { PublicMapReportDto } from '../types/publicReport';
+import type { OwnReportListItemDto } from '../types/reporting';
 
 interface DashboardHomeProps {
   persons: MissingPerson[];
+  hasLoadedPersons: boolean;
   announcements: Announcement[];
   currentUser: User | null;
-  isAdmin: boolean;
   statsUpdatedLabel?: string;
   pushStatus: string;
+  newsItems: NaverNewsItem[];
+  newsLoading: boolean;
+  newsError: string | null;
+  reportMapLayerEnabled: boolean;
+  onOpenSearch: (query?: string) => void;
   onOpenMap: (personId?: string) => void;
   onOpenCommunity: (personId?: string) => void;
+  onOpenNews: (articleId?: string) => void;
+  onOpenCaseNews: (personId: string) => void;
+  onRetryNews: () => void;
   onOpenRegion: (region: string) => void;
   onOpenStatistics: () => void;
   onOpenGrid: () => void;
   onOpenReport: () => void;
+  onOpenAlerts: () => void;
   onOpenMyReports: () => void;
+  onOpenPublicReports: () => void;
   onOpenLogin: () => void;
   onOpenProfile: () => void;
-  onOpenAdmin: () => void;
-  onLogout: () => void | Promise<void>;
   onEnablePush: () => void | Promise<void>;
+  hideLegacyMobileNav?: boolean;
+  personalizationEnabled?: boolean;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -93,52 +106,6 @@ const elapsed = (value: string): string => {
 
 const genderLabel = (gender: string): string => gender === 'M' ? '남성' : gender === 'F' ? '여성' : '성별 미상';
 
-type BannerAction = 'map' | 'search' | 'statistics' | 'report';
-
-interface BannerSlide {
-  image: string;
-  eyebrow: string;
-  title: string;
-  description: string;
-  action: BannerAction;
-  actionLabel: string;
-}
-
-const BANNER_SLIDES: BannerSlide[] = [
-  {
-    image: '/banner/dashboard-01-overview.png',
-    eyebrow: '실종자 안전정보',
-    title: '실종자 현황을\n한눈에 확인하세요',
-    description: '최근 등록된 정보를 지도와 목록으로 빠르게 확인할 수 있습니다.',
-    action: 'map',
-    actionLabel: '지도에서 확인하기',
-  },
-  {
-    image: '/banner/dashboard-02-recent-alert.png',
-    eyebrow: '최근 등록 정보',
-    title: '최근 등록된 실종자부터\n확인해 주세요',
-    description: '24시간 내 등록된 정보와 주변의 인상착의를 살펴보세요.',
-    action: 'search',
-    actionLabel: '최근 정보 검색하기',
-  },
-  {
-    image: '/banner/dashboard-03-regional-map.png',
-    eyebrow: '지역별 현황',
-    title: '내 주변의 실종 정보를\n확인하세요',
-    description: '지역별 현황을 확인하고 지도에서 위치를 살펴볼 수 있습니다.',
-    action: 'statistics',
-    actionLabel: '지역 통계 보기',
-  },
-  {
-    image: '/banner/dashboard-04-report-guide.png',
-    eyebrow: '시민 제보 안내',
-    title: '작은 제보가 가족을 만나는\n단서가 됩니다',
-    description: '확실하지 않아도 괜찮습니다. 시간과 장소를 알려주세요.',
-    action: 'report',
-    actionLabel: '온라인 제보하기',
-  },
-];
-
 function PersonPhoto({ person, compact = false }: { person: MissingPerson; compact?: boolean }) {
   const [failed, setFailed] = useState(false);
   const source = person.photos?.[0] || person.photo;
@@ -153,16 +120,21 @@ function PersonPhoto({ person, compact = false }: { person: MissingPerson; compa
 }
 
 export default function DashboardHome({
-  persons, announcements, currentUser, isAdmin, statsUpdatedLabel, pushStatus,
-  onOpenMap, onOpenCommunity, onOpenRegion, onOpenStatistics, onOpenGrid, onOpenReport,
-  onOpenMyReports, onOpenLogin, onOpenProfile, onOpenAdmin, onLogout, onEnablePush,
+  persons, hasLoadedPersons, currentUser,
+  newsItems, newsLoading, newsError, reportMapLayerEnabled, onOpenSearch, onOpenMap, onOpenCommunity, onOpenNews, onOpenCaseNews, onRetryNews,
+  onOpenRegion, onOpenStatistics, onOpenGrid, onOpenReport,
+  onOpenAlerts,
+  onOpenMyReports, onOpenPublicReports, onOpenLogin, onOpenProfile,
+  hideLegacyMobileNav = false,
+  personalizationEnabled = false,
 }: DashboardHomeProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRegion, setSelectedRegion] = useState('전체');
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [bannerIndex, setBannerIndex] = useState(0);
-  const [bannerPaused, setBannerPaused] = useState(false);
   const [selectedMapPersonId, setSelectedMapPersonId] = useState<string | null>(null);
+  const [publicReports, setPublicReports] = useState<PublicMapReportDto[]>([]);
+  const [publicReportsLoading, setPublicReportsLoading] = useState(true);
+  const [ownReports, setOwnReports] = useState<OwnReportListItemDto[]>([]);
+  const [ownReportsLoading, setOwnReportsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const now = Date.now();
@@ -172,8 +144,6 @@ export default function DashboardHome({
     const recent = activePersons.filter((person) => getTimestamp(person) >= now - 7 * DAY_MS);
     return (recent.length > 0 ? recent : activePersons).sort((a, b) => getTimestamp(b) - getTimestamp(a));
   }, [activePersons, now]);
-  const urgentCount = useMemo(() => activePersons.filter((person) => getTimestamp(person) >= now - DAY_MS).length, [activePersons, now]);
-  const foundCount = useMemo(() => persons.filter((person) => person.status === 'found').length, [persons]);
   const regionStats = useMemo(() => {
     const counts = new Map<string, number>();
     activePersons.forEach((person) => {
@@ -191,22 +161,43 @@ export default function DashboardHome({
       return matchesRegion && matchesQuery;
     }).slice(0, 8);
   }, [recentPersons, searchQuery, selectedRegion]);
-  const visibleAnnouncements = useMemo(() => {
-    const unique = new Map<string, Announcement>();
-    announcements.forEach((announcement) => unique.set(announcement.id, announcement));
-    return Array.from(unique.values()).filter((item) => item.active).sort((a, b) => a.priority - b.priority).slice(0, 3);
-  }, [announcements]);
   const miniMapPersons = useMemo(() => recentPersons.slice(0, 80), [recentPersons]);
   const maxRegionCount = Math.max(1, ...regionStats.slice(0, 6).map((item) => item.count));
-  const pushEnabled = pushStatus === 'enabled';
+  const { preferences, moduleOrder } = useDashboardPreferences(currentUser, personalizationEnabled);
+  const moduleStyle = (id: 'news' | 'region-summary') => personalizationEnabled ? {
+    order: 50 + (moduleOrder.get(id) ?? 0),
+    display: preferences.hidden.includes(id) ? 'none' : undefined,
+  } : undefined;
 
   useEffect(() => {
-    if (bannerPaused) return undefined;
-    const timer = window.setInterval(() => {
-      setBannerIndex((current) => (current + 1) % BANNER_SLIDES.length);
-    }, 9000);
-    return () => window.clearInterval(timer);
-  }, [bannerPaused]);
+    if (!reportMapLayerEnabled) {
+      setPublicReports([]);
+      setPublicReportsLoading(false);
+      return undefined;
+    }
+    const controller = new AbortController();
+    setPublicReportsLoading(true);
+    fetchPublicMapReports(controller.signal)
+      .then((items) => setPublicReports(items.slice(0, 3)))
+      .catch(() => !controller.signal.aborted && setPublicReports([]))
+      .finally(() => !controller.signal.aborted && setPublicReportsLoading(false));
+    return () => controller.abort();
+  }, [reportMapLayerEnabled]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setOwnReports([]);
+      setOwnReportsLoading(false);
+      return undefined;
+    }
+    const controller = new AbortController();
+    setOwnReportsLoading(true);
+    listOwnReportsV2(controller.signal)
+      .then((items) => setOwnReports(items.slice(0, 3)))
+      .catch(() => !controller.signal.aborted && setOwnReports([]))
+      .finally(() => !controller.signal.aborted && setOwnReportsLoading(false));
+    return () => controller.abort();
+  }, [currentUser]);
 
   const goTop = () => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
   const focusSearch = () => {
@@ -214,170 +205,58 @@ export default function DashboardHome({
     searchRef.current?.focus();
   };
 
-  const handleBannerAction = (action: BannerAction) => {
-    if (action === 'map') onOpenMap();
-    if (action === 'search') focusSearch();
-    if (action === 'statistics') onOpenStatistics();
-    if (action === 'report') onOpenReport();
-  };
-
   const selectMiniMapPerson = (personId: string) => {
     setSelectedMapPersonId(personId);
     document.getElementById('dashboard-mini-map')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
-  const activeBanner = BANNER_SLIDES[bannerIndex];
+  const selectedMapPerson = visiblePersons.find((person) => person.id === selectedMapPersonId)
+    || recentPersons.find((person) => person.id === selectedMapPersonId)
+    || recentPersons[0];
+
+  const submitSearch = () => onOpenSearch(searchQuery.trim() || undefined);
 
   return (
-    <div ref={scrollRef} className="h-full overflow-y-auto bg-[#f8fafc] text-slate-900">
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-          <button onClick={goTop} className="flex items-center gap-3 text-left" aria-label="현황 대시보드 맨 위로 이동">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#1e3a5f] text-white"><Siren size={20} /></span>
-            <span><strong className="block text-sm font-extrabold tracking-tight text-slate-950 sm:text-base">실종자 안전정보</strong><span className="hidden text-[11px] text-slate-500 sm:block">공공 안전 현황판</span></span>
-          </button>
-          <nav className="hidden items-center gap-1 md:flex" aria-label="주요 메뉴">
-            <button className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-bold text-[#1e3a5f]">현황</button>
-            <button onClick={() => onOpenMap()} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">실종자 지도</button>
-            <button onClick={() => onOpenCommunity()} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">소통</button>
-            <button onClick={onOpenStatistics} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">지역 통계</button>
-            <button onClick={onOpenReport} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">제보하기</button>
-          </nav>
-          <div className="hidden items-center gap-2 md:flex">
-            {currentUser ? <>
-              <button onClick={onOpenMyReports} className="rounded-lg px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">내 제보</button>
-              {isAdmin && <button onClick={onOpenAdmin} className="rounded-lg p-2 text-amber-600 hover:bg-amber-50" aria-label="관리자 대시보드"><Shield size={19} /></button>}
-              <button onClick={onOpenProfile} className="flex max-w-48 items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold text-slate-700 hover:border-slate-300"><UserCircle size={18} /><span className="truncate">{currentUser.displayName || currentUser.email}</span></button>
-              <button onClick={onLogout} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="로그아웃"><LogOut size={18} /></button>
-            </> : <button onClick={onOpenLogin} className="flex items-center gap-2 rounded-lg bg-[#1e3a5f] px-4 py-2.5 text-sm font-bold text-white hover:bg-[#162f4e]"><LogIn size={17} /> 로그인</button>}
-          </div>
-          <button onClick={() => setMobileMenuOpen((open) => !open)} className="rounded-lg p-2 text-slate-700 hover:bg-slate-100 md:hidden" aria-label="메뉴 열기" aria-expanded={mobileMenuOpen}>{mobileMenuOpen ? <X size={21} /> : <Menu size={21} />}</button>
-        </div>
-        {mobileMenuOpen && <div className="border-t border-slate-200 bg-white px-4 py-4 shadow-lg md:hidden"><div className="grid grid-cols-2 gap-2">
-          <button onClick={() => { onOpenMap(); setMobileMenuOpen(false); }} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-3 text-sm font-bold"><MapIcon size={17} /> 실종자 지도</button>
-          <button onClick={() => { onOpenCommunity(); setMobileMenuOpen(false); }} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-3 text-sm font-bold"><MessageCircle size={17} /> 소통</button>
-          <button onClick={() => { onOpenStatistics(); setMobileMenuOpen(false); }} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-3 text-sm font-bold"><BarChart3 size={17} /> 지역 통계</button>
-          <button onClick={() => { onOpenReport(); setMobileMenuOpen(false); }} className="flex items-center gap-2 rounded-lg bg-red-50 px-3 py-3 text-sm font-bold text-red-700"><Plus size={17} /> 제보하기</button>
-          {currentUser ? <button onClick={() => { onOpenMyReports(); setMobileMenuOpen(false); }} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-3 text-sm font-bold"><FileText size={17} /> 내 제보</button> : <button onClick={() => { onOpenLogin(); setMobileMenuOpen(false); }} className="flex items-center gap-2 rounded-lg bg-[#1e3a5f] px-3 py-3 text-sm font-bold text-white"><LogIn size={17} /> 로그인</button>}
-        </div></div>}
-      </header>
+    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto bg-[#f8fafc] text-slate-900">
 
-      <main className="mx-auto max-w-7xl px-4 pb-24 sm:px-6 lg:px-8 lg:pb-12">
-        <section className="border-b border-slate-200 py-6 sm:py-8">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div><p className="text-xs font-extrabold tracking-[0.16em] text-[#1e3a5f]">LIVE STATUS BOARD</p><h1 className="mt-2 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">실종자 현황</h1><p className="mt-2 text-sm text-slate-500">최근 등록된 실종자와 지역별 수색 현황을 확인하세요.</p></div>
-            <div className="flex items-center gap-2 text-xs text-slate-500"><span className="h-2 w-2 rounded-full bg-emerald-500" /> 실시간 연결됨 <span className="text-slate-300">·</span> 마지막 갱신 {statsUpdatedLabel || '확인 중'}</div>
+      <main className={`mx-auto flex max-w-7xl flex-col px-4 pb-24 sm:px-6 lg:px-8 lg:pb-12 ${personalizationEnabled && preferences.density === 'compact' ? 'text-[0.96rem]' : ''}`}>
+        <section id="dashboard-search" className="mt-6 overflow-hidden rounded-2xl bg-[#10213a] px-5 py-7 text-white shadow-lg shadow-slate-900/10 sm:px-8 sm:py-9" aria-labelledby="dashboard-search-title" data-dashboard-module="search">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-xl"><p className="text-[11px] font-black tracking-[0.18em] text-cyan-200">MISSING PERSON SEARCH</p><h1 id="dashboard-search-title" className="mt-2 text-2xl font-black sm:text-3xl">실종자·지역·인상착의 통합 검색</h1><p className="mt-2 text-sm leading-6 text-slate-300">공식 사건, 운영 검토를 마친 공개 제보와 관련 뉴스를 한 번에 찾습니다.</p></div>
+            <div className="w-full lg:max-w-2xl"><div className="flex gap-2"><label className="relative min-w-0 flex-1"><Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={19} /><input ref={searchRef} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && submitSearch()} placeholder="이름·지역·인상착의를 입력하세요" className="h-12 w-full rounded-xl border border-white/20 bg-white pl-11 pr-4 text-sm text-slate-950 outline-none focus:ring-2 focus:ring-cyan-300" /></label><button type="button" onClick={submitSearch} className="h-12 flex-none rounded-xl bg-[#e34b43] px-5 text-sm font-black text-white hover:bg-[#cf4039]">검색</button></div><div className="mt-3 flex gap-2 overflow-x-auto text-xs font-bold"><button type="button" onClick={() => setSelectedRegion('전체')} className={`whitespace-nowrap rounded-full px-3 py-2 ${selectedRegion === '전체' ? 'bg-white text-[#10213a]' : 'bg-white/10 text-white'}`}>전국</button>{regionStats.slice(0, 3).map((item) => <button key={item.region} type="button" onClick={() => setSelectedRegion(item.region)} className={`whitespace-nowrap rounded-full px-3 py-2 ${selectedRegion === item.region ? 'bg-white text-[#10213a]' : 'bg-white/10 text-white'}`}>{item.region}</button>)}<button type="button" onClick={() => onOpenMap()} className="flex whitespace-nowrap rounded-full bg-white/10 px-3 py-2 text-white"><LocateFixed className="mr-1" size={14} />내 주변 보기</button><button type="button" onClick={() => document.getElementById('dashboard-urgent')?.scrollIntoView({ behavior: 'smooth' })} className="flex whitespace-nowrap rounded-full bg-white/10 px-3 py-2 text-white"><Clock3 className="mr-1" size={14} />최근 24시간</button></div></div>
           </div>
         </section>
 
-        <section className="grid grid-cols-2 border-x border-b border-slate-200 bg-white sm:grid-cols-4">
-          {[
-            { label: '현재 진행 중', value: activePersons.length, note: '수색·조사 중', icon: Users, color: 'text-[#1e3a5f]' },
-            { label: '24시간 내 등록', value: urgentCount, note: '빠른 확인 필요', icon: Siren, color: 'text-[#d94841]' },
-            { label: '발견 완료', value: foundCount, note: '누적 상태 기준', icon: CheckCircle2, color: 'text-emerald-700' },
-            { label: '등록 지역', value: regionStats.length, note: '현재 진행 기준', icon: MapPin, color: 'text-blue-700' },
-          ].map((metric, index) => { const Icon = metric.icon; return <div key={metric.label} className={`border-slate-200 p-4 sm:p-5 ${index % 2 === 1 ? 'border-l' : ''} ${index > 1 ? 'border-t sm:border-t-0' : ''} ${index > 0 ? 'sm:border-l' : ''}`}><div className="flex items-center gap-2 text-xs font-bold text-slate-500"><Icon size={16} className={metric.color} /> {metric.label}</div><p className="mt-2 text-2xl font-black tracking-tight text-slate-950">{metric.value.toLocaleString()}<span className="ml-1 text-sm font-bold text-slate-400">{metric.label === '등록 지역' ? '곳' : metric.label === '발견 완료' || metric.label === '현재 진행 중' ? '명' : '건'}</span></p><p className="mt-1 text-[11px] text-slate-400">{metric.note}</p></div>; })}
-        </section>
-
-        <section
-          className="relative mt-6 overflow-hidden rounded-xl bg-[#17202e] shadow-sm sm:mt-8"
-          onMouseEnter={() => setBannerPaused(true)}
-          onMouseLeave={() => setBannerPaused(false)}
-          onFocusCapture={() => setBannerPaused(true)}
-          onBlurCapture={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setBannerPaused(false);
-          }}
-          aria-label="실종자 안전정보 안내 배너"
-        >
-          <div className="relative w-full aspect-[16/8] min-h-[280px] sm:aspect-[16/6] sm:min-h-[300px]">
-            {BANNER_SLIDES.map((slide, index) => (
-              <img
-                key={slide.image}
-                src={slide.image}
-                alt=""
-                aria-hidden={index !== bannerIndex}
-                className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ${index === bannerIndex ? 'opacity-100' : 'opacity-0'}`}
-              />
-            ))}
-            <div className="absolute inset-0 bg-gradient-to-r from-[#0d192b] via-[#0d192b]/90 to-transparent sm:via-[#0d192b]/75" />
-            <div className="relative flex h-full max-w-xl flex-col justify-center px-6 py-8 text-white sm:px-10">
-              <p className="text-[11px] font-black uppercase tracking-[0.18em] text-cyan-200">{activeBanner.eyebrow}</p>
-              <h2 className="mt-3 whitespace-pre-line text-2xl font-black leading-tight tracking-tight sm:text-3xl">{activeBanner.title}</h2>
-              <p className="mt-3 max-w-md text-sm leading-6 text-slate-200">{activeBanner.description}</p>
-              <button onClick={() => handleBannerAction(activeBanner.action)} className="mt-5 flex w-fit items-center gap-2 rounded-lg bg-[#d94841] px-4 py-2.5 text-sm font-black text-white shadow-lg shadow-black/20 transition hover:bg-[#c23d37] focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-[#17202e]">
-                {activeBanner.actionLabel} <ArrowRight size={16} />
-              </button>
-            </div>
-            <div className="absolute bottom-5 right-5 flex items-center gap-2 sm:right-8">
-              <button onClick={() => setBannerIndex((current) => (current - 1 + BANNER_SLIDES.length) % BANNER_SLIDES.length)} className="flex h-8 w-8 items-center justify-center rounded-full border border-white/30 bg-black/20 text-white hover:bg-white/20" aria-label="이전 배너"><ChevronRight className="rotate-180" size={16} /></button>
-              <div className="flex items-center gap-1.5" role="tablist" aria-label="배너 슬라이드 선택">{BANNER_SLIDES.map((slide, index) => <button key={slide.image} onClick={() => setBannerIndex(index)} role="tab" aria-selected={index === bannerIndex} aria-label={`${index + 1}번 배너`} className={`h-1.5 rounded-full transition-all ${index === bannerIndex ? 'w-6 bg-white' : 'w-1.5 bg-white/50 hover:bg-white/80'}`} />)}</div>
-              <button onClick={() => setBannerIndex((current) => (current + 1) % BANNER_SLIDES.length)} className="flex h-8 w-8 items-center justify-center rounded-full border border-white/30 bg-black/20 text-white hover:bg-white/20" aria-label="다음 배너"><ChevronRight size={16} /></button>
-            </div>
-          </div>
-        </section>
-
-        <section className="grid gap-6 border-b border-slate-200 py-8 lg:grid-cols-[1.1fr_0.9fr] lg:py-10">
-          <div className="min-w-0">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-xl font-black text-slate-950">최근 실종자</h2><p className="mt-1 text-sm text-slate-500">최근 7일 기준 · 총 {recentPersons.length.toLocaleString()}건 이상</p></div><button onClick={onOpenGrid} className="flex w-fit items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"><Grid3X3 size={15} /> 전체 목록</button></div>
-            <div className="mt-5 flex flex-col gap-2 sm:flex-row"><label className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} /><input ref={searchRef} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="이름·지역·인상착의 검색" className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm outline-none focus:border-[#1e3a5f] focus:ring-2 focus:ring-blue-100" /></label><div className="flex gap-2 overflow-x-auto"><button onClick={() => setSelectedRegion('전체')} className={`whitespace-nowrap rounded-lg px-3 py-2 text-xs font-bold ${selectedRegion === '전체' ? 'bg-[#1e3a5f] text-white' : 'border border-slate-200 bg-white text-slate-600'}`}>전체</button>{regionStats.slice(0, 3).map((item) => <button key={item.region} onClick={() => setSelectedRegion(item.region)} className={`whitespace-nowrap rounded-lg px-3 py-2 text-xs font-bold ${selectedRegion === item.region ? 'bg-[#1e3a5f] text-white' : 'border border-slate-200 bg-white text-slate-600'}`}>{item.region}</button>)}</div></div>
-            <div className="mt-4 divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white">
-              {visiblePersons.length > 0 ? visiblePersons.map((person) => { const urgent = getTimestamp(person) >= now - DAY_MS; return <button key={person.id} onClick={() => selectMiniMapPerson(person.id)} aria-label={`${person.name} 위치를 미니지도에서 보기`} className="group flex w-full items-center gap-3 p-3 text-left transition hover:bg-slate-50 sm:gap-4 sm:p-4"><div className="h-16 w-16 flex-none overflow-hidden rounded-lg bg-slate-100 sm:h-[72px] sm:w-[72px]"><PersonPhoto person={person} compact /></div><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><h3 className="truncate font-extrabold text-slate-950 group-hover:text-[#1e3a5f]">{person.name}</h3>{urgent && <span className="flex-none rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-black text-[#d94841]">24H</span>}</div><p className="mt-1 text-xs text-slate-500">{person.age ? `${person.age}세` : '나이 미상'} · {genderLabel(person.gender)} · {TYPE_LABELS[person.type]}</p><p className="mt-1 flex items-center gap-1 truncate text-xs text-slate-500"><MapPin size={13} className="flex-none text-slate-400" /> {person.location.address}</p></div><div className="hidden text-right sm:block"><p className="text-xs font-bold text-slate-700">{formatDate(person.missingDate)}</p><p className="mt-1 text-[11px] text-slate-400">{elapsed(person.missingDate)}</p></div><ChevronRight className="flex-none text-slate-300 group-hover:text-[#1e3a5f]" size={18} /></button>; }) : <div className="py-12 text-center text-sm text-slate-400"><Search className="mx-auto mb-2 text-slate-300" size={28} />검색 결과가 없습니다.<button onClick={() => { setSearchQuery(''); setSelectedRegion('전체'); }} className="ml-2 font-bold text-[#1e3a5f]">초기화</button></div>}
-            </div>
-          </div>
-
-          <div id="dashboard-mini-map" className="min-w-0"><div className="flex items-center justify-between"><div><h2 className="text-xl font-black text-slate-950">전국 실종자 지도</h2><p className="mt-1 text-sm text-slate-500">실종자를 선택하면 위치 핀이 표시됩니다.</p></div><button onClick={() => onOpenMap(selectedMapPersonId || undefined)} className="text-xs font-bold text-[#1e3a5f] hover:underline">전체 지도 <ArrowRight className="inline" size={14} /></button></div><div className="mt-5 h-[300px] sm:h-[360px]"><DashboardMiniMap persons={miniMapPersons} selectedPersonId={selectedMapPersonId} onSelectPerson={setSelectedMapPersonId} onOpenMap={onOpenMap} /></div></div>
-        </section>
-
-        <section className="border-b border-slate-200 py-8 lg:py-10" aria-labelledby="missing-person-details-title">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-xs font-extrabold tracking-[0.16em] text-[#1e3a5f]">CASE DETAILS</p>
-              <h2 id="missing-person-details-title" className="mt-2 text-xl font-black text-slate-950">실종자 상세 정보</h2>
-              <p className="mt-1 text-sm text-slate-500">지도에서 확인한 최근 실종자의 사진·상태·위치를 자세히 확인하세요.</p>
-            </div>
-            <button onClick={onOpenGrid} className="flex w-fit items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">전체 목록 <ArrowRight size={14} /></button>
-          </div>
+        <DashboardSectionSurface id="dashboard-urgent" label="긴급·최근 공식 사건" moduleId="urgent-cases" className="mt-5 p-5 sm:p-6 lg:p-8">
+          <div className="flex items-end justify-between gap-4"><div><p className="text-xs font-black tracking-[0.16em] text-[#d94841]">URGENT CASES</p><h2 className="mt-2 text-xl font-black text-slate-950">긴급·최근 공식 사건</h2><p className="mt-1 text-sm text-slate-500">24시간 내 등록된 사건부터 우선 확인하세요.</p></div><button type="button" onClick={onOpenGrid} className="flex items-center gap-1 text-xs font-black text-[#1e3a5f]">전체 보기 <ArrowRight size={14} /></button></div>
           <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {visiblePersons.length > 0 ? visiblePersons.slice(0, 6).map((person) => {
-              const urgent = getTimestamp(person) >= now - DAY_MS;
-              const selected = selectedMapPersonId === person.id;
-              return (
-                <button
-                  key={`detail-${person.id}`}
-                  type="button"
-                  onClick={() => selectMiniMapPerson(person.id)}
-                  className={`group rounded-xl border bg-white p-4 text-left transition hover:-translate-y-0.5 hover:shadow-md ${selected ? 'border-[#1e3a5f] ring-2 ring-blue-100' : 'border-slate-200'}`}
-                  aria-label={`${person.name} 상세를 지도에서 보기`}
-                >
-                  <div className="flex gap-3">
-                    <div className="h-20 w-20 flex-none overflow-hidden rounded-lg bg-slate-100"><PersonPhoto person={person} compact /></div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2"><h3 className="truncate font-extrabold text-slate-950 group-hover:text-[#1e3a5f]">{person.name}</h3><span className={`flex-none rounded px-1.5 py-1 text-[10px] font-black ${urgent ? 'bg-red-50 text-[#d94841]' : 'bg-amber-50 text-amber-700'}`}>{urgent ? '24H' : '수색 중'}</span></div>
-                      <p className="mt-1 text-xs text-slate-500">{person.age ? `${person.age}세` : '나이 미상'} · {genderLabel(person.gender)} · {TYPE_LABELS[person.type]}</p>
-                      <p className="mt-2 flex items-start gap-1 text-xs leading-5 text-slate-600"><MapPin size={13} className="mt-0.5 flex-none text-[#d94841]" /> <span className="line-clamp-2">{person.location.address}</span></p>
-                    </div>
-                  </div>
-                  <div className="mt-3 border-t border-slate-100 pt-3 text-xs text-slate-500">
-                    <p><span className="font-bold text-slate-700">실종일</span> {formatDate(person.missingDate)} · {elapsed(person.missingDate)}</p>
-                    <p className="mt-1 truncate"><span className="font-bold text-slate-700">인상착의</span> {person.clothes || person.description || '등록된 인상착의 정보가 없습니다.'}</p>
-                  </div>
-                  <p className="mt-3 flex items-center justify-end gap-1 text-xs font-black text-[#1e3a5f]">지도에서 위치 보기 <ArrowRight size={14} /></p>
-                </button>
-              );
-            }) : <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-400 sm:col-span-2 lg:col-span-3">표시할 실종자 상세 정보가 없습니다.</div>}
+            {visiblePersons.slice(0, 6).map((person) => { const urgent = getTimestamp(person) >= now - DAY_MS; return <article key={person.id} className="rounded-xl border border-slate-200 bg-white p-3 transition hover:-translate-y-0.5 hover:shadow-md"><button type="button" onClick={() => selectMiniMapPerson(person.id)} className="flex w-full gap-3 text-left"><div className="h-24 w-20 flex-none overflow-hidden rounded-lg bg-slate-100"><PersonPhoto person={person} compact /></div><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><span className="rounded bg-blue-50 px-1.5 py-1 text-[10px] font-black text-[#1e3a5f]">공식정보</span>{urgent && <span className="rounded bg-red-50 px-1.5 py-1 text-[10px] font-black text-[#d94841]">24H</span>}</div><h3 className="mt-2 truncate font-black text-slate-950">{person.name}</h3><p className="mt-1 text-xs text-slate-500">{person.age ? `${person.age}세` : '나이 미상'} · {genderLabel(person.gender)}</p><p className="mt-2 flex items-start gap-1 text-xs leading-5 text-slate-600"><MapPin className="mt-0.5 flex-none" size={13} /><span className="line-clamp-2">{person.location.address}</span></p></div></button></article>; })}
+            {visiblePersons.length === 0 && <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 py-12 text-center text-sm text-slate-400 sm:col-span-2 lg:col-span-3">{hasLoadedPersons ? '조건에 맞는 공식 사건이 없습니다.' : '공식 사건을 확인하고 있습니다.'}</div>}
           </div>
+        </DashboardSectionSurface>
+
+        <DashboardSectionSurface id="dashboard-explore" label="지도와 선택 사건 목록" moduleId="case-details" className="mt-5 grid min-h-[430px] lg:grid-cols-[1.15fr_0.85fr]">
+          <div id="dashboard-mini-map" className="min-h-[340px] p-4 sm:p-6"><div className="flex items-center justify-between"><div><h2 className="text-xl font-black text-slate-950">지도 미리보기</h2><p className="mt-1 text-sm text-slate-500">공개 가능한 위치만 표시합니다.</p></div><button type="button" onClick={() => onOpenMap(selectedMapPerson?.id)} className="text-xs font-black text-[#1e3a5f]">전체 지도 <ArrowRight className="inline" size={14} /></button></div><div className="mt-4 h-[330px]"><DashboardMiniMap persons={miniMapPersons} selectedPersonId={selectedMapPerson?.id || null} onSelectPerson={setSelectedMapPersonId} onOpenMap={onOpenMap} /></div></div>
+          <div className="border-t border-slate-200 bg-slate-50/70 p-4 sm:p-6 lg:border-l lg:border-t-0"><h2 className="text-xl font-black text-slate-950">선택 사건 목록</h2><p className="mt-1 text-sm text-slate-500">사진·공식 라벨·시각·축약 위치를 확인하세요.</p>{selectedMapPerson && <article className="mt-4 rounded-xl border border-[#1e3a5f]/20 bg-white p-4 shadow-sm"><div className="flex gap-3"><div className="h-20 w-20 flex-none overflow-hidden rounded-lg"><PersonPhoto person={selectedMapPerson} compact /></div><div className="min-w-0"><span className="rounded bg-blue-50 px-1.5 py-1 text-[10px] font-black text-[#1e3a5f]">공식정보</span><h3 className="mt-2 font-black text-slate-950">{selectedMapPerson.name}</h3><p className="mt-1 text-xs text-slate-500">{formatDate(selectedMapPerson.missingDate)} · {elapsed(selectedMapPerson.missingDate)}</p><p className="mt-1 line-clamp-2 text-xs text-slate-600">{selectedMapPerson.location.address}</p></div></div><div className="mt-4 grid grid-cols-2 gap-2 text-xs font-black"><button type="button" onClick={() => onOpenCaseNews(selectedMapPerson.id)} className="rounded-lg bg-[#03c75a]/10 px-3 py-2 text-[#008f3e]">관련 뉴스</button><button type="button" onClick={() => onOpenMap(selectedMapPerson.id)} className="rounded-lg bg-[#1e3a5f] px-3 py-2 text-white">지도 상세</button></div></article>}<div className="mt-3 space-y-2">{visiblePersons.slice(0, 4).map((person) => <button key={`list-${person.id}`} type="button" onClick={() => setSelectedMapPersonId(person.id)} className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left ${selectedMapPerson?.id === person.id ? 'border-[#1e3a5f] bg-white' : 'border-slate-200 bg-white/70'}`}><div className="h-10 w-10 flex-none overflow-hidden rounded-md"><PersonPhoto person={person} compact /></div><span className="min-w-0 flex-1"><strong className="block truncate text-sm text-slate-900">{person.name}</strong><span className="block truncate text-xs text-slate-500">{person.location.address}</span></span><ChevronRight size={16} className="text-slate-300" /></button>)}</div></div>
+        </DashboardSectionSurface>
+
+        <section id="dashboard-actions" className="mt-5 grid gap-3 sm:grid-cols-3" aria-label="빠른 안전 행동" data-dashboard-module="quick-actions"><button type="button" onClick={onOpenReport} className="flex items-center gap-4 rounded-2xl bg-[#d94841] p-5 text-left text-white shadow-sm"><span className="rounded-xl bg-white/15 p-3"><Plus size={22} /></span><span><strong className="block">목격 제보하기</strong><small className="mt-1 block text-red-100">시간과 장소를 안전하게 전달</small></span></button><button type="button" onClick={onOpenAlerts} className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm"><span className="rounded-xl bg-blue-50 p-3 text-[#1e3a5f]"><Bell size={22} /></span><span><strong className="block text-slate-950">지역 알림 받기</strong><small className="mt-1 block text-slate-500">관심 사건과 지역을 설정</small></span></button><a href="tel:112" className="flex items-center gap-4 rounded-2xl border border-amber-200 bg-amber-50 p-5 text-left shadow-sm"><span className="rounded-xl bg-white p-3 text-amber-700"><PhoneCall size={22} /></span><span><strong className="block text-slate-950">112 신고 안내</strong><small className="mt-1 block text-slate-600">현재 위험하면 온라인보다 신고 우선</small></span></a></section>
+
+        <section className="mt-5 grid gap-5 lg:grid-cols-2" aria-label="제보 요약">
+          <DashboardSectionSurface id="dashboard-public-reports" label="검토된 최근 공개 제보" moduleId="public-reports" className="p-5 sm:p-6"><div className="flex items-center justify-between gap-3"><div><h2 className="text-lg font-black text-slate-950">검토된 최근 공개 제보</h2><p className="mt-1 text-xs text-slate-500">민감정보를 제거하고 운영 검토를 마친 전체 공개 내용을 표시합니다.</p></div><button type="button" onClick={onOpenPublicReports} className="flex flex-none items-center gap-1 text-xs font-black text-[#1e3a5f]">전체 보기 <ArrowRight size={14} /></button></div><div className="mt-4 space-y-2">{publicReportsLoading ? <p className="py-8 text-center text-sm text-slate-400">공개 제보를 불러오는 중입니다.</p> : publicReports.length > 0 ? publicReports.map((report) => <button key={report.id} type="button" onClick={() => onOpenMap()} className="block w-full rounded-lg border border-slate-200 p-3 text-left hover:bg-slate-50"><span className="text-[10px] font-black text-emerald-700">{report.sourceLabel}</span><p className="mt-1 whitespace-pre-wrap text-sm font-bold leading-6 text-slate-800">{report.publicDescription}</p><p className="mt-1 text-xs text-slate-500">{report.publicLocationText} · {formatDate(report.occurredAt)}</p></button>) : <div className="py-8 text-center"><ShieldCheck className="mx-auto text-slate-300" size={24} /><p className="mt-2 text-sm text-slate-400">현재 공개된 검토 완료 제보가 없습니다.</p></div>}</div></DashboardSectionSurface>
+          <DashboardSectionSurface id="dashboard-own-reports" label="내 제보 상태" moduleId="own-reports" className="p-5 sm:p-6"><div className="flex items-center justify-between"><div><h2 className="text-lg font-black text-slate-950">내 제보 상태</h2><p className="mt-1 text-xs text-slate-500">접수·검토·추가정보 요청 상태를 확인합니다.</p></div><ClipboardCheck className="text-[#1e3a5f]" size={21} /></div>{!currentUser ? <div className="py-9 text-center"><p className="text-sm text-slate-500">로그인하면 제출한 제보의 처리 상태를 확인할 수 있습니다.</p><button type="button" onClick={onOpenLogin} className="mt-4 rounded-lg bg-[#1e3a5f] px-4 py-2 text-xs font-black text-white">로그인</button></div> : ownReportsLoading ? <p className="py-9 text-center text-sm text-slate-400">내 제보를 확인하는 중입니다.</p> : ownReports.length > 0 ? <div className="mt-4 space-y-2">{ownReports.map((report) => <button key={report.reportId} type="button" onClick={onOpenMyReports} className="flex w-full items-center gap-3 rounded-lg border border-slate-200 p-3 text-left"><span className="flex-1"><strong className="block text-sm text-slate-800">{report.receiptNumber}</strong><span className="mt-1 block text-xs text-slate-500">{report.locationLabel}</span></span><span className="rounded bg-blue-50 px-2 py-1 text-[10px] font-black text-[#1e3a5f]">{report.displayStatus}</span></button>)}</div> : <div className="py-9 text-center"><p className="text-sm text-slate-500">아직 제출한 제보가 없습니다.</p><button type="button" onClick={onOpenReport} className="mt-4 text-xs font-black text-[#d94841]">첫 제보 작성하기</button></div>}</DashboardSectionSurface>
         </section>
 
-        <section className="grid gap-6 border-b border-slate-200 py-8 lg:grid-cols-[1.1fr_0.9fr] lg:py-10">
-          <div><div className="flex items-center justify-between"><div><h2 className="text-xl font-black text-slate-950">지역별 현황</h2><p className="mt-1 text-sm text-slate-500">현재 진행 중인 정보를 지역별로 집계했습니다.</p></div><button onClick={onOpenStatistics} className="text-xs font-bold text-[#1e3a5f] hover:underline">상세 통계 <ArrowRight className="inline" size={14} /></button></div><div className="mt-5 space-y-4">{regionStats.slice(0, 6).map((item, index) => <button key={item.region} onClick={() => onOpenRegion(item.region)} className="group block w-full text-left"><div className="mb-1.5 flex items-center justify-between text-xs"><span className="font-bold text-slate-700"><span className="mr-2 text-slate-300">{String(index + 1).padStart(2, '0')}</span>{item.region}</span><span className="font-black text-slate-900">{item.count}명</span></div><div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#1e3a5f] transition-all group-hover:bg-[#d94841]" style={{ width: `${Math.max(8, item.count / maxRegionCount * 100)}%` }} /></div></button>)}</div></div>
-          <div className="rounded-xl border border-slate-200 bg-white p-5"><div className="flex items-center gap-2"><Info size={18} className="text-[#1e3a5f]" /><h2 className="font-black text-slate-950">공지사항</h2></div><div className="mt-4 divide-y divide-slate-100 border-y border-slate-100">{visibleAnnouncements.length > 0 ? visibleAnnouncements.map((announcement) => <div key={announcement.id} className="flex items-start gap-3 py-3"><span className={`mt-0.5 rounded px-1.5 py-1 text-[10px] font-black ${announcement.type === 'warning' ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'}`}>{announcement.type === 'warning' ? '중요' : '안내'}</span><p className="flex-1 text-sm leading-5 text-slate-700">{announcement.popupTitle || announcement.text}</p></div>) : <p className="py-8 text-center text-sm text-slate-400">등록된 공지사항이 없습니다.</p>}</div><div className="mt-5 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-500">정확한 최신 정보는 경찰청 공식 채널과 112 신고를 통해 다시 확인해 주세요.</div></div>
+        <section className="mt-5 grid gap-5 lg:grid-cols-2" aria-label="지역과 뉴스 요약">
+          <DashboardSectionSurface id="dashboard-region" label="지역 요약 통계" moduleId="region-summary" style={moduleStyle('region-summary')} className="p-5 sm:p-6"><div className="flex items-center justify-between"><div><h2 className="text-lg font-black text-slate-950">지역 요약 통계</h2><p className="mt-1 text-xs text-slate-500">현재 진행 중인 공식 사건 기준입니다.</p></div><button type="button" onClick={onOpenStatistics} className="text-xs font-black text-[#1e3a5f]">상세 통계</button></div><div className="mt-5 space-y-3">{regionStats.slice(0, 6).map((item, index) => <button key={item.region} type="button" onClick={() => onOpenRegion(item.region)} className="block w-full text-left"><div className="mb-1 flex justify-between text-xs font-bold"><span>{String(index + 1).padStart(2, '0')} · {item.region}</span><span>{item.count}명</span></div><div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#1e3a5f]" style={{ width: `${Math.max(8, item.count / maxRegionCount * 100)}%` }} /></div></button>)}</div></DashboardSectionSurface>
+          <DashboardSectionSurface id="dashboard-news" label="관련 뉴스 요약" moduleId="news" style={moduleStyle('news')} className="px-5 sm:px-6"><NewsSummarySection items={newsItems} loading={newsLoading} error={newsError} onRetry={onRetryNews} onOpenAll={() => onOpenNews()} onOpenArticle={(articleId) => onOpenNews(articleId)} /></DashboardSectionSurface>
         </section>
 
-        <section className="grid gap-4 py-8 sm:grid-cols-2"><div className="flex items-start gap-4 rounded-xl border border-red-100 bg-red-50 p-5"><span className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-white text-[#d94841]"><Plus size={21} /></span><div className="min-w-0"><h2 className="font-black text-slate-950">목격 정보를 알려주세요</h2><p className="mt-1 text-sm leading-5 text-slate-600">확실하지 않아도 괜찮습니다. 시간과 장소를 남겨주세요.</p><button onClick={onOpenReport} className="mt-3 text-sm font-black text-[#d94841] hover:underline">온라인 제보하기 <ArrowRight className="inline" size={14} /></button></div></div><div className="flex items-start gap-4 rounded-xl border border-slate-200 bg-white p-5"><span className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-slate-100 text-[#1e3a5f]"><Bell size={20} /></span><div className="min-w-0"><h2 className="font-black text-slate-950">관심 지역 알림</h2><p className="mt-1 text-sm leading-5 text-slate-600">새 실종 정보가 등록되면 푸시로 알려드립니다.</p>{pushEnabled ? <p className="mt-3 flex items-center gap-1 text-sm font-bold text-emerald-700"><CheckCircle2 size={15} /> 알림이 켜져 있습니다</p> : <button onClick={currentUser ? onEnablePush : onOpenLogin} className="mt-3 text-sm font-black text-[#1e3a5f] hover:underline">{currentUser ? '알림 켜기' : '로그인하고 알림 받기'} <ArrowRight className="inline" size={14} /></button>}</div></div></section>
+        <section className="my-5 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]" aria-label="소통과 안전 안내"><div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6"><div className="flex items-center gap-3"><MessageCircle className="text-[#1e3a5f]" /><div><h2 className="font-black text-slate-950">커뮤니티 요약</h2><p className="mt-1 text-sm text-slate-500">확인 가능한 목격 정보와 안전한 응원 메시지를 나눕니다.</p></div></div><button type="button" onClick={() => onOpenCommunity()} className="mt-5 flex items-center gap-1 text-sm font-black text-[#1e3a5f]">소통 공간 보기 <ArrowRight size={15} /></button></div><div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm sm:p-6"><div className="flex items-center gap-3"><Info className="text-amber-700" /><div><h2 className="font-black text-slate-950">안전 안내</h2><p className="mt-1 text-sm leading-6 text-slate-600">직접 추적하거나 접근하지 말고, 긴급 상황은 112에 신고하세요. 정확한 최신 정보는 경찰청 공식 채널에서 재확인합니다.</p></div></div></div></section>
       </main>
 
       <footer className="border-t border-slate-200 bg-white px-4 py-7 text-xs text-slate-500 md:pb-7"><div className="mx-auto flex max-w-7xl flex-col gap-3 sm:px-2 sm:flex-row sm:items-center sm:justify-between"><span className="flex items-center gap-2 font-bold text-slate-700"><Siren size={16} className="text-[#1e3a5f]" /> 실종자 안전정보</span><span>긴급신고 112 · 경찰민원 182 · 개인정보 보호</span></div></footer>
-      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-slate-200 bg-white px-2 py-2 shadow-[0_-8px_30px_rgba(15,23,42,0.08)] md:hidden" aria-label="모바일 빠른 메뉴"><button onClick={goTop} className="flex flex-col items-center gap-1 text-[10px] font-bold text-[#1e3a5f]"><Home size={19} />홈</button><button onClick={focusSearch} className="flex flex-col items-center gap-1 text-[10px] font-bold text-slate-500"><Search size={19} />검색</button><button onClick={() => onOpenMap()} className="flex flex-col items-center gap-1 text-[10px] font-bold text-slate-500"><MapIcon size={19} />지도</button><button onClick={() => onOpenCommunity()} className="flex flex-col items-center gap-1 text-[10px] font-bold text-slate-500"><MessageCircle size={19} />소통</button><button onClick={currentUser ? onOpenProfile : onOpenLogin} className="flex flex-col items-center gap-1 text-[10px] font-bold text-slate-500"><UserCircle size={19} />내 정보</button></nav>
+      {!hideLegacyMobileNav && <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-slate-200 bg-white px-2 py-2 shadow-[0_-8px_30px_rgba(15,23,42,0.08)] md:hidden" aria-label="모바일 빠른 메뉴"><button onClick={goTop} className="flex flex-col items-center gap-1 text-[10px] font-bold text-[#1e3a5f]"><Home size={19} />홈</button><button onClick={focusSearch} className="flex flex-col items-center gap-1 text-[10px] font-bold text-slate-500"><Search size={19} />검색</button><button onClick={() => onOpenMap()} className="flex flex-col items-center gap-1 text-[10px] font-bold text-slate-500"><MapIcon size={19} />지도</button><button onClick={() => onOpenCommunity()} className="flex flex-col items-center gap-1 text-[10px] font-bold text-slate-500"><MessageCircle size={19} />소통</button><button onClick={currentUser ? onOpenProfile : onOpenLogin} className="flex flex-col items-center gap-1 text-[10px] font-bold text-slate-500"><UserCircle size={19} />내 정보</button></nav>}
     </div>
   );
 }

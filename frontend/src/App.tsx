@@ -1,21 +1,19 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Bell, BellOff, ChevronLeft, ChevronRight, LogIn, LogOut, UserCircle, Plus, FileText, Shield, User as UserIcon, Menu, BarChart3, Home, LayoutGrid } from 'lucide-react';
+import { UserCircle, Plus, FileText, Shield } from 'lucide-react';
 import EmergencyMap from './components/EmergencyMap';
 import Sidebar from './components/Sidebar';
 import FilterPanel from './components/FilterPanel';
-import ReportModal from './components/ReportModal';
-import MyReportsModal from './components/MyReportsModal';
 import AdminDashboard from './components/AdminDashboard';
 import LoginModal from './components/LoginModal';
 import UserProfileModal from './components/UserProfileModal';
 import AnnouncementBanner from './components/AnnouncementBanner';
 import AnnouncementPopup from './components/AnnouncementPopup';
-import NotificationBell from './components/NotificationBell';
 import StatisticsModal from './components/StatisticsModal';
 import { useEmergencyStore } from './stores/emergencyStore';
 import { ToastContainer, toast } from 'react-toastify';
 import { onAuthChange, logout as firebaseLogout } from './services/firebase';
-import { hasAdminAccess } from './utils/adminUtils';
+import { EMPTY_ADMIN_ROLES, getAdminRoles, hasAnyAdminRole } from './utils/adminUtils';
+import type { AdminRoles } from './utils/adminUtils';
 import { getBannerAnnouncements, getPopupAnnouncements } from './services/announcementService';
 import type { User } from 'firebase/auth';
 import type { Announcement } from './types/announcement';
@@ -26,7 +24,7 @@ import { usePushNotifications, PUSH_PROMPT_STORAGE_KEY } from './hooks/usePushNo
 import { useApiData } from './hooks/useApiData';
 import { getRegionStatsUpdateInfo } from './services/regionStatsService';
 import { useGuestId } from './hooks/useGuestId';
-import { setAnalyticsGuestId, setAnalyticsAuthenticatedUser, logLoginEvent, logLogoutEvent } from './services/analyticsService';
+import { setAnalyticsGuestId, setAnalyticsAuthenticatedUser, logCustomEvent, logLoginEvent, logLogoutEvent, logMissingPersonView } from './services/analyticsService';
 import { logger } from './utils/logger';
 import { cacheMissingPersons, hydrateMissingPersonsFromCache, cacheAnnouncements } from './utils/offlineCache';
 import { hasUndismissedPopupForToday } from './utils/announcementPopupStorage';
@@ -36,35 +34,30 @@ import { DesktopGridView } from './components/DesktopGridView';
 import DashboardHome from './components/DashboardHome';
 import CommunityFeed from './components/CommunityFeed';
 import PageShell from './components/PageShell';
-import type { AppSection } from './components/AppSidebar';
+import NewsPage from './components/news/NewsPage';
+import { useNewsFeed } from './hooks/useNewsFeed';
+import { getPathForView, getViewFromLocation } from './app-routing/route-contract';
+import type { AppView } from './app-routing/route-contract';
+import { useUiFeatureFlags } from './hooks/useUiFeatureFlags';
+import EmergencySiteAlert from './components/alerts/EmergencySiteAlert';
+import MobileNavigation from './components/layout/MobileNavigation';
+import SearchPage from './features/search/SearchPage';
+import ExplorePage from './features/explore/ExplorePage';
+import ReportWizard from './features/reports/ReportWizard';
+import OwnReportsPage from './features/reports/OwnReportsPage';
+import ReportsModerationV2 from './features/admin/reports/ReportsModerationV2';
+import AlertSubscriptionsPage from './features/alerts/AlertSubscriptionsPage';
+import DashboardPersonalizationPanel from './features/dashboard/DashboardPersonalizationPanel';
+import { useSiteBanners } from './hooks/useSiteBanners';
+import BannerOperationsV2 from './features/admin/banners/BannerOperationsV2';
+import ProfileHubPage from './features/profile/ProfileHubPage';
+import PrivacyPolicyPage from './features/privacy/PrivacyPolicyPage';
+import GlobalHeader from './components/layout/GlobalHeader';
+import PublicReportsPage from './features/reports/PublicReportsPage';
 
 const GRID_VIEW_PREF_KEY = 'missing_person_desktop_grid_view';
 const INSTALL_PROMPT_DISMISSED_KEY = 'missing_person_install_prompt_snooze_until';
 const INSTALL_PROMPT_SNOOZE_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
-
-type AppView = 'dashboard' | 'map' | 'community' | 'statistics' | 'profile' | 'reports' | 'admin' | 'report';
-
-const getViewFromLocation = (): AppView => {
-  if (typeof window === 'undefined') return 'dashboard';
-  const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
-  const legacyView = new URLSearchParams(window.location.search).get('view');
-  if (pathname === '/statistics' || legacyView === 'statistics') return 'statistics';
-  if (pathname === '/profile' || legacyView === 'profile') return 'profile';
-  if (pathname === '/reports' || legacyView === 'reports') return 'reports';
-  if (pathname === '/reports/new' || legacyView === 'report') return 'report';
-  if (pathname === '/admin' || pathname.startsWith('/admin/')) return 'admin';
-  if (pathname === '/community' || legacyView === 'community') return 'community';
-  if (pathname === '/map' || legacyView === 'map') return 'map';
-  return 'dashboard';
-};
-
-const getPathForView = (view: AppView, personId?: string) => {
-  const path = view === 'dashboard' ? '/' : view === 'report' ? '/reports/new' : `/${view}`;
-  if (personId && (view === 'map' || view === 'community' || view === 'report')) {
-    return `${path}?personId=${encodeURIComponent(personId)}`;
-  }
-  return path;
-};
 
 function App() {
   const [activeView, setActiveView] = useState<AppView>(getViewFromLocation);
@@ -73,7 +66,8 @@ function App() {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [alertsEnabled, setAlertsEnabled] = useState(true);
+  const [adminRoles, setAdminRoles] = useState<AdminRoles>(EMPTY_ADMIN_ROLES);
+  const alertsEnabled = true;
   const [currentAnnouncementIndex, setCurrentAnnouncementIndex] = useState(0);
   const [bannerAnnouncements, setBannerAnnouncements] = useState<Announcement[]>([]);
   const [popupAnnouncements, setPopupAnnouncements] = useState<Announcement[]>([]);
@@ -85,14 +79,14 @@ function App() {
   const swUpdateToastRef = useRef<React.ReactText | null>(null);
   const swRefreshingRef = useRef(false);
   const shareTargetHandledRef = useRef(false);
-  const [showMobileMenu, setShowMobileMenu] = useState(false);
-  const [statsHasFreshData, setStatsHasFreshData] = useState(false);
   const [statsUpdatedAt, setStatsUpdatedAt] = useState<number | undefined>(undefined);
-  const [showInstallShortcut, setShowInstallShortcut] = useState(false);
   const [showGridView, setShowGridView] = useState(false);
   const [communityPersonId, setCommunityPersonId] = useState<string | null>(null);
+  const dashboardNews = useNewsFeed({ limit: 5, enabled: activeView === 'dashboard' });
+  const { flags: uiFlags } = useUiFeatureFlags();
+  const siteBanners = useSiteBanners(uiFlags.emergency_banner_v2_enabled);
 
-  useApiData();
+  const { hasLoadedPersons } = useApiData();
   useActiveSessionTracker(currentUser);
 
   const missingPersons = useEmergencyStore(state => state.missingPersons);
@@ -104,7 +98,13 @@ function App() {
   const newPersonAlerts = useEmergencyStore(state => state.newPersonAlerts);
   const shiftNewPersonAlert = useEmergencyStore(state => state.shiftNewPersonAlert);
 
-  const { status: pushStatus, enablePush, syncExistingToken } = usePushNotifications(currentUser);
+  const {
+    status: pushStatus,
+    isProcessing: isPushProcessing,
+    enablePush,
+    disablePush,
+    syncExistingToken
+  } = usePushNotifications(currentUser);
   const { guestIdInfo, userType } = useGuestId(currentUser);
   const [pendingPersonId, setPendingPersonId] = useState<string | null>(null);
   const pendingPersonReasonRef = useRef<'deeplink' | 'notification' | null>(null);
@@ -112,6 +112,11 @@ function App() {
   const activeAlertToastIdRef = useRef<React.ReactText | null>(null);
   const alertsEnabledRef = useRef(alertsEnabled);
   const newPersonAlertCount = newPersonAlerts.length;
+  const emergencyAnnouncement = useMemo(() => siteBanners.find((banner) => banner.kind === 'emergency'), [siteBanners]);
+  const informationBannerAnnouncements = useMemo(
+    () => bannerAnnouncements.filter((announcement) => announcement.kind !== 'emergency'),
+    [bannerAnnouncements]
+  );
 
   const navigateTo = useCallback((view: AppView, personId?: string, replace = false) => {
     const nextUrl = getPathForView(view, personId);
@@ -122,14 +127,6 @@ function App() {
     setCommunityPersonId(view === 'community' ? personId || null : null);
     setActiveView(view);
   }, []);
-
-  // 게스트 사용자 닉네임 생성
-  const guestNickname = useMemo(() => {
-    if (!guestIdInfo) return '게스트';
-    const parts = guestIdInfo.guestId.split('_');
-    const lastPart = parts[parts.length - 1];
-    return `게스트-${lastPart.substring(0, 4).toUpperCase()}`;
-  }, [guestIdInfo]);
 
   const statsUpdatedLabel = useMemo(() => {
     if (!statsUpdatedAt) {
@@ -170,6 +167,44 @@ function App() {
     window.addEventListener('popstate', syncLocation);
     return () => window.removeEventListener('popstate', syncLocation);
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('utm_source') !== 'organic' || params.get('utm_medium') !== 'seo') return;
+    const personId = params.get('personId') || '';
+    const sessionKey = `seo_landing:${personId || window.location.pathname}`;
+    if (window.sessionStorage.getItem(sessionKey)) return;
+    logCustomEvent('seo_app_landing', {
+      missing_person_id: personId,
+      campaign: params.get('utm_campaign') || 'missing_detail',
+      content: params.get('utm_content') || 'unknown',
+      landing_path: window.location.pathname
+    });
+    window.sessionStorage.setItem(sessionKey, '1');
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const indexable = activeView === 'dashboard' || activeView === 'map';
+    const canonicalPath = getPathForView(activeView).split('?')[0];
+    const titles: Partial<Record<AppView, string>> = {
+      dashboard: 'MissingAlert | 실종자 공식정보·지도·제보',
+      search: '실종자 통합 검색 | MissingAlert',
+      map: '전국 실종자 지도 | MissingAlert',
+      reports: '내 제보 | MissingAlert',
+      report: '안전한 제보 접수 | MissingAlert',
+      alerts: '지역·사건 알림 설정 | MissingAlert',
+      admin: '운영자 검토 | MissingAlert',
+      profile: '내 정보 | MissingAlert',
+      privacy: '개인정보 처리방침 | MissingAlert',
+    };
+    document.title = titles[activeView] || 'MissingAlert';
+    const robots = document.querySelector<HTMLMetaElement>('meta[name="robots"]');
+    robots?.setAttribute('content', indexable ? 'index,follow,max-image-preview:large' : 'noindex,follow,noarchive');
+    const canonical = document.querySelector<HTMLLinkElement>('link[rel="canonical"]');
+    canonical?.setAttribute('href', `https://missingalert.kr${canonicalPath}`);
+  }, [activeView]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -255,6 +290,7 @@ function App() {
 
     setSelectedPersonId(target.id);
     setHoveredPersonId(target.id);
+    logMissingPersonView(target.id, userType);
 
     if (pendingPersonReasonRef.current === 'notification') {
       toast.info(
@@ -286,7 +322,7 @@ function App() {
 
     pendingPersonReasonRef.current = null;
     setPendingPersonId(null);
-  }, [pendingPersonId, missingPersons, setSelectedPersonId, setHoveredPersonId]);
+  }, [pendingPersonId, missingPersons, setSelectedPersonId, setHoveredPersonId, userType]);
 
   useEffect(() => {
     if (shareTargetHandledRef.current || typeof window === 'undefined') {
@@ -630,8 +666,6 @@ function App() {
     const handleBeforeInstallPrompt = (event: Event) => {
       event.preventDefault();
       installPromptRef.current = event as BeforeInstallPromptEvent;
-      setShowInstallShortcut(true);
-
       if (isInstallPromptSnoozed()) {
         return;
       }
@@ -687,7 +721,6 @@ function App() {
     const handleAppInstalled = () => {
       dismissInstallPrompt();
       toast.success('🎉 앱이 홈 화면에 추가되었습니다!', { autoClose: 4000 });
-      setShowInstallShortcut(false);
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt as EventListener);
@@ -698,50 +731,6 @@ function App() {
       window.removeEventListener('appinstalled', handleAppInstalled);
     };
   }, [handleInstallApp, dismissInstallPrompt]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const checkInstallAvailability = () => {
-      try {
-        const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
-        const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(window.navigator.userAgent || '');
-        setShowInstallShortcut(isMobileDevice && !isStandalone);
-      } catch (error) {
-        logger.warn('홈 화면 추가 가능 여부 확인 실패', error);
-      }
-    };
-
-    checkInstallAvailability();
-
-    const mediaQuery = window.matchMedia('(display-mode: standalone)');
-    const handleDisplayModeChange = () => checkInstallAvailability();
-
-    if (typeof mediaQuery.addEventListener === 'function') {
-      mediaQuery.addEventListener('change', handleDisplayModeChange);
-    } else if (typeof mediaQuery.addListener === 'function') {
-      mediaQuery.addListener(handleDisplayModeChange);
-    }
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        checkInstallAvailability();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      if (typeof mediaQuery.removeEventListener === 'function') {
-        mediaQuery.removeEventListener('change', handleDisplayModeChange);
-      } else if (typeof mediaQuery.removeListener === 'function') {
-        mediaQuery.removeListener(handleDisplayModeChange);
-      }
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, []);
 
   useEffect(() => {
     const handleUpdateAvailable = (event: Event) => {
@@ -844,14 +833,9 @@ function App() {
       try {
         const info = await getRegionStatsUpdateInfo();
         if (!mounted) return;
-        setStatsHasFreshData(info.hasFreshData);
         setStatsUpdatedAt(info.updatedAt);
       } catch (error) {
         logger.warn('통계 최신 정보 조회 실패', error);
-        // 에러 발생 시에도 상태를 안전하게 유지
-        if (mounted) {
-          setStatsHasFreshData(false);
-        }
       }
     };
 
@@ -872,10 +856,12 @@ function App() {
 
   // Firebase 인증 상태 감지
   useEffect(() => {
-    const unsubscribe = onAuthChange((user) => {
+    const unsubscribe = onAuthChange(async (user) => {
       setCurrentUser(user);
       if (user) {
-        const adminAccess = hasAdminAccess(user.email, user.uid);
+        const roles = await getAdminRoles(user);
+        const adminAccess = hasAnyAdminRole(roles);
+        setAdminRoles(roles);
         setIsAdmin(adminAccess);
 
         // Firebase Analytics 인증 사용자 설정
@@ -889,7 +875,7 @@ function App() {
         }
 
         // SNS 로그인 유저(전화번호 없음)는 프로필 모달 자동 열기
-        if (!user.phoneNumber) {
+        if (!user.phoneNumber && !uiFlags.reporting_flow_v2_enabled) {
           // 로그인 직후에만 (1초 후에 체크)
           setTimeout(() => {
             const isFirstLogin = sessionStorage.getItem('phone_prompt_shown') !== 'true';
@@ -901,6 +887,7 @@ function App() {
           }, 1000);
         }
       } else {
+        setAdminRoles(EMPTY_ADMIN_ROLES);
         setIsAdmin(false);
         // 로그아웃 시 세션 스토리지 초기화
         sessionStorage.removeItem('phone_prompt_shown');
@@ -908,7 +895,7 @@ function App() {
     });
 
     return () => unsubscribe();
-  }, [navigateTo]);
+  }, [navigateTo, uiFlags.reporting_flow_v2_enabled]);
 
   // Guest ID를 Firebase Analytics에 설정
   useEffect(() => {
@@ -1122,6 +1109,11 @@ function App() {
       return;
     }
 
+    if (uiFlags.reporting_flow_v2_enabled) {
+      navigateTo('report');
+      return;
+    }
+
     // 전화번호 인증 확인
     if (!currentUser.phoneNumber) {
       // UserProfileModal을 띄워서 전화번호 인증 유도
@@ -1146,9 +1138,32 @@ function App() {
     navigateTo('map', personId);
   }, [navigateTo, setHoveredPersonId, setSelectedPersonId]);
 
+  const handleOpenSearch = useCallback((query?: string) => {
+    const normalizedQuery = query?.trim().slice(0, 80) || '';
+    const sensitiveQuery = /(?:\b\d{2,3}-?\d{3,4}-?\d{4}\b|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|\b\d{6}-?[1-4]\d{6}\b)/.test(normalizedQuery);
+    const nextUrl = normalizedQuery && !sensitiveQuery ? `/search?q=${encodeURIComponent(normalizedQuery)}` : '/search';
+    if (typeof window !== 'undefined') {
+      window.history.pushState(sensitiveQuery ? { transientSearchQuery: normalizedQuery } : {}, document.title, nextUrl);
+    }
+    setCommunityPersonId(null);
+    setActiveView('search');
+  }, []);
+
   const handleOpenCommunity = useCallback((personId?: string) => {
     navigateTo('community', personId);
   }, [navigateTo]);
+
+  const handleOpenNews = useCallback((articleId?: string) => {
+    navigateTo('news', articleId);
+  }, [navigateTo]);
+
+  const handleOpenCaseNews = useCallback((personId: string) => {
+    if (typeof window !== 'undefined') {
+      window.history.pushState({}, document.title, `/news?caseId=${encodeURIComponent(personId)}`);
+    }
+    setCommunityPersonId(null);
+    setActiveView('news');
+  }, []);
 
   const handleOpenRegion = useCallback((region: string) => {
     updateFilters({ regions: [region] });
@@ -1156,495 +1171,194 @@ function App() {
     navigateTo('map');
   }, [navigateTo, updateFilters]);
 
-  const handleSidebarNavigate = useCallback((section: AppSection) => {
-    if (section === 'grid') {
-      setShowGridView(true);
+  const handleOpenGrid = useCallback(() => {
+    if (uiFlags.unified_explorer_enabled) {
+      window.history.pushState({}, document.title, '/map?view=cards');
+      setActiveView('map');
       return;
     }
-    navigateTo(section as AppView);
-  }, [navigateTo]);
+    setShowGridView(true);
+  }, [uiFlags.unified_explorer_enabled]);
+
+  const handleOpenPublicReport = useCallback((reportId: string) => {
+    if (typeof window !== 'undefined') {
+      window.history.pushState({}, document.title, `/map?publicReportId=${encodeURIComponent(reportId)}`);
+    }
+    setCommunityPersonId(null);
+    setActiveView('map');
+  }, []);
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-gray-50">
+      {uiFlags.emergency_banner_v2_enabled && emergencyAnnouncement && (
+        <EmergencySiteAlert announcement={emergencyAnnouncement} />
+      )}
+      <GlobalHeader
+        activeView={activeView}
+        currentUser={currentUser}
+        isAdmin={isAdmin}
+        onNavigate={(view) => navigateTo(view)}
+        onReport={handleReportClick}
+        onLogin={() => setShowLoginModal(true)}
+        onLogout={handleLogout}
+      />
       {activeView === 'dashboard' ? (
         <DashboardHome
           persons={missingPersons}
+          hasLoadedPersons={hasLoadedPersons}
           announcements={[...bannerAnnouncements, ...popupAnnouncements]}
           currentUser={currentUser}
-          isAdmin={isAdmin}
           statsUpdatedLabel={statsUpdatedLabel}
           pushStatus={pushStatus}
+          newsItems={dashboardNews.items}
+          newsLoading={dashboardNews.loading}
+          newsError={dashboardNews.error}
+          reportMapLayerEnabled={uiFlags.reports_map_layer_enabled}
+          onOpenSearch={handleOpenSearch}
           onOpenMap={handleOpenMap}
           onOpenCommunity={handleOpenCommunity}
+          onOpenNews={handleOpenNews}
+          onOpenCaseNews={handleOpenCaseNews}
+          onRetryNews={dashboardNews.reload}
           onOpenRegion={handleOpenRegion}
           onOpenStatistics={handleOpenStatistics}
-          onOpenGrid={() => setShowGridView(true)}
+          onOpenGrid={handleOpenGrid}
           onOpenReport={handleReportClick}
+          onOpenAlerts={() => navigateTo('alerts')}
           onOpenMyReports={() => navigateTo('reports')}
+          onOpenPublicReports={() => navigateTo('public-reports')}
           onOpenLogin={() => setShowLoginModal(true)}
           onOpenProfile={() => navigateTo('profile')}
-          onOpenAdmin={() => navigateTo('admin')}
-          onLogout={handleLogout}
           onEnablePush={handleEnablePush}
+          hideLegacyMobileNav={uiFlags.mobile_nav_v2_enabled}
+          personalizationEnabled={uiFlags.dashboard_personalization_enabled}
         />
+      ) : activeView === 'search' ? (
+        <PageShell
+          title="통합 검색"
+          description="공식 사건, 운영 검토를 마친 공개 제보와 관련 뉴스를 한 곳에서 찾습니다."
+        >
+          <SearchPage enabled={uiFlags.unified_search_enabled} onOpenMap={() => handleOpenMap()} />
+        </PageShell>
+      ) : activeView === 'map' && uiFlags.unified_explorer_enabled ? (
+        <PageShell
+          title="실종자 통합 탐색"
+          description="지도, 목록, 카드 보기를 전환하며 공식 공개 수색정보를 확인하세요."
+        >
+          <ExplorePage persons={filteredPersons} reportMapLayerEnabled={uiFlags.reports_map_layer_enabled} onOpenCommunity={handleOpenCommunity} onOpenCaseNews={handleOpenCaseNews} />
+        </PageShell>
+      ) : activeView === 'public-reports' ? (
+        <PageShell
+          eyebrow="PUBLIC REPORTS / SAFETY REVIEW"
+          title="검토된 사용자 제보"
+          description="운영 검토를 마친 공개 제보만 확인하고, 지도와 공식 사건 정보로 이어서 살펴보세요."
+          assurances={['운영 검토 완료', '개인정보 최소화']}
+          action={<button type="button" onClick={handleReportClick}><Plus size={15} />제보하기</button>}
+        >
+          <PublicReportsPage enabled={uiFlags.reports_public_timeline_enabled && uiFlags.reports_map_layer_enabled} onOpenMap={handleOpenPublicReport} onStartReport={handleReportClick} />
+        </PageShell>
       ) : activeView === 'community' ? (
-        <CommunityFeed
-          persons={missingPersons}
-          currentUser={currentUser}
-          isAdmin={isAdmin}
-          initialMissingPersonId={communityPersonId}
-          onBack={() => navigateTo('dashboard')}
-          onOpenMap={handleOpenMap}
-          onOpenLogin={() => setShowLoginModal(true)}
-          onOpenProfile={() => navigateTo('profile')}
-          onOpenAdmin={() => navigateTo('admin')}
-          onLogout={handleLogout}
-        />
+        <PageShell
+          eyebrow="COMMUNITY FEED"
+          title="함께 확인하고, 함께 알려주세요"
+          description="실종자별 목격 정보·문의·응원 메시지를 한곳에서 확인하고 답글을 남길 수 있습니다."
+          assurances={['공식 채널 교차 확인', '개인정보 공개 금지']}
+        >
+          <CommunityFeed
+            persons={missingPersons}
+            currentUser={currentUser}
+            isAdmin={isAdmin}
+            initialMissingPersonId={communityPersonId}
+            onBack={() => navigateTo('dashboard')}
+            onOpenMap={handleOpenMap}
+            onOpenLogin={() => setShowLoginModal(true)}
+          />
+        </PageShell>
+      ) : activeView === 'news' ? (
+        <PageShell
+          title="관련 뉴스"
+          description="NAVER에서 “실종”으로 검색한 뉴스 결과를 시간순으로 확인하세요."
+        >
+          <NewsPage />
+        </PageShell>
       ) : activeView === 'statistics' ? (
         <PageShell
-          activeSection="statistics"
-          currentUser={!!currentUser}
-          isAdmin={isAdmin}
           title="지역 통계"
           description="기간과 지역별 실종자 현황을 지도와 차트로 확인하세요."
-          onNavigate={handleSidebarNavigate}
-          onLogin={() => setShowLoginModal(true)}
         >
           <StatisticsModal isOpen onClose={() => navigateTo('dashboard')} isPage />
         </PageShell>
-      ) : activeView === 'profile' ? (
+      ) : activeView === 'profile' || activeView === 'reports' || activeView === 'alerts' ? (
         <PageShell
-          activeSection="profile"
-          currentUser={!!currentUser}
-          isAdmin={isAdmin}
-          title="내 정보"
-          description="프로필, 전화번호 인증, 푸시 알림과 계정 설정을 관리하세요."
-          onNavigate={handleSidebarNavigate}
-          onLogin={() => setShowLoginModal(true)}
+          title="내 프로필"
+          description="내 정보, 제보 처리 상태와 관심 알림을 한곳에서 관리하세요."
         >
-          {currentUser ? (
-            <UserProfileModal isOpen onClose={() => navigateTo('dashboard')} isPage />
-          ) : (
-            <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-              <UserCircle className="mx-auto text-slate-300" size={44} />
-              <h2 className="mt-4 text-xl font-black text-slate-950">로그인이 필요합니다</h2>
-              <p className="mt-2 text-sm text-slate-500">내 정보 페이지를 사용하려면 로그인해주세요.</p>
-              <button type="button" onClick={() => setShowLoginModal(true)} className="mt-5 rounded-lg bg-[#10213a] px-4 py-2 text-sm font-bold text-white">로그인</button>
-            </div>
-          )}
-        </PageShell>
-      ) : activeView === 'reports' ? (
-        <PageShell
-          activeSection="reports"
-          currentUser={!!currentUser}
-          isAdmin={isAdmin}
-          title="내 제보"
-          description="내가 등록한 실종자 제보와 처리 상태를 확인하세요."
-          onNavigate={handleSidebarNavigate}
-          onLogin={() => setShowLoginModal(true)}
-        >
-          {currentUser ? (
-            <MyReportsModal isOpen onClose={() => navigateTo('dashboard')} isPage />
-          ) : (
-            <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-              <FileText className="mx-auto text-slate-300" size={44} />
-              <h2 className="mt-4 text-xl font-black text-slate-950">로그인이 필요합니다</h2>
-              <p className="mt-2 text-sm text-slate-500">내 제보를 확인하려면 로그인해주세요.</p>
-              <button type="button" onClick={() => setShowLoginModal(true)} className="mt-5 rounded-lg bg-[#10213a] px-4 py-2 text-sm font-bold text-white">로그인</button>
-            </div>
-          )}
+          <ProfileHubPage activeSection={activeView} onNavigate={(section) => navigateTo(section)}>
+            {activeView === 'alerts' ? (
+              currentUser ? <AlertSubscriptionsPage pushStatus={pushStatus} pushProcessing={isPushProcessing} enablePush={enablePush} disablePush={disablePush} /> : (
+                <div className="rounded-xl border border-slate-200 bg-white p-8 text-center"><h2 className="text-xl font-black">로그인이 필요합니다</h2><p className="mt-2 text-sm text-slate-500">관심 알림을 관리하려면 로그인해주세요.</p><button type="button" onClick={() => setShowLoginModal(true)} className="mt-5 rounded-lg bg-[#10213a] px-4 py-2 text-sm font-bold text-white">로그인</button></div>
+              )
+            ) : activeView === 'reports' ? (
+              currentUser ? (uiFlags.reporting_flow_v2_enabled ? <OwnReportsPage /> : (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-8 text-center shadow-sm">
+                <FileText className="mx-auto text-amber-500" size={44} />
+                <h2 className="mt-4 text-xl font-black text-slate-950">제보 시스템 전환 준비 중</h2>
+                <p className="mt-2 text-sm text-slate-600">기존 제보 경로는 개인정보 보호를 위해 종료되었습니다. 안전한 신규 제보 시스템이 활성화되면 이곳에서 처리 상태를 확인할 수 있습니다.</p>
+              </div>
+              )) : (
+                <div className="rounded-xl border border-slate-200 bg-white p-8 text-center"><FileText className="mx-auto text-slate-300" size={44} /><h2 className="mt-4 text-xl font-black text-slate-950">로그인이 필요합니다</h2><p className="mt-2 text-sm text-slate-500">내 제보를 확인하려면 로그인해주세요.</p><button type="button" onClick={() => setShowLoginModal(true)} className="mt-5 rounded-lg bg-[#10213a] px-4 py-2 text-sm font-bold text-white">로그인</button></div>
+              )
+            ) : currentUser ? (
+              <>{uiFlags.dashboard_personalization_enabled && <DashboardPersonalizationPanel user={currentUser} />}<UserProfileModal isOpen onClose={() => navigateTo('dashboard')} isPage /></>
+            ) : (
+              <div className="rounded-xl border border-slate-200 bg-white p-8 text-center"><UserCircle className="mx-auto text-slate-300" size={44} /><h2 className="mt-4 text-xl font-black text-slate-950">로그인이 필요합니다</h2><p className="mt-2 text-sm text-slate-500">내 정보를 관리하려면 로그인해주세요.</p><button type="button" onClick={() => setShowLoginModal(true)} className="mt-5 rounded-lg bg-[#10213a] px-4 py-2 text-sm font-bold text-white">로그인</button></div>
+            )}
+          </ProfileHubPage>
         </PageShell>
       ) : activeView === 'admin' ? (
         <PageShell
-          activeSection="admin"
-          currentUser={!!currentUser}
-          isAdmin={isAdmin}
           title="관리자"
           description="제보·사용자·공지·댓글 신고를 관리합니다."
-          onNavigate={handleSidebarNavigate}
-          onLogin={() => setShowLoginModal(true)}
         >
           {isAdmin ? (
-            <AdminDashboard isOpen onClose={() => navigateTo('dashboard')} isPage />
+            <>{uiFlags.reporting_flow_v2_enabled && <ReportsModerationV2 roles={adminRoles} adminEnabled={uiFlags.reports_admin_enabled} publicApprovalEnabled={uiFlags.reports_public_timeline_enabled} />}{uiFlags.admin_banner_v2_enabled && <BannerOperationsV2 roles={adminRoles} />}<AdminDashboard isOpen onClose={() => navigateTo('dashboard')} isPage /></>
           ) : (
             <div className="rounded-2xl border border-red-100 bg-white p-8 text-center shadow-sm">
               <Shield className="mx-auto text-red-300" size={44} />
-              <h2 className="mt-4 text-xl font-black text-slate-950">관리자 권한이 필요합니다</h2>
-              <p className="mt-2 text-sm text-slate-500">이 페이지에 접근할 수 있는 권한이 없습니다.</p>
-              <button type="button" onClick={() => navigateTo('dashboard')} className="mt-5 rounded-lg bg-[#10213a] px-4 py-2 text-sm font-bold text-white">현황으로 돌아가기</button>
+              <h2 className="mt-4 text-xl font-black text-slate-950">{currentUser ? '관리자 권한이 필요합니다' : '관리자 로그인이 필요합니다'}</h2>
+              <p className="mt-2 text-sm text-slate-500">{currentUser ? '현재 계정에는 이 페이지에 접근할 수 있는 역할이 없습니다.' : '승인된 관리자 계정으로 로그인하면 제보 검토 화면으로 돌아옵니다.'}</p>
+              <div className="mt-5 flex flex-wrap justify-center gap-2">
+                {!currentUser && <button type="button" onClick={() => setShowLoginModal(true)} className="rounded-lg bg-[#10213a] px-4 py-2 text-sm font-bold text-white">관리자 로그인</button>}
+                <button type="button" onClick={() => navigateTo('dashboard')} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700">현황으로 돌아가기</button>
+              </div>
             </div>
           )}
         </PageShell>
+      ) : activeView === 'privacy' ? (
+        <PageShell
+          title="개인정보 처리방침"
+          description="서비스가 처리하는 정보, 보호 조치와 이용자의 권리를 공개합니다."
+        >
+          <PrivacyPolicyPage />
+        </PageShell>
       ) : activeView === 'report' ? (
         <PageShell
-          activeSection="reports"
-          currentUser={!!currentUser}
-          isAdmin={isAdmin}
           title="실종자 제보"
           description="확인 가능한 정보와 위치를 정확히 남겨주세요."
-          onNavigate={handleSidebarNavigate}
-          onLogin={() => setShowLoginModal(true)}
         >
-          {currentUser ? <ReportModal isOpen onClose={() => navigateTo('dashboard')} isPage /> : <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm"><h2 className="text-xl font-black text-slate-950">로그인이 필요합니다</h2><button type="button" onClick={() => setShowLoginModal(true)} className="mt-5 rounded-lg bg-[#10213a] px-4 py-2 text-sm font-bold text-white">로그인</button></div>}
+          {currentUser ? (uiFlags.reporting_flow_v2_enabled ? <ReportWizard onComplete={() => navigateTo('reports')} mediaEnabled={uiFlags.reports_media_enabled} submissionEnabled={uiFlags.reports_submission_enabled} /> : <div className="rounded-2xl border border-amber-200 bg-amber-50 p-8 text-center shadow-sm"><h2 className="text-xl font-black text-slate-950">제보 접수 준비 중</h2><p className="mt-2 text-sm text-slate-600">안전한 검토·개인정보 보호 절차를 갖춘 신규 제보 시스템을 준비하고 있습니다.</p></div>) : <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm"><h2 className="text-xl font-black text-slate-950">로그인이 필요합니다</h2><button type="button" onClick={() => setShowLoginModal(true)} className="mt-5 rounded-lg bg-[#10213a] px-4 py-2 text-sm font-bold text-white">로그인</button></div>}
         </PageShell>
       ) : (
         <>
       {/* 상단 헤더 */}
-      <header className="bg-gradient-to-r from-red-600 to-red-700 text-white shadow-lg z-50">
-        {/* 모바일: 두 줄로 분리 */}
-        <div className="md:hidden relative">
-          {/* 첫 번째 줄: 타이틀과 메뉴 토글 */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-red-500">
-            <div className="flex items-center gap-2 flex-1">
-              <button
-                onClick={() => navigateTo('dashboard')}
-                className="p-2 hover:bg-red-700 rounded-lg transition-colors"
-                title="현황 대시보드로 이동"
-                aria-label="현황 대시보드로 이동"
-              >
-                <Home size={19} />
-              </button>
-              <button
-                onClick={() => setShowSidebar(!showSidebar)}
-                className="p-2 hover:bg-red-700 rounded-lg transition-colors"
-              >
-                {showSidebar ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
-              </button>
-              <h1 className="text-lg font-bold truncate">🚨 실시간 실종자 알림</h1>
-              <span className="px-2 py-0.5 bg-red-800 rounded-full text-xs font-semibold whitespace-nowrap">
-                {missingPersons.length}명
-              </span>
-            </div>
-            <button
-              onClick={() => setShowMobileMenu(prev => !prev)}
-              className="ml-3 p-2 hover:bg-red-700 rounded-lg transition-colors"
-              aria-label="메뉴 열기"
-            >
-              <Menu size={20} />
-            </button>
-          </div>
-
-          {/* 두 번째 줄: 버튼들 */}
-          <div className="flex items-center justify-between gap-3 px-4 py-2">
-            <button
-              onClick={() => {
-                setShowMobileMenu(false);
-                handleOpenStatistics();
-              }}
-              className="flex items-center gap-1.5 rounded-lg bg-white/20 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-white/30"
-              aria-label="지역별 실종자 통계 보기"
-              title={statsUpdatedLabel ? `업데이트: ${statsUpdatedLabel}` : '지역별 실종자 통계 보기'}
-            >
-              <BarChart3 size={16} />
-              <span>통계 보기</span>
-              {statsHasFreshData && (
-                <span className="ml-1 inline-flex items-center rounded-full bg-yellow-300 px-1.5 py-0.5 text-[10px] font-bold text-red-700">
-                  New
-                </span>
-              )}
-            </button>
-            {currentUser ? (
-              <>
-                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-red-800 rounded-lg text-sm">
-                  {isAdmin && <Shield size={14} color="#fbbf24" />}
-                  <UserCircle size={16} />
-                  <span className="max-w-[100px] truncate">{currentUser.displayName || currentUser.email}</span>
-                </div>
-                <button
-                  onClick={async () => {
-                    setShowMobileMenu(false);
-                    await handleLogout();
-                  }}
-                  className="flex items-center gap-1.5 rounded-lg bg-red-800 px-3 py-1.5 text-sm transition-colors hover:bg-red-900"
-                >
-                  <LogOut size={16} />
-                  <span className="text-sm">로그아웃</span>
-                </button>
-              </>
-            ) : (
-              <>
-                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-red-800/80 rounded-lg text-sm">
-                  <UserCircle size={16} />
-                  <span className="text-xs opacity-90">{guestNickname}</span>
-                </div>
-                <button
-                  onClick={() => {
-                    setShowMobileMenu(false);
-                    setShowLoginModal(true);
-                  }}
-                  className="flex items-center gap-1.5 rounded-lg bg-red-800 px-3 py-1.5 text-sm transition-colors hover:bg-red-900"
-                >
-                  <LogIn size={16} />
-                  <span className="text-sm">로그인</span>
-                </button>
-              </>
-            )}
-          </div>
-
-          {showMobileMenu && (
-            <>
-              <div
-                className="fixed inset-0 bg-black/40 z-40"
-                onClick={() => setShowMobileMenu(false)}
-              />
-              <div className="absolute right-4 top-full mt-2 z-50 w-72 bg-white text-gray-800 rounded-xl shadow-2xl overflow-hidden">
-                <div className="px-4 py-3 border-b border-gray-200">
-                  <p className="text-sm font-semibold text-gray-700">빠른 메뉴</p>
-                  <p className="text-xs text-gray-500 mt-1">자주 사용되는 기능을 모았습니다.</p>
-                </div>
-                <div className="py-2">
-                  <button
-                    onClick={() => {
-                      setAlertsEnabled(!alertsEnabled);
-                      setShowMobileMenu(false);
-                    }}
-                    className="w-full flex items-center justify-between px-4 py-2 hover:bg-gray-100 transition-colors"
-                  >
-                    <span className="flex items-center gap-3 text-sm">
-                      {alertsEnabled ? <Bell size={18} className="text-red-500" /> : <BellOff size={18} className="text-gray-500" />}
-                      <span>{alertsEnabled ? '실시간 알림 끄기' : '실시간 알림 켜기'}</span>
-                    </span>
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${alertsEnabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                      {alertsEnabled ? 'ON' : 'OFF'}
-                    </span>
-                  </button>
-
-                  {showInstallShortcut && (
-                    <button
-                      onClick={() => {
-                        setShowMobileMenu(false);
-                        handleInstallApp();
-                      }}
-                      className="mt-1 w-full flex items-center justify-between px-4 py-2 hover:bg-gray-100 transition-colors"
-                    >
-                      <span className="flex items-center gap-3 text-sm">
-                        <Home size={18} className="text-red-500" />
-                        <span>홈 화면에 추가하기</span>
-                      </span>
-                      <span className="text-[11px] font-medium text-gray-400">PWA</span>
-                    </button>
-                  )}
-
-                  <div className="px-4 py-2 border-t border-gray-200">
-                    <span className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                      <NotificationBell onOpenCommunity={handleOpenCommunity} />
-                      알림 센터
-                    </span>
-                  </div>
-
-                  <div className="mt-2 border-t border-gray-200">
-                    {currentUser ? (
-                      <div className="flex flex-col">
-                        <button
-                          onClick={() => {
-                            handleOpenStatistics();
-                            setShowMobileMenu(false);
-                          }}
-                          className="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
-                          title={statsUpdatedLabel ? `업데이트: ${statsUpdatedLabel}` : '지역별 실종자 통계 보기'}
-                        >
-                          <span className="flex items-center gap-2">
-                            <BarChart3 size={18} />
-                            <span>통계 보기</span>
-                            {statsHasFreshData && (
-                              <span className="inline-flex items-center rounded-full bg-yellow-200 px-1.5 py-0.5 text-[10px] font-semibold text-red-600">
-                                New
-                              </span>
-                            )}
-                          </span>
-                        </button>
-                        <button
-                          onClick={() => {
-                            navigateTo('reports');
-                            setShowMobileMenu(false);
-                          }}
-                          className="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
-                        >
-                          <FileText size={18} />
-                          내 제보 보기
-                        </button>
-                        <button
-                          onClick={() => {
-                            navigateTo('profile');
-                            setShowMobileMenu(false);
-                          }}
-                          className="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
-                        >
-                          <UserIcon size={18} />
-                          프로필 관리
-                        </button>
-                        <button
-                          onClick={() => {
-                            setShowMobileMenu(false);
-                            handleReportClick();
-                          }}
-                          className="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
-                        >
-                          <Plus size={18} />
-                          실종 제보하기
-                        </button>
-                        {isAdmin && (
-                          <button
-                            onClick={() => {
-                              navigateTo('admin');
-                              setShowMobileMenu(false);
-                            }}
-                            className="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
-                          >
-                            <Shield size={18} />
-                            관리자 대시보드
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex flex-col">
-                        <button
-                          onClick={() => {
-                            handleOpenStatistics();
-                            setShowMobileMenu(false);
-                          }}
-                          className="flex items-center gap-3 px-4 py-2 text-sm hover:bg-gray-100 transition-colors"
-                          title={statsUpdatedLabel ? `업데이트: ${statsUpdatedLabel}` : '지역별 실종자 통계 보기'}
-                        >
-                          <span className="flex items-center gap-2">
-                            <BarChart3 size={18} />
-                            <span>통계 보기</span>
-                            {statsHasFreshData && (
-                              <span className="inline-flex items-center rounded-full bg-yellow-200 px-1.5 py-0.5 text-[10px] font-semibold text-red-600">
-                                New
-                              </span>
-                            )}
-                          </span>
-                        </button>
-                        <div className="px-4 py-2 text-xs text-gray-500">
-                          로그인 후 제보, 알림 설정 등 모든 기능을 이용할 수 있습니다.
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* 데스크톱: 한 줄 */}
-        <div className="hidden md:flex items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => navigateTo('dashboard')}
-              className="p-2 hover:bg-red-700 rounded-lg transition-colors"
-              title="현황 대시보드로 이동"
-              aria-label="현황 대시보드로 이동"
-            >
-              <Home size={22} />
-            </button>
-            <button
-              onClick={() => setShowSidebar(!showSidebar)}
-              className="p-2 hover:bg-red-700 rounded-lg transition-colors"
-            >
-              {showSidebar ? <ChevronLeft size={24} /> : <ChevronRight size={24} />}
-            </button>
-            <h1 className="text-xl md:text-2xl font-bold">🚨 실시간 실종자 알림</h1>
-            <span className="px-3 py-1 bg-red-800 rounded-full text-sm">
-              {missingPersons.length}명
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {/* 알림 토글 */}
-            <button
-              onClick={() => setAlertsEnabled(!alertsEnabled)}
-              className="p-2 hover:bg-red-700 rounded-lg transition-colors"
-              title={alertsEnabled ? '알림 끄기' : '알림 켜기'}
-            >
-              {alertsEnabled ? <Bell size={20} /> : <BellOff size={20} />}
-            </button>
-            <NotificationBell onOpenCommunity={handleOpenCommunity} />
-            <button
-              onClick={() => setShowGridView(true)}
-              className="flex items-center gap-2 rounded-lg bg-white/10 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-white/20"
-              title="실종자 격자 보기 열기"
-              aria-label="실종자 격자 보기 열기"
-            >
-              <LayoutGrid size={18} />
-              <span className="hidden lg:inline">격자 보기</span>
-            </button>
-            <button
-              onClick={handleOpenStatistics}
-              className="flex items-center gap-2 rounded-lg bg-white/10 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-white/20"
-              aria-label="지역별 실종자 통계 보기"
-              title={statsUpdatedLabel ? `업데이트: ${statsUpdatedLabel}` : '지역별 실종자 통계 보기'}
-            >
-              <BarChart3 size={18} />
-              <span className="hidden lg:inline">통계 보기</span>
-              {statsHasFreshData && (
-                <span className="inline-flex items-center rounded-full bg-yellow-300 px-1.5 py-0.5 text-[10px] font-bold text-red-700">
-                  New
-                </span>
-              )}
-            </button>
-
-            {/* 로그인/로그아웃 */}
-            {currentUser ? (
-              <div className="flex items-center gap-2">
-                {isAdmin && (
-                  <button
-                    onClick={() => navigateTo('admin')}
-                    className="p-2 hover:bg-red-700 rounded-lg transition-colors bg-yellow-500 hover:bg-yellow-600"
-                    title="관리자 대시보드"
-                  >
-                    <Shield size={20} />
-                  </button>
-                )}
-                <button
-                  onClick={() => navigateTo('reports')}
-                  className="p-2 hover:bg-red-700 rounded-lg transition-colors"
-                  title="내 제보 기록"
-                >
-                  <FileText size={20} />
-                </button>
-                <button
-                  onClick={() => navigateTo('profile')}
-                  className="p-2 hover:bg-red-700 rounded-lg transition-colors"
-                  title="내 프로필"
-                >
-                  <UserIcon size={20} />
-                </button>
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-red-800 rounded-full cursor-pointer" onClick={() => navigateTo('profile')}>
-                  {isAdmin && <Shield size={16} color="#fbbf24" />}
-                  <UserCircle size={18} />
-                  <span className="text-sm">{currentUser.displayName || currentUser.email}</span>
-                </div>
-                <button
-                  onClick={handleLogout}
-                  className="p-2 hover:bg-red-700 rounded-lg transition-colors"
-                  title="로그아웃"
-                >
-                  <LogOut size={20} />
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-red-800/80 rounded-full">
-                  <UserCircle size={18} />
-                  <span className="text-sm opacity-90">{guestNickname}</span>
-                </div>
-                <button
-                  onClick={() => setShowLoginModal(true)}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-red-800 hover:bg-red-900 rounded-lg transition-colors"
-                >
-                  <LogIn size={18} />
-                  <span className="text-sm">로그인</span>
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
 
       {/* 메인 콘텐츠 */}
-      <div className="flex flex-1 overflow-hidden pb-10 relative">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden pb-10">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-2 shadow-sm">
+          <div className="flex items-center gap-2"><strong className="text-sm text-slate-900">실종자 지도</strong><span className="rounded-full bg-red-50 px-2 py-1 text-xs font-bold text-red-700">{filteredPersons.length}명</span></div>
+          <div className="flex flex-wrap gap-2"><button type="button" onClick={() => setShowSidebar((visible) => !visible)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">{showSidebar ? '목록 닫기' : '목록 열기'}</button><button type="button" onClick={() => setShowFilters((visible) => !visible)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">필터</button><button type="button" onClick={handleOpenGrid} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700">격자 보기</button><button type="button" onClick={handleOpenStatistics} className="rounded-lg bg-[#10213a] px-3 py-2 text-xs font-black text-white">지역 통계</button></div>
+        </div>
+        <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {/* 사이드바 */}
         {showSidebar && (
           <Sidebar
@@ -1655,7 +1369,7 @@ function App() {
 
         {/* 지도 */}
         <div className="flex-1 relative">
-          <EmergencyMap onOpenCommunity={handleOpenCommunity} />
+          <EmergencyMap onOpenCommunity={handleOpenCommunity} onOpenCaseNews={handleOpenCaseNews} />
         </div>
 
         {/* 필터 패널 (오버레이 - 모바일은 전체 화면, 데스크톱은 적당한 크기) */}
@@ -1672,6 +1386,7 @@ function App() {
             </div>
           </>
         )}
+        </div>
       </div>
 
       {/* 제보하기 버튼 (로그인 시에만 표시) */}
@@ -1705,19 +1420,30 @@ function App() {
         pauseOnHover
       />
 
+      {uiFlags.mobile_nav_v2_enabled && (
+        <MobileNavigation
+          activeView={activeView}
+          onHome={() => navigateTo('dashboard')}
+          onSearch={() => navigateTo('search')}
+          onMap={() => handleOpenMap()}
+          onReport={handleReportClick}
+          onProfile={() => currentUser ? navigateTo('profile') : setShowLoginModal(true)}
+        />
+      )}
+
       {/* 공지사항 배너 (하단) */}
-      {activeView === 'map' && bannerAnnouncements.length > 0 && (
+      {activeView === 'map' && informationBannerAnnouncements.length > 0 && (
         <div className="fixed bottom-0 left-0 right-0 z-30">
           <AnnouncementBanner
-            announcement={bannerAnnouncements[currentAnnouncementIndex]}
-            onPrev={() => setCurrentAnnouncementIndex((prev) => (prev - 1 + bannerAnnouncements.length) % bannerAnnouncements.length)}
-            onNext={() => setCurrentAnnouncementIndex((prev) => (prev + 1) % bannerAnnouncements.length)}
+            announcement={informationBannerAnnouncements[currentAnnouncementIndex % informationBannerAnnouncements.length]}
+            onPrev={() => setCurrentAnnouncementIndex((prev) => (prev - 1 + informationBannerAnnouncements.length) % informationBannerAnnouncements.length)}
+            onNext={() => setCurrentAnnouncementIndex((prev) => (prev + 1) % informationBannerAnnouncements.length)}
           />
         </div>
       )}
 
       <DesktopGridView
-        isOpen={showGridView}
+        isOpen={!uiFlags.unified_explorer_enabled && showGridView}
         onClose={() => setShowGridView(false)}
         persons={filteredPersons}
       />

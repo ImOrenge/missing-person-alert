@@ -2,6 +2,7 @@ import {onRequest} from "firebase-functions/v2/https";
 import {onSchedule} from "firebase-functions/v2/scheduler";
 import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
+import {FieldValue, Timestamp} from "firebase-admin/firestore";
 import express, {NextFunction, Request, Response} from "express";
 import cors from "cors";
 import axios from "axios";
@@ -20,6 +21,58 @@ import {
   RegionMetadata
 } from "./regionMetadata";
 import * as crypto from "crypto";
+import {
+  buildCaseNewsSearchPlan,
+  cleanupExpiredNaverNews,
+  DEFAULT_NAVER_NEWS_QUERY,
+  listNaverNews,
+  NAVER_NEWS_CACHE_DAYS,
+  searchCaseNaverNews,
+  syncNaverNews,
+} from "./news";
+import {
+  buildCollectionSitemap,
+  buildGoneHtml,
+  buildMissingPersonCollectionHtml,
+  buildMissingPersonHtml,
+  buildMissingPersonsSitemap,
+  buildSitemapIndex,
+  getPublicMissingType,
+  getPublicRegion,
+  getPublicRegionForAddress,
+  isSearchIndexableMissingPerson,
+  PUBLIC_MISSING_TYPES,
+  PUBLIC_REGIONS,
+  toPublicMissingPerson,
+} from "./missingPersonSeo";
+import {
+  loadReportingFeatureFlags,
+  registerPublicRuntimeConfigRoute,
+} from "./runtimeConfig";
+import {registerPublicSearchRoutes} from "./search/routes";
+import {getAlgoliaSearchConfig} from "./search/algolia-runtime";
+import {registerReportRoutesV2} from "./reports/routes";
+import {consumeReportingRateLimit} from "./reports/rate-limit";
+import {registerAdminReportRoutes} from "./reports/admin-routes";
+import {registerNotificationSubscriptionRoutes} from "./notifications/routes";
+import {registerDashboardPreferenceRoutes} from "./dashboard/routes";
+import {registerBannerRoutes} from "./banners/routes";
+import {registerPublicExploreRoutes} from "./explore/routes";
+export {processReportMediaUpload} from "./reports/media-pipeline";
+export {enforceReportRetention} from "./reports/retention";
+export {enforceClosedCasePolicy} from "./reports/case-lifecycle";
+export {
+  queueNotificationEvent,
+  createNewMissingCaseNotification,
+  targetNotificationEventTask,
+  deliverNotificationTask,
+  requeuePendingNotificationEvents,
+} from "./notifications/dispatcher";
+export {
+  syncAlgoliaOfficialCase,
+  syncAlgoliaPublicReport,
+  syncAlgoliaNewsArticle,
+} from "./search/algolia-sync";
 
 // Firebase Admin 초기화
 admin.initializeApp();
@@ -30,6 +83,8 @@ type AuthedRequest = Request & {user?: admin.auth.DecodedIdToken};
 const db = admin.firestore();
 const safe182EsntlId = defineSecret("SAFE182_ESNTL_ID");
 const safe182AuthKey = defineSecret("SAFE182_AUTH_KEY");
+const naverApiHubClientId = defineSecret("NAVER_API_HUB_CLIENT_ID");
+const naverApiHubClientSecret = defineSecret("NAVER_API_HUB_CLIENT_SECRET");
 
 const REGION_DAILY_DOC = () => db.collection("stats").doc("regionDaily");
 const REGION_METADATA_DOC = () => db.collection("stats").doc("regionMetadata");
@@ -204,6 +259,311 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.use(express.json());
+registerPublicRuntimeConfigRoute(app, db);
+registerPublicSearchRoutes(app, db, {getAlgoliaConfig: getAlgoliaSearchConfig});
+registerPublicExploreRoutes(app, db);
+
+const SEO_SITEMAP_PAGE_SIZE = 1000;
+const SEO_SITEMAP_MAX_PAGES = 50;
+const SEO_EVENT_NAMES = ["seo_app_cta_click", "share_started", "call_112_click", "call_182_click"] as const;
+type SeoEventName = typeof SEO_EVENT_NAMES[number];
+
+const isSeoEventName = (value: unknown): value is SeoEventName =>
+  typeof value === "string" && SEO_EVENT_NAMES.includes(value as SeoEventName);
+
+const isSafeCaseId = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0 && value.length <= 200 && !/[\/\u0000-\u001f\u007f]/.test(value);
+
+const seoulDateKey = (date: Date): string => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric", month: "2-digit", day: "2-digit", timeZone: "Asia/Seoul",
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  return `${year}-${month}-${day}`;
+};
+
+const recordSeoEvent = async (event: SeoEventName, caseId: string): Promise<void> => {
+  const day = seoulDateKey(new Date());
+  const caseKey = crypto.createHash("sha256").update(caseId).digest("hex").slice(0, 24);
+  const totalRef = db.collection("seoMetrics").doc(day);
+  const caseRef = totalRef.collection("cases").doc(caseKey);
+  const batch = db.batch();
+  batch.set(totalRef, {
+    day,
+    totals: {[event]: FieldValue.increment(1)},
+    updatedAt: FieldValue.serverTimestamp(),
+  }, {merge: true});
+  batch.set(caseRef, {
+    caseKey,
+    events: {[event]: FieldValue.increment(1)},
+    updatedAt: FieldValue.serverTimestamp(),
+  }, {merge: true});
+  await batch.commit();
+};
+
+const loadIndexablePersons = async (limit = 5000) => {
+  const snapshot = await db.collection("missingPersons").where("seoVisible", "==", true).limit(limit).get();
+  return snapshot.docs
+    .filter((doc) => isSearchIndexableMissingPerson(doc.data()))
+    .map((doc) => toPublicMissingPerson(doc.id, doc.data()))
+    .sort((a, b) => (b.missingDate || "").localeCompare(a.missingDate || ""));
+};
+
+const collectionResponseHeaders = (hasPersons: boolean) => ({
+  "Content-Type": "text/html; charset=utf-8",
+  "Cache-Control": "public, max-age=0, s-maxage=300, must-revalidate",
+  "X-Robots-Tag": hasPersons ? "index, follow, max-image-preview:large" : "noindex, follow",
+});
+
+const activeRegionLinks = (persons: ReturnType<typeof toPublicMissingPerson>[], limit = PUBLIC_REGIONS.length) => {
+  const slugs = new Set(persons.map((person) => getPublicRegionForAddress(person.address)?.slug).filter(Boolean));
+  return PUBLIC_REGIONS.filter((region) => slugs.has(region.slug)).slice(0, limit)
+    .map((region) => ({href: `/missing/region/${region.slug}`, label: `${region.name} 실종자 현황`}));
+};
+
+app.get("/missing", async (_req: Request, res: Response) => {
+  try {
+    const allPersons = await loadIndexablePersons();
+    const persons = allPersons.slice(0, 100);
+    const typeLinks = PUBLIC_MISSING_TYPES.filter((missingType) =>
+      allPersons.some((person) => missingType.types.includes(person.type)))
+      .map((missingType) => ({href: `/missing/type/${missingType.slug}`, label: missingType.name}));
+    const html = buildMissingPersonCollectionHtml({
+      title: "실종자 검색·조회·찾기 - 최신 실종자 현황",
+      description: "경찰청 안전Dream에서 현재 공개 수색 중인 최근 실종자를 이름, 지역, 인상착의로 검색하고 사진, 실종 날짜와 마지막 확인 위치를 조회하세요.",
+      canonicalPath: "/missing",
+      eyebrow: "전국 실종자 공개 검색",
+      supportingCopy: "경기·강원·충북·충남·전북·전남·경북·경남 8도와 제주, 서울·부산·대구·인천·광주·대전·울산·세종까지 전국 17개 시·도의 최근 실종자와 실종아동·치매환자·장애인 공개 수색 정보를 찾아볼 수 있습니다.",
+      relatedLinks: [...typeLinks, ...activeRegionLinks(allPersons)],
+      persons,
+    });
+    return res.status(persons.length ? 200 : 404).set(collectionResponseHeaders(persons.length > 0)).send(html);
+  } catch (error) {
+    logger.error("실종자 검색 SEO 페이지 생성 실패", error);
+    return res.status(503).set({"Retry-After": "300", "X-Robots-Tag": "noindex, nofollow"}).send(buildGoneHtml());
+  }
+});
+
+app.get("/missing/type/:typeSlug", async (req: Request, res: Response) => {
+  const missingType = getPublicMissingType(req.params.typeSlug || "");
+  if (!missingType) return res.status(404).set("X-Robots-Tag", "noindex, nofollow").send(buildGoneHtml());
+  try {
+    const persons = (await loadIndexablePersons()).filter((person) => missingType.types.includes(person.type)).slice(0, 100);
+    const html = buildMissingPersonCollectionHtml({
+      title: missingType.title,
+      description: missingType.description,
+      canonicalPath: `/missing/type/${missingType.slug}`,
+      eyebrow: missingType.eyebrow,
+      supportingCopy: "공식 출처에서 공개 중인 사건만 제공하며 이름, 지역, 실종 날짜와 인상착의를 확인해 수색 정보를 찾을 수 있습니다.",
+      relatedLinks: [
+        {href: "/missing", label: "전체 실종자 검색·조회"},
+        ...activeRegionLinks(persons),
+      ],
+      persons,
+    });
+    return res.status(persons.length ? 200 : 404).set(collectionResponseHeaders(persons.length > 0)).send(html);
+  } catch (error) {
+    logger.error("대상별 실종자 SEO 페이지 생성 실패", {type: missingType.slug, error});
+    return res.status(503).set({"Retry-After": "300", "X-Robots-Tag": "noindex, nofollow"}).send(buildGoneHtml());
+  }
+});
+
+app.get("/missing/today", async (_req: Request, res: Response) => {
+  try {
+    const today = seoulDateKey(new Date());
+    const persons = (await loadIndexablePersons()).filter((person) =>
+      person.missingDate ? seoulDateKey(new Date(person.missingDate)) === today : false).slice(0, 100);
+    const html = buildMissingPersonCollectionHtml({
+      title: `오늘의 실종자 공개 정보 - ${today}`,
+      description: `${today}가 실종일로 표시된 경찰청 안전Dream 공개 정보입니다. 사진, 인상착의와 마지막 확인 지역을 확인하세요.`,
+      canonicalPath: "/missing/today",
+      eyebrow: "오늘의 공개 수색 정보",
+      supportingCopy: "오늘 실종된 것으로 공개된 사건을 확인하고 이름, 지역과 인상착의로 실종자 정보를 검색할 수 있습니다.",
+      relatedLinks: [{href: "/missing", label: "전체 실종자 검색·조회"}, ...activeRegionLinks(persons)],
+      persons,
+    });
+    return res.status(persons.length ? 200 : 404).set(collectionResponseHeaders(persons.length > 0)).send(html);
+  } catch (error) {
+    logger.error("오늘 실종자 SEO 페이지 생성 실패", error);
+    return res.status(503).set({"Retry-After": "300", "X-Robots-Tag": "noindex, nofollow"}).send(buildGoneHtml());
+  }
+});
+
+app.get("/missing/region/:regionSlug", async (req: Request, res: Response) => {
+  const region = getPublicRegion(req.params.regionSlug || "");
+  if (!region) return res.status(404).set("X-Robots-Tag", "noindex, nofollow").send(buildGoneHtml());
+  try {
+    const persons = (await loadIndexablePersons()).filter((person) =>
+      getPublicRegionForAddress(person.address)?.slug === region.slug).slice(0, 100);
+    const html = buildMissingPersonCollectionHtml({
+      title: `${region.name} 실종자 현황·검색 - 최신 공개 정보`,
+      description: `${region.name}에서 현재 공개 수색 중인 최근 실종자를 찾고 사진, 인상착의, 실종 날짜와 마지막 확인 지역을 조회하세요.`,
+      canonicalPath: `/missing/region/${region.slug}`,
+      eyebrow: `${region.name} 공개 수색 정보`,
+      supportingCopy: `${region.name} 실종자 지도와 목록을 통해 최근 공개 수색 정보를 확인할 수 있습니다. 공식 출처에서 종결된 사건은 검색 결과에서 제외됩니다.`,
+      relatedLinks: [
+        {href: "/missing", label: "전체 실종자 검색·조회"},
+        ...PUBLIC_MISSING_TYPES.filter((missingType) => persons.some((person) => missingType.types.includes(person.type)))
+          .map((missingType) => ({href: `/missing/type/${missingType.slug}`, label: missingType.name})),
+      ],
+      persons,
+    });
+    return res.status(persons.length ? 200 : 404).set(collectionResponseHeaders(persons.length > 0)).send(html);
+  } catch (error) {
+    logger.error("지역 실종자 SEO 페이지 생성 실패", {region: region.slug, error});
+    return res.status(503).set({"Retry-After": "300", "X-Robots-Tag": "noindex, nofollow"}).send(buildGoneHtml());
+  }
+});
+
+app.get("/missing/:caseId", async (req: Request, res: Response) => {
+  const caseId = req.params.caseId?.trim();
+  if (!caseId || caseId.length > 200) {
+    return res.status(400).set("X-Robots-Tag", "noindex, nofollow").send(buildGoneHtml());
+  }
+
+  try {
+    const snapshot = await db.collection("missingPersons").doc(caseId).get();
+    const data = snapshot.data();
+    if (!snapshot.exists || !data) {
+      return res
+        .status(404)
+        .set({
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "public, max-age=0, s-maxage=60, must-revalidate",
+          "X-Robots-Tag": "noindex, nofollow, noarchive",
+        })
+        .send(buildGoneHtml());
+    }
+    if (!isSearchIndexableMissingPerson(data)) {
+      return res
+        .status(410)
+        .set({
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "public, max-age=0, s-maxage=60, must-revalidate",
+          "X-Robots-Tag": "noindex, nofollow, noarchive",
+        })
+        .send(buildGoneHtml());
+    }
+
+    const reportingFlags = await loadReportingFeatureFlags(db);
+    const publicReports = reportingFlags.reports_public_timeline_enabled
+      ? (await db.collection("publicReports").where("caseId", "==", caseId).limit(100).get()).docs
+        .map((document) => ({id: document.id, ...document.data()} as Record<string, any>))
+        .filter((report) => report.visibility === "public" && ["approved", "forwarded", "confirmed"].includes(report.status))
+        .map((report) => ({
+          id: String(report.id),
+          reportType: String(report.reportType || "sighting"),
+          occurredAt: String(report.occurredAt || ""),
+          publicDescription: String(report.publicDescription || ""),
+          publicLocationText: String(report.publicLocationText || "지역 비공개"),
+          publicStatus: report.status as "approved" | "forwarded" | "confirmed",
+        }))
+      : [];
+
+    return res
+      .status(200)
+      .set({
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": reportingFlags.reports_public_timeline_enabled
+          ? "public, max-age=0, s-maxage=30, must-revalidate"
+          : "public, max-age=0, s-maxage=300, must-revalidate",
+        "X-Robots-Tag": "index, follow, max-image-preview:large",
+      })
+      .send(buildMissingPersonHtml(toPublicMissingPerson(snapshot.id, data), publicReports));
+  } catch (error) {
+    logger.error("실종자 SEO 상세 페이지 생성 실패", {caseId, error});
+    return res
+      .status(503)
+      .set({"Retry-After": "300", "X-Robots-Tag": "noindex, nofollow"})
+      .send(buildGoneHtml());
+  }
+});
+
+app.post("/api/seo/events", async (req: Request, res: Response) => {
+  const {event, caseId} = req.body || {};
+  if (!isSeoEventName(event) || !isSafeCaseId(caseId)) {
+    return res.status(400).json({success: false});
+  }
+  try {
+    await recordSeoEvent(event, caseId);
+    return res.status(204).send();
+  } catch (error) {
+    logger.warn("SEO 전환 이벤트 기록 실패", {event, error});
+    return res.status(204).send();
+  }
+});
+
+app.get("/sitemap-missing-persons.xml", async (_req: Request, res: Response) => {
+  try {
+    const countSnapshot = await db.collection("missingPersons").where("seoVisible", "==", true).count().get();
+    const count = countSnapshot.data().count;
+    const pageCount = Math.max(1, Math.min(SEO_SITEMAP_MAX_PAGES, Math.ceil(count / SEO_SITEMAP_PAGE_SIZE)));
+    const paths = Array.from({length: pageCount}, (_, index) => `/sitemaps/public-cases-${index + 1}.xml`);
+    paths.push("/sitemaps/missing-collections.xml");
+    return res
+      .status(200)
+      .set({
+        "Content-Type": "application/xml; charset=utf-8",
+        "Cache-Control": "public, max-age=0, s-maxage=900, must-revalidate",
+      })
+      .send(buildSitemapIndex(paths));
+  } catch (error) {
+    logger.error("실종자 사이트맵 인덱스 생성 실패", error);
+    return res.status(503).set("Retry-After", "300").send("Service Unavailable");
+  }
+});
+
+const serveMissingPersonsSitemapPage = async (req: Request, res: Response) => {
+  const page = Number(req.params.page);
+  if (!Number.isInteger(page) || page < 1 || page > SEO_SITEMAP_MAX_PAGES) {
+    return res.status(404).set("X-Robots-Tag", "noindex").send("Not Found");
+  }
+  try {
+    const snapshot = await db.collection("missingPersons")
+      .where("seoVisible", "==", true)
+      .orderBy(admin.firestore.FieldPath.documentId())
+      .offset((page - 1) * SEO_SITEMAP_PAGE_SIZE)
+      .limit(SEO_SITEMAP_PAGE_SIZE)
+      .get();
+    const persons = snapshot.docs.filter((doc) => isSearchIndexableMissingPerson(doc.data()))
+      .map((doc) => toPublicMissingPerson(doc.id, doc.data()));
+    return res.status(200).set({
+      "Content-Type": "application/xml; charset=utf-8",
+      "Cache-Control": "public, max-age=0, s-maxage=900, must-revalidate",
+    }).send(buildMissingPersonsSitemap(persons));
+  } catch (error) {
+    logger.error("실종자 분할 사이트맵 생성 실패", {page, error});
+    return res.status(503).set("Retry-After", "300").send("Service Unavailable");
+  }
+};
+
+app.get("/sitemaps/public-cases-:page.xml", serveMissingPersonsSitemapPage);
+// Keep the previous child URL available while crawlers transition to the new sitemap index.
+app.get("/sitemaps/missing-persons-:page.xml", serveMissingPersonsSitemapPage);
+
+app.get("/sitemaps/missing-collections.xml", async (_req: Request, res: Response) => {
+  try {
+    const persons = await loadIndexablePersons();
+    const regionSlugs = new Set(persons.map((person) => getPublicRegionForAddress(person.address)?.slug).filter(Boolean));
+    const today = seoulDateKey(new Date());
+    const paths = PUBLIC_REGIONS.filter((region) => regionSlugs.has(region.slug))
+      .map((region) => `/missing/region/${region.slug}`);
+    PUBLIC_MISSING_TYPES.filter((missingType) => persons.some((person) => missingType.types.includes(person.type)))
+      .reverse()
+      .forEach((missingType) => paths.unshift(`/missing/type/${missingType.slug}`));
+    if (persons.length) paths.unshift("/missing");
+    if (persons.some((person) => person.missingDate && seoulDateKey(new Date(person.missingDate)) === today)) paths.unshift("/missing/today");
+    return res.status(200).set({
+      "Content-Type": "application/xml; charset=utf-8",
+      "Cache-Control": "public, max-age=0, s-maxage=900, must-revalidate",
+    }).send(buildCollectionSitemap(paths));
+  } catch (error) {
+    logger.error("실종자 컬렉션 사이트맵 생성 실패", error);
+    return res.status(503).set("Retry-After", "300").send("Service Unavailable");
+  }
+});
 
 const ANONYMOUS_PREFIX = "익명";
 const COMMENT_COLLECTION = "missingPersonComments";
@@ -221,29 +581,8 @@ const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000; // 5분
 
 const isAdminUser = (user?: admin.auth.DecodedIdToken | null): boolean => {
   if (!user) return false;
-
-  // Custom claim으로 admin 체크
-  if ((user as any).admin === true) return true;
-
-  // 하드코딩된 관리자 이메일 (임시)
-  const hardcodedAdminEmails = ["jmgi1024@gmail.com"];
-  if (user.email && hardcodedAdminEmails.includes(user.email)) {
-    logger.info(`Admin access granted for: ${user.email}`);
-    return true;
-  }
-
-  // 환경변수에서 admin 이메일 목록 가져오기
-  const adminEmailsEnv = process.env.ADMIN_EMAILS;
-  if (adminEmailsEnv) {
-    const adminEmails = adminEmailsEnv.split(",").map((email) => email.trim());
-    if (user.email && adminEmails.includes(user.email)) {
-      logger.info(`Admin access granted via env for: ${user.email}`);
-      return true;
-    }
-  }
-
-  logger.warn(`Admin access denied for: ${user.email || "no email"}`);
-  return false;
+  return ["reportModerator", "seniorModerator", "agencyOperator", "privacyOfficer", "systemAdmin"]
+    .some((claim) => (user as Record<string, unknown>)[claim] === true);
 };
 
 const base64UrlDecode = (input: string): Buffer => {
@@ -368,7 +707,7 @@ const removeUserFromCommentLikes = async (uid: string): Promise<number> => {
       await doc.ref.update({
         likedBy: newLikedBy,
         likes: newLikes,
-        updatedAt: admin.firestore.Timestamp.now(),
+        updatedAt: Timestamp.now(),
       });
     })
   );
@@ -391,7 +730,7 @@ const removeUserFromCommentReports = async (uid: string): Promise<number> => {
         reportedBy: newReportedBy,
         reportCount,
         reported: reportCount > 0,
-        updatedAt: admin.firestore.Timestamp.now(),
+        updatedAt: Timestamp.now(),
       });
     })
   );
@@ -458,7 +797,7 @@ const extractRegionFromData = (data: FirebaseFirestore.DocumentData | undefined)
 
 const normalizeDateValue = (value: unknown): number | null => {
   if (!value) return null;
-  if (value instanceof admin.firestore.Timestamp) {
+  if (value instanceof Timestamp) {
     return value.toMillis();
   }
   if (value instanceof Date) {
@@ -605,7 +944,7 @@ const aggregateMissingPersonSummary = async () => {
 
   const recent = recentRecords.slice(0, 20).map(({missingDateMs, ...rest}) => rest);
 
-  const timestamp = admin.firestore.Timestamp.now();
+  const timestamp = Timestamp.now();
 
   const statusArray = Object.entries(statusCounts).map(([status, count]) => ({status, count}));
   statusArray.sort((a, b) => b.count - a.count);
@@ -641,7 +980,7 @@ const serializeSummaryDocument = (data: FirebaseFirestore.DocumentData | null | 
 
   const {updatedAt, ...rest} = data;
   let updatedAtIso: string | null = null;
-  if (updatedAt instanceof admin.firestore.Timestamp) {
+  if (updatedAt instanceof Timestamp) {
     updatedAtIso = updatedAt.toDate().toISOString();
   } else if (updatedAt instanceof Date) {
     updatedAtIso = updatedAt.toISOString();
@@ -734,8 +1073,9 @@ const rateLimit = (keyExtractor: (req: AuthedRequest) => string) => {
 const verifyRecaptchaToken = async (token: string, expectedAction: string): Promise<boolean> => {
   const secretKey = process.env.RECAPTCHA_SECRET_KEY;
   if (!secretKey || !token) {
-    logger.warn("reCAPTCHA 검증 건너뜀 (환경변수 또는 토큰 누락)");
-    return true;
+    const emulator = process.env.FUNCTIONS_EMULATOR === "true" || String(process.env.GCLOUD_PROJECT || "").startsWith("demo-");
+    logger.warn(emulator ? "reCAPTCHA 검증 건너뜀 (로컬 Emulator)" : "reCAPTCHA 설정 또는 토큰 누락으로 요청 차단");
+    return emulator;
   }
 
   try {
@@ -753,6 +1093,7 @@ const verifyRecaptchaToken = async (token: string, expectedAction: string): Prom
 
     if (response.data.action && response.data.action !== expectedAction) {
       logger.warn(`reCAPTCHA 액션 불일치: ${response.data.action} (예상: ${expectedAction})`);
+      return false;
     }
 
     const minScore = parseFloat(process.env.RECAPTCHA_MIN_SCORE || "0.5");
@@ -777,6 +1118,31 @@ const ensureRecaptcha = async (req: AuthedRequest, res: Response, next: NextFunc
   }
   next();
 };
+
+registerReportRoutesV2(app, {
+  db,
+  authenticate,
+  ensureRecaptcha,
+  rateLimit: async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    const uid = req.user?.uid;
+    if (!uid) return res.status(401).json({success: false, error: "AUTH_REQUIRED"});
+    try {
+      const outcome = await consumeReportingRateLimit(db, uid);
+      res.set("X-RateLimit-Remaining", String(outcome.remaining));
+      if (!outcome.allowed) {
+        res.set("Retry-After", String(outcome.retryAfterSeconds));
+        return res.status(429).json({success: false, error: "REPORT_RATE_LIMITED"});
+      }
+      return next();
+    } catch {
+      return res.status(503).json({success: false, error: "RATE_LIMIT_UNAVAILABLE"});
+    }
+  },
+});
+registerAdminReportRoutes(app, {db, authenticate});
+registerNotificationSubscriptionRoutes(app, {db, authenticate});
+registerDashboardPreferenceRoutes(app, {db, authenticate});
+registerBannerRoutes(app, {db, authenticate});
 
 const buildAnonymousName = () => {
   const random = Math.floor(Math.random() * 900) + 100;
@@ -812,7 +1178,7 @@ const notifyCommentReply = async (parent: MissingPersonComment, reply: MissingPe
     replyCommentId: reply.commentId,
     type: "reply",
     isRead: false,
-    createdAt: admin.firestore.Timestamp.now(),
+    createdAt: Timestamp.now(),
   });
 
   try {
@@ -857,6 +1223,167 @@ app.get("/api/status", (req: Request, res: Response) => {
     environment: "production",
     platform: "firebase-functions",
   });
+});
+
+const parseNewsDateQuery = (value: unknown, endOfDay = false): Date | undefined => {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
+  const suffix = endOfDay ? "T23:59:59.999+09:00" : "T00:00:00.000+09:00";
+  const parsed = new Date(`${value}${suffix}`);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+};
+
+const NAVER_CASE_SEARCH_DAILY_LIMIT = 5000;
+const NAVER_CASE_SEARCH_PER_CASE_DAILY_LIMIT = 20;
+
+const consumeCaseNewsSearchQuota = async (caseId: string, requestCost: number): Promise<"OK" | "CASE_LIMIT" | "DAILY_LIMIT"> => {
+  const dayKey = formatDateKey(new Date(Date.now() + 9 * 60 * 60 * 1000));
+  const caseKey = crypto.createHash("sha256").update(caseId).digest("hex").slice(0, 32);
+  const quotaRef = db.collection("serviceQuotas").doc(`naver-case-search-${dayKey}`);
+
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(quotaRef);
+    const data = snapshot.exists ? snapshot.data() as Record<string, any> : {};
+    const total = Number.isFinite(data.total) ? Number(data.total) : 0;
+    const cases = data.cases && typeof data.cases === "object" ? {...data.cases} : {};
+    const caseCount = Number.isFinite(cases[caseKey]) ? Number(cases[caseKey]) : 0;
+
+    if (total + requestCost > NAVER_CASE_SEARCH_DAILY_LIMIT) return "DAILY_LIMIT";
+    if (caseCount >= NAVER_CASE_SEARCH_PER_CASE_DAILY_LIMIT) return "CASE_LIMIT";
+
+    cases[caseKey] = caseCount + 1;
+    transaction.set(quotaRef, {
+      source: "NAVER_API_HUB",
+      purpose: "CASE_CONTEXT_SEARCH_RATE_LIMIT",
+      dayKey,
+      total: total + requestCost,
+      cases,
+      updatedAt: FieldValue.serverTimestamp(),
+      expiresAt: Timestamp.fromMillis(Date.now() + 8 * 24 * 60 * 60 * 1000),
+    }, {merge: false});
+    return "OK";
+  });
+};
+
+const cleanupExpiredCaseNewsSearchQuotas = async (): Promise<number> => {
+  const snapshot = await db.collection("serviceQuotas")
+    .where("expiresAt", "<=", Timestamp.now())
+    .limit(400)
+    .get();
+  if (snapshot.empty) return 0;
+  const batch = db.batch();
+  snapshot.docs.forEach((document) => batch.delete(document.ref));
+  await batch.commit();
+  return snapshot.size;
+};
+
+app.get("/api/news", async (req: Request, res: Response) => {
+  try {
+    const limit = typeof req.query.limit === "string" ? Number(req.query.limit) : undefined;
+    const cursor = typeof req.query.cursor === "string" ? req.query.cursor : undefined;
+    const from = parseNewsDateQuery(req.query.from);
+    const to = parseNewsDateQuery(req.query.to, true);
+
+    if (req.query.from && !from) {
+      return res.status(400).json({success: false, error: "from은 YYYY-MM-DD 형식이어야 합니다"});
+    }
+    if (req.query.to && !to) {
+      return res.status(400).json({success: false, error: "to는 YYYY-MM-DD 형식이어야 합니다"});
+    }
+    if (from && to && from.getTime() > to.getTime()) {
+      return res.status(400).json({success: false, error: "from은 to보다 늦을 수 없습니다"});
+    }
+
+    const result = await listNaverNews(db, {limit, cursor, from, to});
+    res.set("Cache-Control", "no-store");
+    return res.json({
+      success: true,
+      source: "NAVER_API_HUB",
+      sourceLabel: "NAVER 검색 결과",
+      mode: "HISTORY_CACHE",
+      query: process.env.NAVER_NEWS_QUERY?.trim() || DEFAULT_NAVER_NEWS_QUERY,
+      retentionDays: NAVER_NEWS_CACHE_DAYS,
+      ...result,
+    });
+  } catch (error: any) {
+    if (error?.message === "INVALID_NEWS_CURSOR") {
+      return res.status(400).json({success: false, error: "뉴스 cursor가 유효하지 않습니다"});
+    }
+    logger.error("뉴스 목록 조회 실패", error);
+    return res.status(500).json({success: false, error: "뉴스 목록을 불러오지 못했습니다"});
+  }
+});
+
+app.get("/api/missing-persons/:caseId/news-search", async (req: Request, res: Response) => {
+  const {caseId} = req.params;
+  try {
+    if (!caseId || caseId.length > 128 || /[\/\u0000-\u001f\u007f]/.test(caseId)) {
+      return res.status(400).json({success: false, error: "유효한 실종자 식별코드가 필요합니다"});
+    }
+
+    const requestedLimit = typeof req.query.limit === "string" ? Number(req.query.limit) : 20;
+    const limit = Number.isFinite(requestedLimit) ? Math.min(20, Math.max(1, Math.floor(requestedLimit))) : 20;
+    const cursor = typeof req.query.cursor === "string" ? req.query.cursor : undefined;
+
+    const caseSnapshot = await db.collection("missingPersons").doc(caseId).get();
+    if (!caseSnapshot.exists) {
+      return res.status(404).json({success: false, error: "실종자 정보를 찾을 수 없습니다"});
+    }
+
+    const caseData = caseSnapshot.data() as Record<string, unknown>;
+    const searchPlan = buildCaseNewsSearchPlan(caseData);
+    if (!searchPlan) {
+      return res.status(422).json({
+        success: false,
+        error: "이름이 비공개이거나 불명확해 개별 뉴스 검색을 제공할 수 없습니다",
+      });
+    }
+
+    const quota = await consumeCaseNewsSearchQuota(caseId, searchPlan.queries.length);
+    if (quota !== "OK") {
+      return res.status(429).json({
+        success: false,
+        error: quota === "CASE_LIMIT"
+          ? "이 실종자에 대한 오늘의 뉴스 검색 한도를 초과했습니다"
+          : "오늘의 뉴스 검색 한도를 초과했습니다",
+      });
+    }
+
+    const clientId = naverApiHubClientId.value();
+    const clientSecret = naverApiHubClientSecret.value();
+    if (!clientId || !clientSecret) {
+      return res.status(503).json({success: false, error: "NAVER 뉴스 검색 설정이 완료되지 않았습니다"});
+    }
+
+    const result = await searchCaseNaverNews({clientId, clientSecret}, searchPlan.queries, limit, cursor);
+    res.set("Cache-Control", "private, no-store");
+    return res.json({
+      success: true,
+      source: "NAVER_API_HUB",
+      sourceLabel: "NAVER 검색 결과",
+      mode: "CASE_CONTEXT_SEARCH",
+      query: searchPlan.queries[0],
+      queries: searchPlan.queries,
+      searchCriteria: searchPlan.criteria,
+      retentionDays: 0,
+      associationStored: false,
+      caseContext: {
+        id: caseSnapshot.id,
+        name: searchPlan.criteria.name,
+        verification: "UNVERIFIED_SEARCH_RESULTS",
+      },
+      ...result,
+    });
+  } catch (error: any) {
+    const message = typeof error?.message === "string" ? error.message : "UNKNOWN";
+    logger.error("실종자별 NAVER 뉴스 검색 실패", {caseId, code: message});
+    if (message === "INVALID_CASE_NEWS_CURSOR") {
+      return res.status(400).json({success: false, error: "뉴스 cursor가 유효하지 않습니다"});
+    }
+    if (message.startsWith("NAVER_NEWS_API_")) {
+      return res.status(502).json({success: false, error: "NAVER 뉴스 검색에 일시적으로 실패했습니다"});
+    }
+    return res.status(500).json({success: false, error: "실종자별 뉴스 검색에 실패했습니다"});
+  }
 });
 
 app.get("/api/admin/reports/summary", requireAdmin, async (req: AuthedRequest, res: Response) => {
@@ -1099,7 +1626,7 @@ app.post("/api/auth/data-deletion", async (req: Request, res: Response) => {
     );
 
     const allSuccessful = results.every((task) => task.success);
-    const timestamp = admin.firestore.Timestamp.now();
+    const timestamp = Timestamp.now();
     const deletionCode = `${uid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
     const protocolHeader = (req.headers["x-forwarded-proto"] as string) || req.protocol || "https";
@@ -1159,8 +1686,8 @@ const incrementViewHandler = async (req: Request, res: Response) => {
     }
 
     const existingLogSnap = await viewLogRef.get();
-    const existingLog = existingLogSnap.data() as {lastViewed?: number | admin.firestore.Timestamp} | undefined;
-    const lastViewed = existingLog?.lastViewed instanceof admin.firestore.Timestamp
+    const existingLog = existingLogSnap.data() as {lastViewed?: number | Timestamp} | undefined;
+    const lastViewed = existingLog?.lastViewed instanceof Timestamp
       ? existingLog.lastViewed.toMillis()
       : typeof existingLog?.lastViewed === "number"
         ? existingLog.lastViewed
@@ -1392,7 +1919,7 @@ app.post(
         ? buildAnonymousName()
         : (userRecord.displayName || userRecord.email || userRecord.phoneNumber || buildAnonymousName());
 
-      const now = admin.firestore.Timestamp.now();
+      const now = Timestamp.now();
       const docRef = db.collection(COMMENT_COLLECTION).doc();
 
       const comment: MissingPersonComment = {
@@ -1464,7 +1991,7 @@ app.post(
       const nickname = isAnonymous
         ? buildAnonymousName()
         : (userRecord.displayName || userRecord.email || userRecord.phoneNumber || buildAnonymousName());
-      const now = admin.firestore.Timestamp.now();
+      const now = Timestamp.now();
       const replyRef = db.collection(COMMENT_COLLECTION).doc();
       const reply: MissingPersonComment = {
         commentId: replyRef.id,
@@ -1538,7 +2065,7 @@ app.patch(
 
       await docRef.update({
         content: content.trim(),
-        updatedAt: admin.firestore.Timestamp.now(),
+        updatedAt: Timestamp.now(),
         isEdited: true,
       });
 
@@ -1575,7 +2102,7 @@ app.delete(
       await docRef.update({
         isDeleted: true,
         isHidden: true,
-        updatedAt: admin.firestore.Timestamp.now(),
+        updatedAt: Timestamp.now(),
       });
 
       res.json({success: true});
@@ -1681,7 +2208,7 @@ app.post(
           reportedBy: userId,
           reason: reason as CommentReportReason,
           description: typeof description === "string" ? description : undefined,
-          createdAt: admin.firestore.Timestamp.now(),
+          createdAt: Timestamp.now(),
           status: "pending",
         };
 
@@ -1691,7 +2218,7 @@ app.post(
           reportCount,
           reportedBy: Array.from(reportedBy),
           isHidden,
-          updatedAt: admin.firestore.Timestamp.now(),
+          updatedAt: Timestamp.now(),
         });
       });
 
@@ -1753,7 +2280,7 @@ app.post("/api/comment-reports/:reportId/resolve", requireAdmin, async (req: Aut
     const commentRef = db.collection(COMMENT_COLLECTION).doc(report.commentId);
 
     const updates: any = {status};
-    updates.resolvedAt = admin.firestore.Timestamp.now();
+    updates.resolvedAt = Timestamp.now();
     updates.resolvedBy = req.user?.uid || "admin";
 
     await db.runTransaction(async (tx) => {
@@ -1762,12 +2289,12 @@ app.post("/api/comment-reports/:reportId/resolve", requireAdmin, async (req: Aut
       if (hideComment) {
         tx.update(commentRef, {
           isHidden: true,
-          updatedAt: admin.firestore.Timestamp.now(),
+          updatedAt: Timestamp.now(),
         });
       } else if (status === "dismissed") {
         tx.update(commentRef, {
           isHidden: false,
-          updatedAt: admin.firestore.Timestamp.now(),
+          updatedAt: Timestamp.now(),
         });
       }
     });
@@ -1792,7 +2319,7 @@ app.post("/api/comments/:commentId/moderation", requireAdmin, async (req: Authed
 
     await docRef.update({
       isHidden: !!isHidden,
-      updatedAt: admin.firestore.Timestamp.now(),
+      updatedAt: Timestamp.now(),
     });
 
     res.json({success: true});
@@ -2197,187 +2724,23 @@ app.get("/api/admin/statistics", requireAdmin, async (req: AuthedRequest, res: R
 });
 
 // Reports endpoints
-app.post(
-  "/api/reports",
+// Legacy reporting stored exact locations and reporter profile fields in a public-shaped
+// document. Keep the route signature only as a fail-closed compatibility tombstone while
+// clients migrate to the reviewed V2 reporting domain.
+app.all(
+  ["/api/reports", "/api/reports/my", "/api/reports/all", "/api/reports/:reportId"],
   authenticate,
-  ensureRecaptcha,
-  rateLimit((req) => req.user?.uid ?? "anonymous"),
-  async (req: AuthedRequest, res: Response) => {
-    try {
-      const {person, uid} = req.body || {};
-      const userId = req.user?.uid;
-
-      if (!userId) {
-        return res.status(401).json({success: false, error: "인증이 필요합니다"});
-      }
-
-      // 요청한 uid와 인증된 uid가 일치하는지 확인
-      if (uid !== userId) {
-        return res.status(403).json({success: false, error: "권한이 없습니다"});
-      }
-
-      // 필수 필드 검증
-      if (!person?.name || !person?.age || !person?.location?.address) {
-        return res.status(400).json({
-          success: false,
-          error: "이름, 나이, 실종 장소는 필수 입력 항목입니다",
-        });
-      }
-
-      // 사용자 정보 가져오기
-      const userRecord = await admin.auth().getUser(userId);
-
-      // Firestore에 저장할 데이터 구성
-      const docRef = db.collection("missing_persons").doc();
-      const now = admin.firestore.Timestamp.now();
-
-      const report = {
-        id: docRef.id,
-        name: person.name,
-        age: person.age,
-        gender: person.gender || "M",
-        location: {
-          lat: person.location.lat || 37.5665,
-          lng: person.location.lng || 126.9780,
-          address: person.location.address,
-        },
-        photo: person.photo || null,
-        description: person.description || "특이사항 없음",
-        missingDate: new Date().toISOString(),
-        type: person.type || "missing_child",
-        status: "active",
-        source: "user_report",
-        reportedBy: {
-          uid: userId,
-          email: userRecord.email || null,
-          phoneNumber: userRecord.phoneNumber || null,
-          displayName: userRecord.displayName || null,
-          reportedAt: now.toDate().toISOString(),
-        },
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      // Firestore에 저장
-      await docRef.set(report);
-
-      logger.info(`제보 등록 성공: ${report.id} by ${userId}`);
-
-      res.status(201).json({
-        success: true,
-        report,
-        message: "실종자 제보가 성공적으로 등록되었습니다",
-      });
-    } catch (error: any) {
-      logger.error("제보 등록 실패", error);
-      res.status(500).json({
-        success: false,
-        error: "제보 등록 중 오류가 발생했습니다",
-      });
-    }
-  }
+  (_req: AuthedRequest, res: Response) => {
+    res.set("Cache-Control", "no-store");
+    res.set("Link", "</api/v2/reports>; rel=successor-version");
+    return res.status(410).json({
+      success: false,
+      error: "LEGACY_REPORTING_RETIRED",
+      message: "기존 제보 경로가 종료되었습니다. 안전한 신규 제보 경로를 이용해주세요.",
+      replacement: "/api/v2/reports",
+    });
+  },
 );
-
-app.get("/api/reports/my", authenticate, async (req: AuthedRequest, res: Response) => {
-  try {
-    const userId = req.user?.uid;
-
-    if (!userId) {
-      return res.status(401).json({success: false, error: "인증이 필요합니다"});
-    }
-
-    // 사용자의 제보 조회
-    const reportsSnapshot = await db
-      .collection("missing_persons")
-      .where("reportedBy.uid", "==", userId)
-      .orderBy("createdAt", "desc")
-      .get();
-
-    const reports = reportsSnapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-
-    res.json({
-      success: true,
-      reports,
-      total: reports.length,
-    });
-  } catch (error: any) {
-    logger.error("내 제보 조회 실패", error);
-    res.status(500).json({
-      success: false,
-      error: "제보 조회 중 오류가 발생했습니다",
-    });
-  }
-});
-
-app.get("/api/reports/all", authenticate, async (req: AuthedRequest, res: Response) => {
-  try {
-    // Check if user is admin
-    if (!isAdminUser(req.user)) {
-      return res.status(403).json({success: false, error: "관리자 권한이 필요합니다"});
-    }
-
-    const reportsSnapshot = await db.collection("missing_persons").get();
-    const reports = reportsSnapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-
-    res.json({
-      success: true,
-      reports,
-      total: reports.length,
-    });
-  } catch (error: any) {
-    logger.error("전체 제보 조회 실패", error);
-    res.status(500).json({
-      success: false,
-      error: "전체 제보 조회 중 오류가 발생했습니다",
-    });
-  }
-});
-
-app.delete("/api/reports/:reportId", authenticate, async (req: AuthedRequest, res: Response) => {
-  try {
-    const {reportId} = req.params;
-    const userId = req.user?.uid;
-
-    if (!userId) {
-      return res.status(401).json({success: false, error: "인증이 필요합니다"});
-    }
-
-    const docRef = db.collection("missing_persons").doc(reportId);
-    const docSnap = await docRef.get();
-
-    if (!docSnap.exists) {
-      return res.status(404).json({success: false, error: "제보를 찾을 수 없습니다"});
-    }
-
-    const reportData = docSnap.data();
-    const isOwner = reportData?.reportedBy?.uid === userId;
-    const isAdmin = isAdminUser(req.user);
-
-    // 본인 또는 관리자만 삭제 가능
-    if (!isOwner && !isAdmin) {
-      return res.status(403).json({success: false, error: "삭제 권한이 없습니다"});
-    }
-
-    await docRef.delete();
-
-    res.json({
-      success: true,
-      message: "제보가 삭제되었습니다",
-    });
-  } catch (error: any) {
-    logger.error("제보 삭제 실패", error);
-    res.status(500).json({
-      success: false,
-      error: "제보 삭제 중 오류가 발생했습니다",
-    });
-  }
-});
 
 // Firebase Functions로 export
 export const api = onRequest({
@@ -2385,6 +2748,7 @@ export const api = onRequest({
   cors: true,
   memory: "512MiB",
   timeoutSeconds: 60,
+  secrets: [naverApiHubClientId, naverApiHubClientSecret],
 }, app);
 
 interface SubRegionAccumulator {
@@ -2599,10 +2963,10 @@ export const aggregateRegionStatistics = onSchedule({
   try {
     logger.info("📊 지역별 실종자 통계 집계 시작");
     const {regions, totalCases, activeCases} = await collectRegionStats();
-    const generatedAt = admin.firestore.Timestamp.now();
+    const generatedAt = Timestamp.now();
 
     const payload = {
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
       generatedAt,
       totals: {
         regions: regions.size,
@@ -2615,7 +2979,7 @@ export const aggregateRegionStatistics = onSchedule({
 
     await REGION_DAILY_DOC().set(payload, {merge: false});
     await REGION_METADATA_DOC().set({
-      lastUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastUpdatedAt: FieldValue.serverTimestamp(),
       regions: REGION_METADATA.map((region) => ({
         id: region.id,
         name: region.name,
@@ -2637,6 +3001,37 @@ export const aggregateRegionStatistics = onSchedule({
     await sendSlackNotification(`❌ 지역 통계 집계 실패: ${error?.message ?? error}`);
     throw error;
   }
+});
+
+export const syncNaverNewsJob = onSchedule({
+  schedule: "*/30 * * * *",
+  timeZone: "Asia/Seoul",
+  region: "asia-northeast3",
+  memory: "256MiB",
+  timeoutSeconds: 120,
+  secrets: [naverApiHubClientId, naverApiHubClientSecret],
+}, async () => {
+  const clientId = naverApiHubClientId.value();
+  const clientSecret = naverApiHubClientSecret.value();
+  if (!clientId || !clientSecret) {
+    throw new Error("NAVER API HUB credentials are not configured");
+  }
+
+  const query = process.env.NAVER_NEWS_QUERY?.trim() || DEFAULT_NAVER_NEWS_QUERY;
+  const result = await syncNaverNews(db, {clientId, clientSecret}, query);
+  logger.info("NAVER 뉴스 동기화 완료", {...result, query});
+});
+
+export const cleanupExpiredNaverNewsJob = onSchedule({
+  schedule: "15 3 * * *",
+  timeZone: "Asia/Seoul",
+  region: "asia-northeast3",
+  memory: "256MiB",
+  timeoutSeconds: 120,
+}, async () => {
+  const deleted = await cleanupExpiredNaverNews(db);
+  const quotaDocumentsDeleted = await cleanupExpiredCaseNewsSearchQuotas();
+  logger.info("NAVER 뉴스 보관 기간 만료 정리 완료", {deleted, quotaDocumentsDeleted});
 });
 
 /**
@@ -2664,7 +3059,9 @@ export const pollMissingPersonsAPI = onSchedule({
     let allItems: any[] = [];
     let currentPage = 1;
     const rowSize = 100;
+    const maxPages = 100;
     let hasMoreData = true;
+    let sourceSnapshotComplete = false;
 
     // 페이지네이션으로 모든 데이터 수집
     while (hasMoreData) {
@@ -2703,18 +3100,26 @@ export const pollMissingPersonsAPI = onSchedule({
       }
 
       const apiList = response.data.list || [];
-      const totalCount = response.data.totalCount || 0;
+      const parsedTotalCount = Number(response.data.totalCount);
+      const totalCount = Number.isInteger(parsedTotalCount) && parsedTotalCount > 0 ? parsedTotalCount : null;
 
       if (apiList.length === 0) {
         logger.info(currentPage === 1 ? "📭 실종자 정보 없음" : `마지막 페이지 도달`);
+        if (currentPage > 1 && allItems.length > 0) {
+          sourceSnapshotComplete = true;
+        }
         hasMoreData = false;
         break;
       }
 
-      logger.info(`✓ ${apiList.length}건 수신 (전체 ${totalCount}건 중, 페이지 ${currentPage})`);
+      logger.info(`✓ ${apiList.length}건 수신 (전체 ${totalCount ?? "미상"}건 중, 페이지 ${currentPage})`);
       allItems = allItems.concat(apiList);
 
-      if (allItems.length >= totalCount || apiList.length < rowSize) {
+      if ((totalCount !== null && allItems.length >= totalCount) || apiList.length < rowSize) {
+        hasMoreData = false;
+        sourceSnapshotComplete = true;
+      } else if (currentPage >= maxPages) {
+        logger.warn("안전드림 API 최대 페이지 제한에 도달했습니다", {maxPages});
         hasMoreData = false;
       } else {
         currentPage++;
@@ -2729,39 +3134,53 @@ export const pollMissingPersonsAPI = onSchedule({
 
     logger.info(`📊 총 ${allItems.length}건 수집 완료`);
 
-    // Firestore에서 기존 데이터 확인하여 중복 필터링
+    // 공식 API의 현재 목록을 일괄 반영한다. 검색 노출은 이 동기화에서
+    // 실제로 확인된 공식 데이터에만 허용한다.
     const db = admin.firestore();
     const missingPersonsRef = db.collection("missingPersons");
+    const currentIds = new Set<string>();
+    const transformedItems = allItems.map((item) => {
+      const transformed = transformAPIData(item);
+      currentIds.add(transformed.id);
+      return transformed;
+    });
 
-    let saved = 0;
-    let duplicates = 0;
-
-    for (const item of allItems) {
-      try {
-        // ID 생성
-        const id = String(item.msspsnIdntfccd || `safe182_${item.nm}_${item.age}`);
-
-        // 중복 체크
-        const docRef = missingPersonsRef.doc(id);
-        const docSnap = await docRef.get();
-
-        if (docSnap.exists) {
-          duplicates++;
-          continue;
-        }
-
-        // 데이터 변환
-        const transformedItem = transformAPIData(item);
-
-        // Firestore에 저장
-        await docRef.set(transformedItem);
-        saved++;
-      } catch (error: any) {
-        logger.error(`데이터 변환/저장 실패 (${item.nm}):`, error.message);
+    for (let offset = 0; offset < transformedItems.length; offset += 400) {
+      const batch = db.batch();
+      for (const item of transformedItems.slice(offset, offset + 400)) {
+        batch.set(missingPersonsRef.doc(item.id), item, {merge: true});
       }
+      await batch.commit();
     }
 
-    logger.info(`✅ 폴링 완료: ${saved}건 저장, ${duplicates}건 중복 제외`);
+    const previouslyVisible = sourceSnapshotComplete ?
+      await missingPersonsRef.where("seoVisible", "==", true).get() : null;
+    const noLongerPublished = previouslyVisible ? previouslyVisible.docs.filter((doc) => {
+      const data = doc.data();
+      return data.source === "api" && !currentIds.has(doc.id);
+    }) : [];
+
+    if (!sourceSnapshotComplete) {
+      logger.warn("안전드림 전체 페이지 수집이 확인되지 않아 기존 검색 노출 종료를 건너뜁니다", {
+        collected: transformedItems.length,
+      });
+    }
+
+    for (let offset = 0; offset < noLongerPublished.length; offset += 400) {
+      const batch = db.batch();
+      for (const doc of noLongerPublished.slice(offset, offset + 400)) {
+        batch.update(doc.ref, {
+          seoVisible: false,
+          status: "found",
+          foundReason: "official_source_removed",
+          removedFromSourceAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+      await batch.commit();
+    }
+
+    logger.info(`✅ 폴링 완료: ${transformedItems.length}건 동기화, ${noLongerPublished.length}건 검색 노출 종료`);
   } catch (error: any) {
     logger.error("❌ 안전드림 API 폴링 오류:", error);
     throw error;
@@ -2844,6 +3263,8 @@ function transformAPIData(apiData: any) {
     type,
     status: "active",
     source: "api",
+    seoVisible: true,
+    sourceLastSeenAt: FieldValue.serverTimestamp(),
     height: apiData.height || null,
     weight: apiData.bdwgh || null,
     clothes: apiData.alldressingDscd || null,
@@ -2852,7 +3273,7 @@ function transformAPIData(apiData: any) {
     hairShape: apiData.hairshpeDscd || null,
     hairColor: apiData.haircolrDscd || null,
     apiTargetCode: apiData.writngTrgetDscd || null,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
   };
 }
 

@@ -1,0 +1,26 @@
+id: feature.profile-hub
+name: ProfileHubPage
+kind: feature
+status: candidate
+source: frontend/src/features/profile/ProfileHubPage.tsx
+owner: account-experience
+public_api:
+  props: [activeSection, onNavigate, children]
+  events: [onNavigate]
+dependencies:
+  external: [react, lucide-react]
+styling:
+  global_css: frontend/src/styles/features/profile-hub.css
+  namespace: f-profile-hub
+  variants: [desktop-side-menu, mobile-tab-menu, active-section]
+state:
+  local: false
+  external_store: false
+side_effects: false
+a11y_contract:
+  keyboard: native-button
+  aria: [aria-current, aria-labelledby]
+test_surface:
+  typecheck: required
+  interaction: required
+  visual: required

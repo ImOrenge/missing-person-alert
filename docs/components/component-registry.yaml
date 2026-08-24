@@ -1,0 +1,486 @@
+version: 1
+updated: 2026-08-24
+stability_policy: component-stabilizer
+global_css_contract:
+  entrypoint: frontend/src/index.css
+  convention: tailwind-utilities-with-existing-global-base
+  invariant: preserve-route-and-trust-contracts-while-allowing-first-redesign-layout
+  inline_style_exception: runtime-map-sizing-and-positioning-only
+
+components:
+  - id: page.privacy-policy
+    name: PrivacyPolicyPage
+    kind: page
+    status: candidate
+    source: frontend/src/features/privacy/PrivacyPolicyPage.tsx
+    owner: privacy-operations
+    public_api:
+      props: []
+      route: /privacy
+    dependencies:
+      internal: [LoginModal.PRIVACY_POLICY]
+      external: [react, lucide-react]
+    styling:
+      convention: existing-tailwind-utilities
+      global_css_changes: none
+    a11y_contract:
+      landmark: article-with-labelled-heading
+      public_access: authentication-not-required
+    test_surface:
+      route-history: required
+      content-contract: required
+      browser-visual: required
+    change_policy:
+      current_gate: privacy-content-behavioral
+      requires: [policy-owner-review, route-test, browser-check]
+
+  - id: page.dashboard-home
+    name: DashboardHome
+    kind: page
+    status: candidate
+    source: frontend/src/components/DashboardHome.tsx
+    owner: public-experience
+    public_api:
+      props: [persons, hasLoadedPersons, announcements, currentUser, statsUpdatedLabel, pushStatus, newsItems, newsLoading, newsError, reportMapLayerEnabled, hideLegacyMobileNav, personalizationEnabled]
+      events: [onOpenSearch, onOpenMap, onOpenCommunity, onOpenNews, onOpenCaseNews, onRetryNews, onOpenRegion, onOpenStatistics, onOpenGrid, onOpenReport, onOpenAlerts, onOpenMyReports, onOpenPublicReports, onOpenLogin, onOpenProfile, onEnablePush]
+      route: /
+    dependencies:
+      internal: [DashboardSectionSurface, mini-map, NewsSummarySection, exploreService, reportingService]
+      external: [react, lucide-react]
+    styling:
+      convention: existing-tailwind-utilities
+      invariants: [global-header-owned-by-app-shell, emergency-banner-owned-by-app-shell, search-first-main-content, urgent-case-priority, map-selection-linkage, fixed-safety-actions, trust-labelled-data, no-dashboard-sidebar]
+    state:
+      local: [searchQuery, selectedRegion, selectedMapPersonId, publicReports, ownReports]
+      external_store: false
+    side_effects: [callback-driven-navigation, fetch-public-reports, fetch-authenticated-own-reports]
+    a11y_contract:
+      landmark: main-dashboard-sections-with-headings
+      keyboard: native-buttons-and-links
+      mobile_navigation: persistent-five-item-navigation
+    test_surface:
+      typecheck: required
+      route-history: required
+      interaction: required
+      visual: required
+    change_policy:
+      current_gate: behavioral-and-style-contract
+      requires: [component-passport-update, focused-tests, desktop-and-mobile-visual-check]
+
+  - id: layout.dashboard-section-surface
+    name: DashboardSectionSurface
+    kind: layout
+    status: candidate
+    source: frontend/src/features/dashboard/DashboardSectionSurface.tsx
+    owner: public-experience
+    public_api:
+      props: [id, label, moduleId, children, className, style]
+    dependencies:
+      internal: []
+      external: [react]
+    styling:
+      convention: existing-tailwind-utilities
+      invariants: [bounded-home-section, scroll-offset, module-data-attributes]
+    state:
+      local: false
+      external_store: false
+    side_effects: false
+    a11y_contract:
+      landmark: labelled-section
+      keyboard: inherited-from-content
+    test_surface:
+      typecheck: required
+      visual: required
+    change_policy:
+      current_gate: style-contract
+      requires: [component-passport-update, visual-check]
+
+  - id: layout.page-shell
+    name: PageShell
+    kind: layout
+    status: candidate
+    source: frontend/src/components/PageShell.tsx
+    owner: public-experience
+    public_api:
+      props: [title, description, eyebrow, assurances, action, children]
+    dependencies:
+      internal: [PageHeroBanner]
+      external: [react]
+    styling:
+      convention: global-css-contract
+      invariants: [single-column-content, shared-page-hero, bounded-content-column]
+    state:
+      local: false
+      external_store: false
+    side_effects: false
+    a11y_contract:
+      landmark: main-with-page-heading
+      keyboard: native-buttons-and-links
+    test_surface:
+      typecheck: required
+      visual: required
+    change_policy:
+      current_gate: breaking-and-style-contract
+      requires: [migration-note, focused-build, desktop-and-mobile-visual-check]
+
+  - id: navigation.global-header
+    name: GlobalHeader
+    kind: navigation
+    status: candidate
+    source: frontend/src/components/layout/GlobalHeader.tsx
+    owner: public-experience
+    public_api:
+      props: [activeView, currentUser, isAdmin, onNavigate, onReport, onLogin, onLogout]
+      events: [onNavigate, onReport, onLogin, onLogout]
+    dependencies:
+      internal: []
+      external: [react, lucide-react]
+    styling:
+      convention: global-css-contract
+      namespace: c-app-header
+      invariants: [primary-public-routes, active-item-indicator, authenticated-account-menu, admin-visibility-gate, mobile-full-menu]
+    state:
+      local: [openMenu]
+      external_store: false
+    side_effects: false
+    a11y_contract:
+      landmark: sitewide-header-and-nav
+      current_item: aria-current-page
+      keyboard: native-buttons-and-escape-dismissal
+    test_surface:
+      typecheck: required
+      interaction: required
+      visual: required
+    change_policy:
+      current_gate: promotion-and-behavioral
+      requires: [route-contract-test, focused-interaction-check, desktop-and-mobile-visual-check]
+
+  - id: page.public-reports
+    name: PublicReportsPage
+    kind: page
+    status: candidate
+    source: frontend/src/features/reports/PublicReportsPage.tsx
+    owner: public-reporting
+    public_api:
+      props: [enabled, onOpenMap, onStartReport]
+      route: /reports/public
+      response: [items, total, capped]
+    dependencies:
+      internal: [PublicMapReportDto, exploreService]
+      external: [react, lucide-react]
+    privacy_contract:
+      allowed: [publicDescription, publicLocationText, publicRadiusM, occurredAt, publicStatus, sourceLabel, caseId]
+      forbidden: [ownerUid, contact, exactLocation, rawMedia]
+      indexing: noindex-follow
+    state:
+      local: [keyword, status, region, loading, error]
+      external_store: false
+    a11y_contract:
+      landmark: labelled-public-report-list
+      keyboard: native-controls
+    test_surface:
+      route-history: required
+      public-dto: required
+      filter-interaction: required
+      browser-visual: required
+    change_policy:
+      current_gate: candidate-behavioral-and-privacy
+      requires: [public-dto-contract, route-test, browser-check]
+
+  - id: feedback.announcement-banner
+    name: AnnouncementBanner
+    kind: feedback
+    status: candidate
+    source: frontend/src/components/AnnouncementBanner.tsx
+    owner: operations
+    public_api:
+      props: [announcement, onPrev, onNext]
+      events: [onPrev, onNext]
+    dependencies:
+      internal: []
+      external: [react, lucide-react]
+    styling:
+      convention: existing-tailwind-utilities
+      variants: [default, warning]
+    state:
+      local: false
+      external_store: false
+    side_effects: false
+    a11y_contract:
+      landmark: status-or-region
+      keyboard: native-buttons
+      motion: no-uncontrolled-autoplay
+    test_surface:
+      typecheck: required
+      interaction: required
+      visual: required
+    change_policy:
+      current_gate: behavioral-and-style-contract
+      requires: [priority-contract-test, keyboard-check, visual-check]
+
+  - id: feature.emergency-map
+    name: EmergencyMap
+    kind: feature
+    status: experimental
+    source: frontend/src/components/EmergencyMap.tsx
+    owner: public-search
+    public_api:
+      props: [onOpenCaseNews, onOpenCommunity, publicReports, selectedPublicReportId, onSelectPublicReport]
+    dependencies:
+      internal: [MarkerWithInfo, emergencyStore]
+      external: [react, vis-gl-react-google-maps]
+    styling:
+      convention: existing-tailwind-and-runtime-map-styles
+    state:
+      local: true
+      external_store: true
+    side_effects: [map-api, geolocation, explicit-notification-permission-only]
+    a11y_contract:
+      fallback: list-or-card-view-remains-available
+      permission: user-initiated-only
+    test_surface:
+      typecheck: required
+      interaction: required
+      visual: required
+    change_policy:
+      current_gate: behavioral
+      requires: [store-contract-check, permission-check, map-smoke]
+
+  - id: navigation.mobile-navigation
+    name: MobileNavigation
+    kind: navigation
+    status: candidate
+    source: frontend/src/components/layout/MobileNavigation.tsx
+    owner: public-experience
+    public_api:
+      props: [activeView, onHome, onSearch, onMap, onReport, onProfile]
+      route_scope: sitewide-mobile
+    styling:
+      convention: existing-tailwind-utilities
+      invariants: [five-safety-actions, safe-area-bottom, fixed-placement]
+    a11y_contract:
+      landmark: nav
+      current_item: aria-current-page
+      keyboard: native-buttons
+    test_surface:
+      route-history: required
+      mobile-visual: required
+    change_policy:
+      current_gate: behavioral-and-style-contract
+      requires: [route-contract-test, mobile-browser-check, feature-off-rollback]
+
+  - id: feedback.emergency-site-alert
+    name: EmergencySiteAlert
+    kind: feedback
+    status: candidate
+    source: frontend/src/components/alerts/EmergencySiteAlert.tsx
+    owner: operations
+    public_api:
+      props: [announcement]
+    state:
+      local: [dismissed, announceRevision]
+      persisted: revision-scoped-local-storage
+    a11y_contract:
+      landmark: alert-on-new-revision-then-region
+      motion: no-autoplay
+      keyboard: native-link-and-button
+    test_surface:
+      revision: required
+      screen-reader: required
+      visual: required
+    change_policy:
+      current_gate: behavioral-and-style-contract
+      requires: [revision-test, accessibility-check, feature-off-rollback]
+
+  - id: page.unified-search
+    name: SearchPage
+    kind: page
+    status: candidate
+    source: frontend/src/features/search/SearchPage.tsx
+    owner: public-search
+    public_api:
+      props: [enabled, onOpenMap]
+      route: /search
+      query: [q, tab, region]
+    privacy_contract:
+      sources: [official-cases, approved-public-reports, public-news]
+      forbidden: [exactLocation, contact, rawText, ownerUid]
+    a11y_contract:
+      landmark: search
+      keyboard: form-submit-and-native-tabs
+    test_surface:
+      url-state: required
+      public-dto: required
+      narrow-layout: required
+    change_policy:
+      current_gate: behavioral
+      requires: [search-contract-check, browser-check, feature-off-rollback]
+
+  - id: page.unified-explorer
+    name: ExplorePage
+    kind: page
+    status: candidate
+    source: frontend/src/features/explore/ExplorePage.tsx
+    owner: public-search
+    public_api:
+      props: [persons, reportMapLayerEnabled, onOpenCommunity, onOpenCaseNews]
+      route: /map
+      query: [view, personId, reportId]
+    state:
+      local: [publicReports, selectedPublicReportId]
+      external_store: [selectedPersonId, hoveredPersonId]
+    privacy_contract:
+      public_report_location: offset-center-with-radius
+      max_items: 500
+    a11y_contract:
+      fallback: list-and-card-view
+      keyboard: native-view-buttons-and-result-buttons
+    test_surface:
+      shared-selection: required
+      public-projection: required
+      browser-visual: required
+    change_policy:
+      current_gate: behavioral
+      requires: [explore-contract-check, browser-check, feature-off-rollback]
+
+  - id: page.report-wizard
+    name: ReportWizard
+    kind: page
+    status: candidate
+    source: frontend/src/features/reports/ReportWizard.tsx
+    owner: reporting
+    public_api:
+      props: [onComplete, mediaEnabled, submissionEnabled]
+      route: /reports/new
+    privacy_contract:
+      persistence: no-local-draft
+      submit_response: receipt-only
+      media: private-draft-until-manual-approval
+      optional_contact: kms-encrypted-private-subdocument
+      contact_review: purpose-coded-privacy-or-agency-role-only
+    a11y_contract:
+      steps: labelled-four-step-flow
+      emergency: explicit-112-priority
+      keyboard: native-form-controls
+    test_surface:
+      validation: required
+      authenticated-flow: required
+      media-pipeline: required
+      cross-account: required
+    change_policy:
+      current_gate: candidate-behavioral
+      requires: [emulator-flow-check, rules-check, feature-off-rollback]
+
+  - id: page.own-reports
+    name: OwnReportsPage
+    kind: page
+    status: candidate
+    source: frontend/src/features/reports/OwnReportsPage.tsx
+    owner: reporting
+    public_api:
+      props: []
+      route: /reports
+    privacy_contract:
+      source: owner-scoped-server-dto-only
+      exact-location: label-only
+      additional-information: private-owner-response
+      detail-disclosure: authenticated-owner-only
+    state:
+      local: [reports, expandedId, detail, detailLoading, detailError, responses]
+      side_effects: [list-own-reports, fetch-owner-scoped-detail, submit-additional-information, withdraw-report]
+    test_surface:
+      owner-access: required
+      cross-account: required
+      optimistic-version: required
+      detail-toggle: required
+    change_policy:
+      current_gate: candidate-behavioral
+      requires: [emulator-flow-check, rules-check, feature-off-rollback]
+
+  - id: page.reports-moderation-v2
+    name: ReportsModerationV2
+    kind: admin-page
+    status: candidate
+    source: frontend/src/features/admin/reports/ReportsModerationV2.tsx
+    owner: reporting-operations
+    public_api:
+      props: [roles, adminEnabled, publicApprovalEnabled]
+      route: /admin
+    authorization_contract:
+      read: [reportModerator, seniorModerator, agencyOperator, privacyOfficer]
+      review: [reportModerator, seniorModerator]
+      publish_and_retention: [seniorModerator]
+      agency_workflow: [agencyOperator]
+      contact_decrypt: [agencyOperator, privacyOfficer]
+      system_admin_raw_access: false
+    privacy_contract:
+      raw_access: purpose-coded-and-audited
+      contact_access: explicit-purpose-and-server-audited
+    test_surface:
+      role-matrix: required
+      emulator-flow: required
+      raw-data-boundary: required
+    change_policy:
+      current_gate: security-sensitive-behavioral
+      requires: [role-contract-check, emulator-flow-check, admin-browser-check]
+
+  - id: page.banner-operations-v2
+    name: BannerOperationsV2
+    kind: admin-page
+    status: candidate
+    source: frontend/src/features/admin/banners/BannerOperationsV2.tsx
+    owner: operations
+    public_api:
+      props: [roles]
+      route: /admin
+    authorization_contract:
+      author_and_submit: [reportModerator, seniorModerator, systemAdmin]
+      approve_and_end: [seniorModerator, systemAdmin]
+      separation_of_duties: enforced-by-server
+    test_surface:
+      role-matrix: required
+      transition-contract: required
+      audit-log: required
+    change_policy:
+      current_gate: security-sensitive-behavioral
+      requires: [role-contract-check, emulator-flow-check, admin-browser-check]
+
+  - id: legacy.report-modals
+    name: LegacyReportModalFamily
+    kind: component-family
+    status: deprecated
+    source: frontend/src/components/ReportModal.tsx
+    owner: reporting
+    public_api:
+      replacements: [ReportWizard, OwnReportsPage, ReportsModerationV2]
+      production-usage: none
+    change_policy:
+      current_gate: deprecation
+      removal_gate: repository-import-scan-and-release-confirmation
+
+  - id: feature.desktop-grid-view
+    name: DesktopGridView
+    kind: feature
+    status: deprecated
+    source: frontend/src/components/DesktopGridView.tsx
+    owner: public-search
+    public_api:
+      replacement: /map?view=cards
+      removal_gate: unified-explorer-parity-and-preference-migration
+    dependencies:
+      internal: [emergencyStore]
+      external: [react, lucide-react]
+    styling:
+      convention: existing-tailwind-utilities
+    state:
+      local: true
+      external_store: true
+    side_effects: [local-storage-preference]
+    a11y_contract:
+      keyboard: native-controls-and-modal-close
+    test_surface:
+      typecheck: required-until-removal
+      migration: required
+    change_policy:
+      current_gate: deprecation
+      requires: [replacement-parity, preference-migration, rollback-path]

@@ -50,6 +50,10 @@ node_modules/
 # Optional npm cache directory
 .npm
 
+# Local deployment caches used when the system drive has no free space
+.deploy-npm-cache/
+.deploy-temp/
+
 # Optional eslint cache
 .eslintcache
 

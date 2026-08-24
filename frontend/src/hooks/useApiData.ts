@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useEmergencyStore } from '../stores/emergencyStore';
 import type { MissingPerson } from '../types';
 import { firestore, collection, query, orderBy, onSnapshot } from '../services/firebase';
@@ -11,6 +11,7 @@ export function useApiData() {
   const enqueueNewPersonAlert = useEmergencyStore(state => state.enqueueNewPersonAlert);
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const initialLoadRef = useRef(true);
+  const [hasLoadedPersons, setHasLoadedPersons] = useState(false);
 
   const startSubscription = useCallback(() => {
     if (unsubscribeRef.current) {
@@ -23,6 +24,7 @@ export function useApiData() {
       const q = query(ref, orderBy('updatedAt', 'desc'));
       setConnectionStatus(true);
       initialLoadRef.current = true;
+      setHasLoadedPersons(false);
 
       const convertDocToPerson = (docSnap: DocumentSnapshot<DocumentData>): MissingPerson => {
         const data = docSnap.data();
@@ -129,6 +131,7 @@ export function useApiData() {
 
           setMissingPersons(persons);
           setConnectionStatus(true);
+          setHasLoadedPersons(true);
 
           if (initialLoadRef.current) {
             initialLoadRef.current = false;
@@ -148,11 +151,13 @@ export function useApiData() {
         (error) => {
           console.error('❌ 실시간 데이터 구독 실패:', error);
           setConnectionStatus(false);
+          setHasLoadedPersons(true);
         }
       );
     } catch (error) {
       console.error('❌ 실시간 데이터 구독 설정 실패:', error);
       setConnectionStatus(false);
+      setHasLoadedPersons(true);
     }
   }, [setMissingPersons, setConnectionStatus, enqueueNewPersonAlert]);
 
@@ -169,6 +174,7 @@ export function useApiData() {
 
   return {
     isConnected,
+    hasLoadedPersons,
     refresh: startSubscription
   };
 }

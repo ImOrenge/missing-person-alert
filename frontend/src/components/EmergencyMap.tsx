@@ -1,14 +1,24 @@
 import React from 'react';
-import { APIProvider, Map, useMap } from '@vis.gl/react-google-maps';
+import { AdvancedMarker, APIProvider, InfoWindow, Map, useMap } from '@vis.gl/react-google-maps';
 import { useEmergencyStore } from '../stores/emergencyStore';
 import MarkerWithInfo from './MarkerWithInfo';
+import type { PublicMapReportDto } from '../types/publicReport';
 
 const KOREA_CENTER = { lat: 37.5665, lng: 126.9780 }; // 서울
 const GOOGLE_MAPS_API_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY || '';
 const MAP_ID = process.env.REACT_APP_MAP_ID || '';
 
 // 마커 애니메이션을 처리하는 내부 컴포넌트
-function MapContent({ onOpenCommunity }: { onOpenCommunity?: (personId: string) => void }) {
+interface EmergencyMapProps {
+  onOpenCommunity?: (personId: string) => void;
+  onOpenCaseNews?: (personId: string) => void;
+  publicReports?: PublicMapReportDto[];
+  selectedPublicReportId?: string | null;
+  onSelectPublicReport?: (reportId: string | null) => void;
+  onViewportChange?: (bounds: { west: number; south: number; east: number; north: number; zoom: number }) => void;
+}
+
+function MapContent({ onOpenCommunity, onOpenCaseNews, publicReports = [], selectedPublicReportId, onSelectPublicReport }: EmergencyMapProps) {
   const map = useMap();
   const getFilteredPersons = useEmergencyStore((state) => state.getFilteredPersons);
   const selectedPersonId = useEmergencyStore((state) => state.selectedPersonId);
@@ -66,38 +76,27 @@ function MapContent({ onOpenCommunity }: { onOpenCommunity?: (personId: string) 
             onClick={() => setSelectedPersonId(person.id)}
             onClose={() => setSelectedPersonId(null)}
             onOpenCommunity={onOpenCommunity}
+            onOpenCaseNews={onOpenCaseNews}
           />
         );
       })}
+      {publicReports.map((report) => (
+        <React.Fragment key={`public-report-${report.id}`}>
+          <AdvancedMarker position={report.publicLocation} onClick={() => onSelectPublicReport?.(report.id)} title={`${report.publicLocationText} 승인 공개 제보`}>
+            <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-amber-600 text-xs font-black text-white shadow-lg">제</span>
+          </AdvancedMarker>
+          {selectedPublicReportId === report.id && (
+            <InfoWindow position={report.publicLocation} onCloseClick={() => onSelectPublicReport?.(null)}>
+              <div className="max-w-56 p-1 text-slate-800"><strong className="text-sm">승인 공개 제보</strong><p className="mt-1 text-xs leading-5">{report.publicDescription}</p><p className="mt-1 text-[10px] font-bold text-amber-800">{report.publicLocationText} · 약 {report.publicRadiusM}m</p><a href={report.href} className="mt-2 inline-block text-xs font-black text-[#1e3a5f]">사건 상세에서 확인</a></div>
+            </InfoWindow>
+          )}
+        </React.Fragment>
+      ))}
     </>
   );
 }
 
-export default function EmergencyMap({ onOpenCommunity }: { onOpenCommunity?: (personId: string) => void }) {
-  const missingPersons = useEmergencyStore((state) => state.missingPersons);
-  const getFilteredPersons = useEmergencyStore((state) => state.getFilteredPersons);
-
-  const filteredPersons = getFilteredPersons();
-
-  // 디버깅: 데이터 상태 로그
-  React.useEffect(() => {
-    console.log('📊 EmergencyMap 상태:');
-    console.log('  - 전체 실종자:', missingPersons.length);
-    console.log('  - 필터링된 실종자:', filteredPersons.length);
-    console.log('  - 데이터:', filteredPersons);
-  }, [missingPersons, filteredPersons]);
-
-  // 첫 렌더링 시 알림 권한 요청
-  React.useEffect(() => {
-    const timer = setTimeout(() => {
-      if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission();
-      }
-    }, 2000);
-
-    return () => clearTimeout(timer);
-  }, []);
-
+export default function EmergencyMap({ onOpenCommunity, onOpenCaseNews, publicReports, selectedPublicReportId, onSelectPublicReport, onViewportChange }: EmergencyMapProps) {
   // 앱 포커스 시 데이터 새로고침
   // React.useEffect(() => {
   //   const handleVisibilityChange = () => {
@@ -148,8 +147,18 @@ export default function EmergencyMap({ onOpenCommunity }: { onOpenCommunity?: (p
           streetViewControl={false}
           fullscreenControl={true}
           className="h-full w-full"
+          onIdle={(event: any) => {
+            const bounds = event.map?.getBounds?.();
+            const northEast = bounds?.getNorthEast?.();
+            const southWest = bounds?.getSouthWest?.();
+            if (!northEast || !southWest) return;
+            onViewportChange?.({
+              west: southWest.lng(), south: southWest.lat(), east: northEast.lng(), north: northEast.lat(),
+              zoom: event.map?.getZoom?.() || 7,
+            });
+          }}
         >
-          <MapContent onOpenCommunity={onOpenCommunity} />
+          <MapContent onOpenCommunity={onOpenCommunity} onOpenCaseNews={onOpenCaseNews} publicReports={publicReports} selectedPublicReportId={selectedPublicReportId} onSelectPublicReport={onSelectPublicReport} />
         </Map>
       </APIProvider>
 

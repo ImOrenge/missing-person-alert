@@ -12,6 +12,28 @@ service firebase.storage {
         && request.resource.contentType.matches('image/.*');
     }
 
+    match /report-private/{userId}/drafts/{draftId}/{mediaId} {
+      allow read: if false;
+      allow write: if request.auth != null && request.auth.uid == userId
+        && request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+    }
+
+    match /report-private/{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    match /report-quarantine/{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    match /report-public/{reportId}/{allPaths=**} {
+      allow read: if firestore.exists(/databases/(default)/documents/publicReports/$(reportId))
+        && firestore.get(/databases/(default)/documents/publicReports/$(reportId)).data.visibility == 'public'
+        && firestore.get(/databases/(default)/documents/publicReports/$(reportId)).data.status in ['approved', 'forwarded', 'confirmed'];
+      allow write: if false;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

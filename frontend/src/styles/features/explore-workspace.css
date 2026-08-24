@@ -1,0 +1,38 @@
+.f-explore-workspace {
+  display: flex;
+  height: min(48rem, calc(100vh - 15.5rem));
+  min-height: 35rem;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--portal-slate-200);
+  border-radius: var(--portal-radius-card);
+  background: #fff;
+  box-shadow: var(--portal-shadow-card);
+}
+
+.f-explore-toolbar {
+  display: grid;
+  gap: .8rem;
+  border-bottom: 1px solid var(--portal-slate-200);
+  background: #fff;
+  padding: .9rem 1rem;
+}
+
+.f-explore-toolbar__heading,
+.f-explore-toolbar__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+}
+
+.f-explore-summary { display: flex; flex-wrap: wrap; gap: .4rem; }
+.f-explore-summary span { border-radius: 999px; background: var(--portal-slate-100); padding: .35rem .55rem; color: var(--portal-slate-500); font-size: .68rem; font-weight: 750; }
+.f-explore-summary strong { color: var(--portal-navy-800); font-weight: 900; }
+.f-explore-stage { background: var(--portal-slate-100); }
+
+@media (max-width: 767px) {
+  .f-explore-workspace { height: auto; min-height: 38rem; }
+  .f-explore-toolbar__controls { align-items: stretch; }
+}

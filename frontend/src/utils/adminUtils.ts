@@ -1,39 +1,30 @@
-/**
- * 슈퍼계정(관리자) 관련 유틸리티
- */
+import type { User } from 'firebase/auth';
 
-// 관리자 이메일 목록
-const ADMIN_EMAILS = [
-  'admin@missing-person.com',
-  'super@missing-person.com',
-  'jmgi1024@gmail.com', // 메인 관리자
-  // 추가 관리자 이메일
-];
+export const ADMIN_ROLE_NAMES = ['reportModerator', 'seniorModerator', 'agencyOperator', 'privacyOfficer', 'systemAdmin'] as const;
+export type AdminRole = typeof ADMIN_ROLE_NAMES[number];
+export type AdminRoles = Readonly<Record<AdminRole, boolean>>;
 
-/**
- * 사용자가 관리자인지 확인
- */
-export const isAdmin = (email: string | null | undefined): boolean => {
-  if (!email) return false;
-  return ADMIN_EMAILS.includes(email.toLowerCase());
+export const EMPTY_ADMIN_ROLES: AdminRoles = Object.freeze({
+  reportModerator: false,
+  seniorModerator: false,
+  agencyOperator: false,
+  privacyOfficer: false,
+  systemAdmin: false,
+});
+
+export const hasAnyAdminRole = (roles: AdminRoles): boolean =>
+  ADMIN_ROLE_NAMES.some((role) => roles[role]);
+
+export const getAdminRoles = async (user: User): Promise<AdminRoles> => {
+  // 운영 역할 변경이 화면에 즉시 반영되도록 캐시된 ID 토큰을 강제 갱신한다.
+  const token = await user.getIdTokenResult(true);
+  return ADMIN_ROLE_NAMES.reduce((roles, role) => {
+    roles[role] = token.claims[role] === true;
+    return roles;
+  }, { ...EMPTY_ADMIN_ROLES } as Record<AdminRole, boolean>);
 };
 
-/**
- * 사용자가 슈퍼관리자인지 확인 (UID 기반)
- */
-export const isSuperAdmin = (uid: string | null | undefined): boolean => {
-  if (!uid) return false;
-  // 특정 UID를 슈퍼관리자로 지정 (Firebase Console에서 확인 가능)
-  const SUPER_ADMIN_UIDS: string[] = [
-    'hoq52Cn12QaeHiWrGqtvmHaa2xB2',
-    // Firebase Console에서 생성한 관리자 계정의 UID를 여기에 추가
-  ];
-  return SUPER_ADMIN_UIDS.includes(uid);
-};
-
-/**
- * 관리자 권한 확인 (이메일 또는 UID)
- */
-export const hasAdminAccess = (email: string | null | undefined, uid: string | null | undefined): boolean => {
-  return isAdmin(email) || isSuperAdmin(uid);
+/** 화면 표시용 관리자 여부다. 실제 권한은 모든 서버 요청에서 다시 검증한다. */
+export const hasAdminAccess = async (user: User): Promise<boolean> => {
+  return hasAnyAdminRole(await getAdminRoles(user));
 };

@@ -11,6 +11,14 @@ export interface ShareOptions {
   customMessage?: string;
 }
 
+const getMissingPersonPublicUrl = (personId: string): string => {
+  const configuredOrigin = process.env.REACT_APP_PUBLIC_SITE_ORIGIN?.replace(/\/+$/, '');
+  const origin = configuredOrigin || (process.env.NODE_ENV === 'production'
+    ? 'https://missingalert.kr'
+    : window.location.origin);
+  return `${origin}/missing/${encodeURIComponent(personId)}`;
+};
+
 /**
  * 실종자 정보 기본 포맷
  */
@@ -276,7 +284,7 @@ export function generateWebShareData(options: ShareOptions): ShareData {
   return {
     title: `실종자 찾기: ${info.name}님`,
     text: generateKakaoFormat(options), // 기본적으로 카카오톡 형식 사용
-    url: window.location.href
+    url: getMissingPersonPublicUrl(options.person.id)
   };
 }
 
@@ -285,7 +293,7 @@ export function generateWebShareData(options: ShareOptions): ShareData {
  */
 export function generateShareUrls(options: ShareOptions) {
   const text = encodeURIComponent(generateKakaoFormat(options));
-  const url = encodeURIComponent(window.location.href);
+  const url = encodeURIComponent(getMissingPersonPublicUrl(options.person.id));
   return {
     // 카카오톡 (JavaScript SDK 필요)
     kakao: null, // SDK를 통해 직접 호출해야 함

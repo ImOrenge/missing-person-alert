@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { X, Shield, Users, BarChart3, FileText, Bell, AlertTriangle } from 'lucide-react';
-import AllReportsTab from './AdminDashboard/AllReportsTab';
+import { X, Shield, Users, BarChart3, Bell, AlertTriangle } from 'lucide-react';
 import UserManagementTab from './AdminDashboard/UserManagementTab';
 import StatisticsTab from './AdminDashboard/StatisticsTab';
 import AnnouncementsTab from './AdminDashboard/AnnouncementsTab';
@@ -12,10 +11,10 @@ interface Props {
   isPage?: boolean;
 }
 
-type TabType = 'reports' | 'users' | 'statistics' | 'announcements' | 'commentReports';
+type TabType = 'users' | 'statistics' | 'announcements' | 'commentReports';
 
 export default function AdminDashboard({ isOpen, onClose, isPage = false }: Props) {
-  const [activeTab, setActiveTab] = useState<TabType>('reports');
+  const [activeTab, setActiveTab] = useState<TabType>('users');
 
   if (!isOpen) return null;
 
@@ -100,12 +99,6 @@ export default function AdminDashboard({ isOpen, onClose, isPage = false }: Prop
           borderBottom: '1px solid #e0e0e0'
         }}>
           <TabButton
-            active={activeTab === 'reports'}
-            onClick={() => setActiveTab('reports')}
-            icon={<FileText size={18} />}
-            label="제보 조회"
-          />
-          <TabButton
             active={activeTab === 'users'}
             onClick={() => setActiveTab('users')}
             icon={<Users size={18} />}
@@ -138,7 +131,6 @@ export default function AdminDashboard({ isOpen, onClose, isPage = false }: Prop
           padding: '20px 30px 30px 30px',
           backgroundColor: '#fafafa'
         }}>
-          {activeTab === 'reports' && <AllReportsTab />}
           {activeTab === 'users' && <UserManagementTab />}
           {activeTab === 'statistics' && <StatisticsTab />}
           {activeTab === 'announcements' && <AnnouncementsTab />}

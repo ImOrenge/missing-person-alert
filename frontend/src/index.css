@@ -1,3 +1,7 @@
+@import './styles/components/portal-shell.css';
+@import './styles/features/explore-workspace.css';
+@import './styles/features/profile-hub.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

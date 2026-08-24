@@ -5,14 +5,69 @@ service cloud.firestore {
     // 관리자 확인 함수
     function isAdmin() {
       return request.auth != null && (
-        request.auth.token.admin == true ||
-        request.auth.token.email == 'jmgi1024@gmail.com' ||
-        request.auth.uid == 'admin_uid_here'
+        request.auth.token.reportModerator == true ||
+        request.auth.token.seniorModerator == true ||
+        request.auth.token.agencyOperator == true ||
+        request.auth.token.privacyOfficer == true ||
+        request.auth.token.systemAdmin == true
       );
     }
 
     function isAuthenticated() {
       return request.auth != null;
+    }
+
+    // 제보 원본과 비공개 하위 컬렉션은 Admin SDK 전용이다.
+    match /sightingReports/{reportId} {
+      allow read, write: if false;
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    // 승인된 최소 공개 투영본만 공개 클라이언트가 읽을 수 있다.
+    match /publicReports/{reportId} {
+      allow read: if resource.data.visibility == 'public'
+        && resource.data.status in ['approved', 'forwarded', 'confirmed'];
+      allow write: if false;
+    }
+
+    match /reportSubmissionKeys/{keyId} {
+      allow read, write: if false;
+    }
+
+    match /reportRateLimits/{keyId} {
+      allow read, write: if false;
+    }
+
+    match /notificationEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /notificationSubscriptions/{userId} {
+      allow read, write: if false;
+    }
+
+    match /dashboardPreferences/{userId} {
+      allow read, write: if false;
+    }
+
+    match /siteBanners/{bannerId} {
+      allow read, write: if false;
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    match /reportMediaDrafts/{draftId} {
+      allow read, write: if false;
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    match /runtimeConfig/{configId} {
+      allow read, write: if false;
     }
 
     function commentOwnerUid() {
@@ -56,7 +111,13 @@ service cloud.firestore {
         data.content is string && data.content.size() >= 10 && data.content.size() <= 500 &&
         data.type in ['sighting', 'question', 'support'] &&
         (!('parentCommentId' in data) || data.parentCommentId == null || (data.parentCommentId is string && data.parentCommentId.size() > 0)) &&
-        (!('imageUrls' in data) || (data.imageUrls is list && data.imageUrls.size() <= 3 && data.imageUrls.all(url, url is string && url.size() > 0 && url.size() <= 2048))) &&
+        (!('imageUrls' in data) || (
+          data.imageUrls is list &&
+          data.imageUrls.size() <= 3 &&
+          (data.imageUrls.size() < 1 || (data.imageUrls[0] is string && data.imageUrls[0].size() > 0 && data.imageUrls[0].size() <= 2048)) &&
+          (data.imageUrls.size() < 2 || (data.imageUrls[1] is string && data.imageUrls[1].size() > 0 && data.imageUrls[1].size() <= 2048)) &&
+          (data.imageUrls.size() < 3 || (data.imageUrls[2] is string && data.imageUrls[2].size() > 0 && data.imageUrls[2].size() <= 2048))
+        )) &&
         (!('replyCount' in data) || (data.replyCount is int && data.replyCount >= 0)) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp &&
@@ -169,37 +230,6 @@ service cloud.firestore {
         (!('platform' in data) || data.platform == null || (data.platform is string && data.platform.size() <= 100));
     }
 
-    function validateUserTokenEntry(entry) {
-      return entry is map &&
-        entry.keys().hasOnly([
-          'token',
-          'createdAt',
-          'lastSeenAt',
-          'userAgent',
-          'platform'
-        ]) &&
-        entry.token is string && entry.token.size() > 0 &&
-        entry.createdAt is timestamp &&
-        entry.lastSeenAt is timestamp &&
-        (!('userAgent' in entry) || entry.userAgent == null || (entry.userAgent is string && entry.userAgent.size() <= 500)) &&
-        (!('platform' in entry) || entry.platform == null || (entry.platform is string && entry.platform.size() <= 50));
-    }
-
-    function validateUserTokenDoc(data, userId) {
-      return data.keys().hasOnly([
-        'userId',
-        'tokens',
-        'updatedAt',
-        'lastPrunedAt'
-      ]) &&
-        data.userId is string && data.userId == userId &&
-        data.updatedAt is timestamp &&
-        (!('lastPrunedAt' in data) || data.lastPrunedAt is timestamp) &&
-        data.tokens is map &&
-        data.tokens.size() <= 20 &&
-        data.tokens.values().all(entry, validateUserTokenEntry(entry));
-    }
-
     // 공지사항 컬렉션
     match /announcements/{announcementId} {
       // 모든 사용자가 읽기 가능
@@ -215,16 +245,9 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // 사용자별 푸시 토큰
+    // 사용자별 푸시 토큰은 인증된 Functions API에서만 검증·관리한다.
     match /userTokens/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-      allow create: if request.auth != null &&
-        request.auth.uid == userId &&
-        validateUserTokenDoc(request.resource.data, userId);
-      allow update: if request.auth != null &&
-        request.auth.uid == userId &&
-        validateUserTokenDoc(request.resource.data, userId);
-      allow delete: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if false;
     }
 
     // 사용자 정보 컬렉션
@@ -243,7 +266,8 @@ service cloud.firestore {
     match /missingPersons/{personId} {
       allow read: if true;
 
-      allow create, update, delete: if isAuthenticated();
+      // 공식 수색 데이터 수집·변경은 Admin SDK 파이프라인만 수행한다.
+      allow create, update, delete: if false;
     }
 
     // 실종자 댓글 컬렉션
@@ -276,6 +300,16 @@ service cloud.firestore {
     match /activeSessions/{sessionId} {
       allow read, delete: if isAdmin();
       allow create, update: if validateActiveSession(request.resource.data, sessionId);
+    }
+
+    // NAVER 검색 결과는 Functions API로만 제공하며 클라이언트 직접 접근을 차단한다.
+    match /newsArticles/{articleId} {
+      allow read, write: if false;
+    }
+
+    // 외부 API 일일 한도 카운터는 Functions Admin SDK에서만 관리한다.
+    match /serviceQuotas/{quotaId} {
+      allow read, write: if false;
     }
 
     // 나머지 모든 문서는 기본적으로 차단

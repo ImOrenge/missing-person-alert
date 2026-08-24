@@ -32,6 +32,7 @@ interface Props {
   onClick: () => void;
   onClose: () => void;
   onOpenCommunity?: (personId: string) => void;
+  onOpenCaseNews?: (personId: string) => void;
 }
 
 // 유형별 색상
@@ -74,7 +75,7 @@ function getTypeLabel(type: string): string {
   }
 }
 
-const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, onClick, onClose, onOpenCommunity }: Props) => {
+const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, onClick, onClose, onOpenCommunity, onOpenCaseNews }: Props) => {
   const [markerRef, marker] = useAdvancedMarkerRef();
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [viewport, setViewport] = useState(() => getInitialViewport());
@@ -383,6 +384,25 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
                 소통 피드 열기
               </button>
             </div>
+
+            {onOpenCaseNews && <button
+              type="button"
+              onClick={() => onOpenCaseNews(person.id)}
+              style={{
+                width: '100%',
+                marginBottom: '12px',
+                padding: isMobile ? '8px' : '10px',
+                borderRadius: '8px',
+                border: '1px solid #03c75a',
+                backgroundColor: '#effcf4',
+                color: '#008f3e',
+                fontSize: isMobile ? '12px' : '14px',
+                fontWeight: 'bold',
+                cursor: 'pointer'
+              }}
+            >
+              NAVER 뉴스 검색
+            </button>}
 
             <>
                 <div

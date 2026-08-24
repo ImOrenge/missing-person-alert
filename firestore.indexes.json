@@ -183,7 +183,75 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "sightingReports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "ownerUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "sightingReports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "sightingReports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "caseId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "newsArticles",
+      "fieldPath": "title",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "newsArticles",
+      "fieldPath": "description",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "newsArticles",
+      "fieldPath": "originallink",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "newsArticles",
+      "fieldPath": "link",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "serviceQuotas",
+      "fieldPath": "cases",
+      "indexes": []
+    }
+  ]
 }

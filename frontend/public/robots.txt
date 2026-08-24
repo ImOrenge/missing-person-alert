@@ -1,2 +1,9 @@
 User-agent: *
-Allow:/
+Allow: /
+Disallow: /admin
+Disallow: /profile
+Disallow: /reports
+Disallow: /api
+
+Sitemap: https://missingalert.kr/sitemap.xml
+Sitemap: https://missingalert.kr/sitemap-missing-persons.xml

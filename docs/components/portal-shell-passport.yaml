@@ -1,0 +1,40 @@
+id: layout.portal-shell
+name: PortalShell
+kind: layout
+status: candidate
+source:
+  - frontend/src/components/PageShell.tsx
+  - frontend/src/components/layout/GlobalHeader.tsx
+  - frontend/src/components/layout/PageHeroBanner.tsx
+owner: public-portal
+public_api:
+  page_shell_props: [title, description, eyebrow, assurances, action, children]
+  global_header_props: [activeView, currentUser, isAdmin, onNavigate, onReport, onLogin, onLogout]
+  page_hero_props: [eyebrow, title, description, assurances, action]
+dependencies:
+  internal: [AppView, PageHeroBanner]
+  external: [react, firebase-auth, lucide-react]
+styling:
+  global_css: frontend/src/styles/components/portal-shell.css
+  namespaces: [c-app-header, c-page-hero, c-portal]
+  tokens: [portal-navy-950, portal-navy-800, portal-red-600, portal-slate-50, portal-radius-card]
+  variants: [active-navigation, desktop-popover, mobile-menu, hero-action]
+state:
+  local: [openMenu]
+  external_store: false
+side_effects: [callback-driven-navigation, escape-and-outside-click-menu-dismissal]
+a11y_contract:
+  keyboard: native-button-and-link
+  aria: [aria-current, aria-expanded, aria-haspopup, labelled-navigation]
+  focus: escape-restores-trigger-focus
+test_surface:
+  typecheck: required
+  interaction: required
+  visual: required
+change_policy:
+  breaking_change_requires: migration-note
+  style_contract_change_requires: visual-verification
+migration:
+  deprecated_component: frontend/src/components/AppSidebar.tsx
+  replacement: frontend/src/components/layout/GlobalHeader.tsx
+  completed_when: AppSidebar-import-count-is-zero

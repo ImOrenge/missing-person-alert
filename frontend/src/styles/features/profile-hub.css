@@ -1,0 +1,20 @@
+.f-profile-hub { display: grid; gap: 1rem; align-items: start; }
+.f-profile-hub__nav, .f-profile-hub__content { overflow: hidden; border: 1px solid var(--portal-slate-200); border-radius: var(--portal-radius-card); background: #fff; box-shadow: var(--portal-shadow-card); }
+.f-profile-hub__nav { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .4rem; padding: .55rem; }
+.f-profile-hub__nav-item { display: flex; width: 100%; min-height: 3.75rem; align-items: center; justify-content: center; gap: .7rem; border-radius: .75rem; padding: .7rem; color: #475569; text-align: left; }
+.f-profile-hub__nav-item:hover { background: var(--portal-slate-100); }
+.f-profile-hub__nav-item[data-active='true'] { background: var(--portal-navy-950); color: #fff; }
+.f-profile-hub__nav-icon { display: grid; width: 2rem; height: 2rem; place-items: center; flex: none; border-radius: .55rem; background: var(--portal-slate-100); color: var(--portal-navy-800); }
+.f-profile-hub__nav-item[data-active='true'] .f-profile-hub__nav-icon { background: rgba(255,255,255,.12); color: #fff; }
+.f-profile-hub__nav-copy { min-width: 0; }
+.f-profile-hub__nav-copy strong, .f-profile-hub__nav-copy small { display: block; }
+.f-profile-hub__nav-copy strong { font-size: .8rem; font-weight: 900; }
+.f-profile-hub__nav-copy small { margin-top: .15rem; color: #94a3b8; font-size: .65rem; }
+.f-profile-hub__nav-item[data-active='true'] small { color: #cbd5e1; }
+.f-profile-hub__content-head { display: flex; align-items: center; gap: .8rem; border-bottom: 1px solid var(--portal-slate-200); padding: 1rem 1.1rem; }
+.f-profile-hub__content-icon { display: grid; width: 2.25rem; height: 2.25rem; place-items: center; border-radius: .65rem; background: #eff6ff; color: var(--portal-navy-800); }
+.f-profile-hub__content-head h2 { color: var(--portal-slate-950); font-size: 1rem; font-weight: 900; }
+.f-profile-hub__content-head p { margin-top: .15rem; color: var(--portal-slate-500); font-size: .7rem; }
+.f-profile-hub__content-body { padding: 1rem; }
+.f-profile-hub__content-body > :first-child { margin-top: 0; }
+@media (max-width: 640px) { .f-profile-hub__nav { display: flex; overflow-x: auto; } .f-profile-hub__nav-item { min-width: 8.5rem; flex: 1 0 auto; } .f-profile-hub__nav-copy small { display: none; } }
