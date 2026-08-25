@@ -1,12 +1,18 @@
 {
   "scripts": {
     "seo:check": "npm --prefix functions run build && node scripts/check-seo-contract.mjs --fixtures",
+    "seo:live": "node scripts/check-seo-live.mjs",
+    "seo:mobile": "node scripts/check-seo-mobile-live.mjs",
+    "seo:operational": "node scripts/check-seo-operational.mjs",
+    "seo:kpi": "node scripts/check-seo-kpi.mjs",
+    "seo:kpi:test": "node --test scripts/check-seo-kpi.test.mjs scripts/check-seo-operational.test.mjs",
     "reporting:check": "npm --prefix functions run build && node scripts/check-reporting-contract.mjs",
     "rules:check": "firebase emulators:exec --project demo-missingalert --only firestore,storage \"node --test tests/rules/reporting-rules.test.mjs\"",
     "reporting:emulator:check": "npm --prefix functions run build && firebase emulators:exec --project demo-missingalert --only auth,functions,firestore,storage \"node scripts/check-reporting-emulator.mjs\"",
     "reporting:flow:check": "npm --prefix functions run build && firebase emulators:exec --project demo-missingalert --only auth,functions,firestore,storage \"node scripts/check-reporting-flow-emulator.mjs\"",
     "reporting:browser:check": "playwright test --config playwright.reporting.config.js",
-    "reporting:budget:check": "node scripts/check-frontend-budget.mjs"
+    "reporting:budget:check": "node scripts/check-frontend-budget.mjs",
+    "firestore:budget:check": "node scripts/check-firestore-read-budget.mjs"
   },
   "dependencies": {
     "firebase": "^12.3.0",

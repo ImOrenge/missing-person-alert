@@ -458,6 +458,43 @@ components:
       current_gate: deprecation
       removal_gate: repository-import-scan-and-release-confirmation
 
+  - id: feature.admin-seo-metrics
+    name: SeoMetricsTab
+    kind: admin-feature
+    status: experimental
+    source: frontend/src/features/admin/seo/SeoMetricsTab.tsx
+    owner: search-operations
+    public_api:
+      props: []
+      route: /admin
+      entrypoint: search-conversion-tab
+    dependencies:
+      internal: [seoMetricsService, seoMetrics-types]
+      external: [react, lucide-react]
+    styling:
+      convention: existing-tailwind-utilities
+      global_css_changes: none
+    state:
+      local: [range, loading, error, aggregate-data]
+      external_store: false
+    side_effects: [authenticated-aggregate-metrics-read]
+    privacy_contract:
+      allowed: [date, channel-bucket, page-group-bucket, aggregate-event-counts, aggregate-rates]
+      forbidden: [visitor-id, raw-referrer-url, raw-case-id, contact, precise-location]
+    a11y_contract:
+      landmark: labelled-section
+      loading: status
+      error: alert
+      keyboard: native-buttons-and-links
+      data_table: caption-and-scoped-headings
+    test_surface:
+      unit: required
+      typecheck: required
+      admin-browser-visual: required
+    change_policy:
+      current_gate: compatible-behavioral-and-privacy
+      requires: [component-passport-update, focused-test, authenticated-api-check, admin-browser-check]
+
   - id: feature.desktop-grid-view
     name: DesktopGridView
     kind: feature

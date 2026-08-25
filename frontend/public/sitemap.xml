@@ -4,8 +4,15 @@
 
   <url>
        <loc>https://missingalert.kr/</loc>
-       <lastmod>2026-08-20T13:04:56+00:00</lastmod>
+       <lastmod>2026-08-24T12:32:37+00:00</lastmod>
        <changefreq>daily</changefreq>
        <priority>1.0000</priority>
+  </url>
+
+  <url>
+       <loc>https://missingalert.kr/map</loc>
+       <lastmod>2026-08-24T12:32:37+00:00</lastmod>
+       <changefreq>daily</changefreq>
+       <priority>0.9000</priority>
   </url>
 </urlset>

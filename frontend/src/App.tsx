@@ -36,7 +36,7 @@ import CommunityFeed from './components/CommunityFeed';
 import PageShell from './components/PageShell';
 import NewsPage from './components/news/NewsPage';
 import { useNewsFeed } from './hooks/useNewsFeed';
-import { getPathForView, getViewFromLocation } from './app-routing/route-contract';
+import { getPathForView, getViewFromLocation, stripInternalTrackingParams } from './app-routing/route-contract';
 import type { AppView } from './app-routing/route-contract';
 import { useUiFeatureFlags } from './hooks/useUiFeatureFlags';
 import EmergencySiteAlert from './components/alerts/EmergencySiteAlert';
@@ -185,8 +185,17 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const cleanSearch = stripInternalTrackingParams(window.location.search);
+    if (cleanSearch === window.location.search) return;
+    const cleanUrl = `${window.location.pathname}${cleanSearch}${window.location.hash}`;
+    window.history.replaceState(window.history.state, document.title, cleanUrl);
+  }, []);
+
+  useEffect(() => {
     if (typeof document === 'undefined') return;
-    const indexable = activeView === 'dashboard' || activeView === 'map';
+    const hasFunctionalState = typeof window !== 'undefined' && window.location.search.length > 0;
+    const indexable = (activeView === 'dashboard' || activeView === 'map') && !hasFunctionalState;
     const canonicalPath = getPathForView(activeView).split('?')[0];
     const titles: Partial<Record<AppView, string>> = {
       dashboard: 'MissingAlert | 실종자 공식정보·지도·제보',

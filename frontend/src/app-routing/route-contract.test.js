@@ -1,4 +1,4 @@
-import { getPathForView, getViewFromAppLocation } from './route-contract';
+import { getPathForView, getViewFromAppLocation, stripInternalTrackingParams } from './route-contract';
 
 describe('app route contract', () => {
   test.each([
@@ -32,5 +32,12 @@ describe('app route contract', () => {
     expect(getPathForView('report')).toBe('/reports/new');
     expect(getPathForView('public-reports')).toBe('/reports/public');
     expect(getPathForView('privacy')).toBe('/privacy');
+  });
+
+  it('removes internal UTM parameters while preserving functional deep-link state', () => {
+    expect(stripInternalTrackingParams('?personId=case%2F1&utm_source=organic&utm_medium=seo&utm_campaign=missing_detail&utm_content=primary_cta'))
+      .toBe('?personId=case%2F1');
+    expect(stripInternalTrackingParams('?utm_source=organic&utm_medium=seo')).toBe('');
+    expect(stripInternalTrackingParams('?personId=case-1&view=cards')).toBe('?personId=case-1&view=cards');
   });
 });

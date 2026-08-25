@@ -15,6 +15,15 @@ assert.equal(config.response.status, 200);
 assert.equal(config.body.success, true);
 assert.equal(Object.values(config.body.flags).every((value) => value === false), true);
 
+const publicCasesMiss = await requestJson('/api/safe182/missing-persons?limit=500');
+assert.equal(publicCasesMiss.response.status, 200);
+assert.equal(publicCasesMiss.body.result, '00');
+assert.equal(Array.isArray(publicCasesMiss.body.list), true);
+assert.match(publicCasesMiss.response.headers.get('cache-control') || '', /s-maxage=300/);
+assert.equal(publicCasesMiss.response.headers.get('x-missingalert-data-cache'), 'MISS');
+const publicCasesHit = await requestJson('/api/safe182/missing-persons?limit=500');
+assert.equal(publicCasesHit.response.headers.get('x-missingalert-data-cache'), 'HIT');
+
 const search = await requestJson('/api/search?q=%EC%84%9C%EC%9A%B8&tab=cases');
 assert.equal(search.response.status, 200);
 assert.equal(search.body.success, true);
@@ -51,4 +60,4 @@ const banners = await requestJson('/api/v2/banners');
 assert.equal(banners.response.status, 200);
 assert.deepEqual(banners.body.banners, []);
 
-console.log('Functions emulator config, private POST search, disabled explorer, auth, and banner checks passed');
+console.log('Functions emulator cached public cases, config, private POST search, disabled explorer, auth, and banner checks passed');

@@ -18,6 +18,15 @@ export interface AppLocation {
   search: string;
 }
 
+const INTERNAL_TRACKING_PARAMS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content'];
+
+export const stripInternalTrackingParams = (search: string): string => {
+  const params = new URLSearchParams(search);
+  INTERNAL_TRACKING_PARAMS.forEach((key) => params.delete(key));
+  const normalized = params.toString();
+  return normalized ? `?${normalized}` : '';
+};
+
 const normalizePathname = (pathname: string) => pathname.replace(/\/+$/, '') || '/';
 
 export const getViewFromAppLocation = ({ pathname, search }: AppLocation): AppView => {

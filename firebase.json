@@ -24,6 +24,18 @@
         "function": "api"
       },
       {
+        "source": "/rss.xml",
+        "function": "api"
+      },
+      {
+        "source": "/guide/**",
+        "function": "api"
+      },
+      {
+        "source": "/embed/**",
+        "function": "api"
+      },
+      {
         "source": "/api/**",
         "function": "api"
       },
@@ -108,6 +120,7 @@
       "ignore": [
         "node_modules",
         ".git",
+        "artifacts",
         "firebase-debug.log",
         "firebase-debug.*.log",
         "*.local"

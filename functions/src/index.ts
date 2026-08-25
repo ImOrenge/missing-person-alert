@@ -32,15 +32,24 @@ import {
 } from "./news";
 import {
   buildCollectionSitemap,
+  buildGuideHtml,
   buildGoneHtml,
+  buildPublicSubRegionCandidates,
   buildMissingPersonCollectionHtml,
   buildMissingPersonHtml,
+  buildMissingPersonStatisticsHtml,
+  buildMissingPersonsRss,
   buildMissingPersonsSitemap,
+  buildRegionEmbedHtml,
   buildSitemapIndex,
   getPublicMissingType,
+  getPublicGuide,
   getPublicRegion,
   getPublicRegionForAddress,
+  isMissingPersonWithinDays,
   isSearchIndexableMissingPerson,
+  PublicMissingPerson,
+  PUBLIC_GUIDES,
   PUBLIC_MISSING_TYPES,
   PUBLIC_REGIONS,
   toPublicMissingPerson,
@@ -58,6 +67,18 @@ import {registerNotificationSubscriptionRoutes} from "./notifications/routes";
 import {registerDashboardPreferenceRoutes} from "./dashboard/routes";
 import {registerBannerRoutes} from "./banners/routes";
 import {registerPublicExploreRoutes} from "./explore/routes";
+import {
+  buildSeoMetricsSummary,
+  isSeoEventName,
+  normalizeSeoMetricDay,
+  normalizeSeoPageGroup,
+  normalizeSeoSource,
+  SEO_PAGE_GROUP_NAMES,
+  SEO_SOURCE_NAMES,
+  SeoEventName,
+  SeoPageGroupName,
+  SeoSourceName,
+} from "./seoMetrics";
 export {processReportMediaUpload} from "./reports/media-pipeline";
 export {enforceReportRetention} from "./reports/retention";
 export {enforceClosedCasePolicy} from "./reports/case-lifecycle";
@@ -265,12 +286,7 @@ registerPublicExploreRoutes(app, db);
 
 const SEO_SITEMAP_PAGE_SIZE = 1000;
 const SEO_SITEMAP_MAX_PAGES = 50;
-const SEO_EVENT_NAMES = ["seo_app_cta_click", "share_started", "call_112_click", "call_182_click"] as const;
-type SeoEventName = typeof SEO_EVENT_NAMES[number];
-
-const isSeoEventName = (value: unknown): value is SeoEventName =>
-  typeof value === "string" && SEO_EVENT_NAMES.includes(value as SeoEventName);
-
+const SEO_COLLECTION_PAGE_SIZE = 24;
 const isSafeCaseId = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0 && value.length <= 200 && !/[\/\u0000-\u001f\u007f]/.test(value);
 
@@ -284,31 +300,56 @@ const seoulDateKey = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
-const recordSeoEvent = async (event: SeoEventName, caseId: string): Promise<void> => {
+const recordSeoEvent = async (
+  event: SeoEventName,
+  caseId: string | null,
+  source: SeoSourceName,
+  pageGroup: SeoPageGroupName
+): Promise<void> => {
   const day = seoulDateKey(new Date());
-  const caseKey = crypto.createHash("sha256").update(caseId).digest("hex").slice(0, 24);
   const totalRef = db.collection("seoMetrics").doc(day);
-  const caseRef = totalRef.collection("cases").doc(caseKey);
   const batch = db.batch();
   batch.set(totalRef, {
     day,
     totals: {[event]: FieldValue.increment(1)},
+    sources: {[source]: {[event]: FieldValue.increment(1)}},
+    pageGroups: {[pageGroup]: {[event]: FieldValue.increment(1)}},
     updatedAt: FieldValue.serverTimestamp(),
   }, {merge: true});
-  batch.set(caseRef, {
-    caseKey,
-    events: {[event]: FieldValue.increment(1)},
-    updatedAt: FieldValue.serverTimestamp(),
-  }, {merge: true});
+  if (caseId) {
+    const caseKey = crypto.createHash("sha256").update(caseId).digest("hex").slice(0, 24);
+    const caseRef = totalRef.collection("cases").doc(caseKey);
+    batch.set(caseRef, {
+      caseKey,
+      events: {[event]: FieldValue.increment(1)},
+      updatedAt: FieldValue.serverTimestamp(),
+    }, {merge: true});
+  }
   await batch.commit();
 };
 
+const SEO_PERSON_CACHE_TTL_MS = 5 * 60 * 1000;
+let seoPersonCache: {expiresAt: number; persons: PublicMissingPerson[]} | null = null;
+let seoPersonCachePromise: Promise<PublicMissingPerson[]> | null = null;
+
 const loadIndexablePersons = async (limit = 5000) => {
-  const snapshot = await db.collection("missingPersons").where("seoVisible", "==", true).limit(limit).get();
-  return snapshot.docs
-    .filter((doc) => isSearchIndexableMissingPerson(doc.data()))
-    .map((doc) => toPublicMissingPerson(doc.id, doc.data()))
-    .sort((a, b) => (b.missingDate || "").localeCompare(a.missingDate || ""));
+  if (seoPersonCache && seoPersonCache.expiresAt > Date.now()) {
+    return seoPersonCache.persons.slice(0, limit);
+  }
+  if (!seoPersonCachePromise) {
+    seoPersonCachePromise = (async () => {
+      const snapshot = await db.collection("missingPersons").where("seoVisible", "==", true).limit(5000).get();
+      const persons = snapshot.docs
+        .filter((doc) => isSearchIndexableMissingPerson(doc.data()))
+        .map((doc) => toPublicMissingPerson(doc.id, doc.data()))
+        .sort((a, b) => (b.missingDate || "").localeCompare(a.missingDate || ""));
+      seoPersonCache = {expiresAt: Date.now() + SEO_PERSON_CACHE_TTL_MS, persons};
+      return persons;
+    })().finally(() => {
+      seoPersonCachePromise = null;
+    });
+  }
+  return (await seoPersonCachePromise).slice(0, limit);
 };
 
 const collectionResponseHeaders = (hasPersons: boolean) => ({
@@ -323,20 +364,70 @@ const activeRegionLinks = (persons: ReturnType<typeof toPublicMissingPerson>[], 
     .map((region) => ({href: `/missing/region/${region.slug}`, label: `${region.name} 실종자 현황`}));
 };
 
+const allRegionLinks = () => PUBLIC_REGIONS.map((region) => ({
+  href: `/missing/region/${region.slug}`,
+  label: `${region.name} 실종자 현황`,
+}));
+
+const allTypeLinks = () => PUBLIC_MISSING_TYPES.map((missingType) => ({
+  href: `/missing/type/${missingType.slug}`,
+  label: missingType.name,
+}));
+
+const publicSubRegionPath = (candidate: {regionSlug: string; slug: string}) =>
+  `/missing/region/${candidate.regionSlug}/${encodeURIComponent(candidate.slug)}`;
+
+app.get("/embed/region/:regionSlug", async (req: Request, res: Response) => {
+  const region = getPublicRegion(req.params.regionSlug || "");
+  if (!region) return res.status(404).set("X-Robots-Tag", "noindex, nofollow").send(buildGoneHtml());
+  try {
+    const persons = (await loadIndexablePersons()).filter((person) =>
+      getPublicRegionForAddress(person.address)?.slug === region.slug);
+    return res.status(200).set({
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=0, s-maxage=300, must-revalidate",
+      "X-Robots-Tag": "noindex, follow, noarchive",
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors *; base-uri 'none'; form-action 'none'",
+    }).send(buildRegionEmbedHtml(region, persons));
+  } catch (error) {
+    logger.error("지역 공개 수색 위젯 생성 실패", {region: region.slug, error});
+    return res.status(503).set({"Retry-After": "300", "X-Robots-Tag": "noindex, nofollow"}).send(buildGoneHtml());
+  }
+});
+
+app.get("/guide/:guideSlug", (req: Request, res: Response) => {
+  const guide = getPublicGuide(req.params.guideSlug || "");
+  if (!guide) return res.status(404).set("X-Robots-Tag", "noindex, nofollow").send(buildGoneHtml());
+  return res.status(200).set({
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "public, max-age=0, s-maxage=3600, must-revalidate",
+    "X-Robots-Tag": "index, follow, max-image-preview:large",
+  }).send(buildGuideHtml(guide));
+});
+
 app.get("/missing", async (_req: Request, res: Response) => {
   try {
     const allPersons = await loadIndexablePersons();
-    const persons = allPersons.slice(0, 100);
-    const typeLinks = PUBLIC_MISSING_TYPES.filter((missingType) =>
-      allPersons.some((person) => missingType.types.includes(person.type)))
-      .map((missingType) => ({href: `/missing/type/${missingType.slug}`, label: missingType.name}));
+    const persons = allPersons.slice(0, SEO_COLLECTION_PAGE_SIZE);
     const html = buildMissingPersonCollectionHtml({
       title: "실종자 검색·조회·찾기 - 최신 실종자 현황",
-      description: "경찰청 안전Dream에서 현재 공개 수색 중인 최근 실종자를 이름, 지역, 인상착의로 검색하고 사진, 실종 날짜와 마지막 확인 위치를 조회하세요.",
+      description: "경찰청 안전Dream에서 현재 공개 수색 중인 최근 실종자를 이름, 지역, 인상착의로 검색하고 사진, 실종 날짜와 실종 발생 지역을 조회하세요.",
       canonicalPath: "/missing",
       eyebrow: "전국 실종자 공개 검색",
       supportingCopy: "경기·강원·충북·충남·전북·전남·경북·경남 8도와 제주, 서울·부산·대구·인천·광주·대전·울산·세종까지 전국 17개 시·도의 최근 실종자와 실종아동·치매환자·장애인 공개 수색 정보를 찾아볼 수 있습니다.",
-      relatedLinks: [...typeLinks, ...activeRegionLinks(allPersons)],
+      totalCount: allPersons.length,
+      linkSections: [
+        {heading: "지역별 실종자 현황", links: allRegionLinks()},
+        {heading: "유형별 실종 정보", links: [
+          ...allTypeLinks(),
+          {href: "/missing/recent", label: "최근 실종자 현황"},
+          {href: "/missing/statistics", label: "현재 공개 수색 정보 통계"},
+        ]},
+        {heading: "신고·목격 대응 안내", links: PUBLIC_GUIDES.map((guide) => ({
+          href: `/guide/${guide.slug}`,
+          label: guide.heading,
+        }))},
+      ],
       persons,
     });
     return res.status(persons.length ? 200 : 404).set(collectionResponseHeaders(persons.length > 0)).send(html);
@@ -350,7 +441,8 @@ app.get("/missing/type/:typeSlug", async (req: Request, res: Response) => {
   const missingType = getPublicMissingType(req.params.typeSlug || "");
   if (!missingType) return res.status(404).set("X-Robots-Tag", "noindex, nofollow").send(buildGoneHtml());
   try {
-    const persons = (await loadIndexablePersons()).filter((person) => missingType.types.includes(person.type)).slice(0, 100);
+    const allPersons = (await loadIndexablePersons()).filter((person) => missingType.types.includes(person.type));
+    const persons = allPersons.slice(0, SEO_COLLECTION_PAGE_SIZE);
     const html = buildMissingPersonCollectionHtml({
       title: missingType.title,
       description: missingType.description,
@@ -359,11 +451,14 @@ app.get("/missing/type/:typeSlug", async (req: Request, res: Response) => {
       supportingCopy: "공식 출처에서 공개 중인 사건만 제공하며 이름, 지역, 실종 날짜와 인상착의를 확인해 수색 정보를 찾을 수 있습니다.",
       relatedLinks: [
         {href: "/missing", label: "전체 실종자 검색·조회"},
-        ...activeRegionLinks(persons),
+        {href: "/missing/recent", label: "최근 실종자 현황"},
+        {href: "/missing/statistics", label: "현재 공개 수색 정보 통계"},
+        ...activeRegionLinks(allPersons),
       ],
+      totalCount: allPersons.length,
       persons,
     });
-    return res.status(persons.length ? 200 : 404).set(collectionResponseHeaders(persons.length > 0)).send(html);
+    return res.status(200).set(collectionResponseHeaders(persons.length > 0)).send(html);
   } catch (error) {
     logger.error("대상별 실종자 SEO 페이지 생성 실패", {type: missingType.slug, error});
     return res.status(503).set({"Retry-After": "300", "X-Robots-Tag": "noindex, nofollow"}).send(buildGoneHtml());
@@ -371,22 +466,78 @@ app.get("/missing/type/:typeSlug", async (req: Request, res: Response) => {
 });
 
 app.get("/missing/today", async (_req: Request, res: Response) => {
+  return res.status(301).set({Location: "/missing/recent", "X-Robots-Tag": "noindex, follow"}).send();
+});
+
+app.get("/missing/recent", async (_req: Request, res: Response) => {
   try {
+    const allPersons = await loadIndexablePersons();
+    const recentPersons = allPersons.filter((person) => isMissingPersonWithinDays(person, 30));
+    const persons = recentPersons.slice(0, SEO_COLLECTION_PAGE_SIZE);
     const today = seoulDateKey(new Date());
-    const persons = (await loadIndexablePersons()).filter((person) =>
-      person.missingDate ? seoulDateKey(new Date(person.missingDate)) === today : false).slice(0, 100);
+    const todayCount = recentPersons.filter((person) => person.missingDate && seoulDateKey(new Date(person.missingDate)) === today).length;
+    const weekCount = recentPersons.filter((person) => isMissingPersonWithinDays(person, 7)).length;
     const html = buildMissingPersonCollectionHtml({
-      title: `오늘의 실종자 공개 정보 - ${today}`,
-      description: `${today}가 실종일로 표시된 경찰청 안전Dream 공개 정보입니다. 사진, 인상착의와 마지막 확인 지역을 확인하세요.`,
-      canonicalPath: "/missing/today",
-      eyebrow: "오늘의 공개 수색 정보",
-      supportingCopy: "오늘 실종된 것으로 공개된 사건을 확인하고 이름, 지역과 인상착의로 실종자 정보를 검색할 수 있습니다.",
-      relatedLinks: [{href: "/missing", label: "전체 실종자 검색·조회"}, ...activeRegionLinks(persons)],
+      title: "최근 실종자 현황 | 최근 공개 수색 정보",
+      description: "경찰청 안전Dream에서 현재 공개 중인 최근 30일 실종자 정보를 오늘·최근 7일·최근 30일 기준으로 확인하세요.",
+      canonicalPath: "/missing/recent",
+      eyebrow: "최근 공개 수색 정보",
+      supportingCopy: `오늘 ${todayCount}건 · 최근 7일 ${weekCount}건 · 최근 30일 ${recentPersons.length}건입니다. 날짜는 공식 공개정보의 실종 일자를 기준으로 합니다.`,
+      relatedLinks: [
+        {href: "/missing", label: "전체 실종자 검색·조회"},
+        {href: "/missing/statistics", label: "지역·유형별 공개 현황"},
+        ...activeRegionLinks(recentPersons),
+        ...PUBLIC_MISSING_TYPES.filter((missingType) => recentPersons.some((person) => missingType.types.includes(person.type)))
+          .map((missingType) => ({href: `/missing/type/${missingType.slug}`, label: missingType.name})),
+      ],
+      listHeading: "최근 30일 공개 실종자",
+      totalCount: recentPersons.length,
       persons,
     });
-    return res.status(persons.length ? 200 : 404).set(collectionResponseHeaders(persons.length > 0)).send(html);
+    return res.status(200).set(collectionResponseHeaders(persons.length > 0)).send(html);
   } catch (error) {
-    logger.error("오늘 실종자 SEO 페이지 생성 실패", error);
+    logger.error("최근 실종자 SEO 페이지 생성 실패", error);
+    return res.status(503).set({"Retry-After": "300", "X-Robots-Tag": "noindex, nofollow"}).send(buildGoneHtml());
+  }
+});
+
+app.get("/missing/statistics", async (_req: Request, res: Response) => {
+  try {
+    const persons = await loadIndexablePersons();
+    return res.status(200).set(collectionResponseHeaders(persons.length > 0))
+      .send(buildMissingPersonStatisticsHtml(persons));
+  } catch (error) {
+    logger.error("실종자 공개정보 통계 페이지 생성 실패", error);
+    return res.status(503).set({"Retry-After": "300", "X-Robots-Tag": "noindex, nofollow"}).send(buildGoneHtml());
+  }
+});
+
+app.get("/missing/region/:regionSlug/:subRegionSlug", async (req: Request, res: Response) => {
+  const region = getPublicRegion(req.params.regionSlug || "");
+  if (!region) return res.status(404).set("X-Robots-Tag", "noindex, nofollow").send(buildGoneHtml());
+  try {
+    const candidates = buildPublicSubRegionCandidates(await loadIndexablePersons());
+    const requestedSlug = (req.params.subRegionSlug || "").normalize("NFKC");
+    const candidate = candidates.find((item) => item.regionSlug === region.slug && item.slug === requestedSlug);
+    if (!candidate) return res.status(404).set("X-Robots-Tag", "noindex, nofollow").send(buildGoneHtml());
+    const canonicalPath = publicSubRegionPath(candidate);
+    const html = buildMissingPersonCollectionHtml({
+      title: `${candidate.name} 실종자 현황·검색 | ${region.name}`,
+      description: `${region.name} ${candidate.name}에서 현재 공개 수색 중인 실종자 정보를 사진, 인상착의, 실종 날짜와 함께 확인하세요.`,
+      canonicalPath,
+      eyebrow: `${region.name} ${candidate.name} 공개 수색 정보`,
+      supportingCopy: `${candidate.name}에서 현재 공개 수색 중인 실종 정보는 ${candidate.persons.length}건입니다. 현재 활성 공식 사건이 3건 이상인 하위 지역만 파일럿 검색 페이지로 제공합니다.`,
+      relatedLinks: [
+        {href: `/missing/region/${region.slug}`, label: `${region.name} 전체 실종자 현황`},
+        {href: "/missing", label: "전국 실종자 검색·조회"},
+        {href: "/missing/recent", label: "최근 실종자 현황"},
+      ],
+      totalCount: candidate.persons.length,
+      persons: candidate.persons.slice(0, SEO_COLLECTION_PAGE_SIZE),
+    });
+    return res.status(200).set(collectionResponseHeaders(true)).send(html);
+  } catch (error) {
+    logger.error("시·군·구 실종자 SEO 페이지 생성 실패", {region: region.slug, subRegion: req.params.subRegionSlug, error});
     return res.status(503).set({"Retry-After": "300", "X-Robots-Tag": "noindex, nofollow"}).send(buildGoneHtml());
   }
 });
@@ -395,22 +546,31 @@ app.get("/missing/region/:regionSlug", async (req: Request, res: Response) => {
   const region = getPublicRegion(req.params.regionSlug || "");
   if (!region) return res.status(404).set("X-Robots-Tag", "noindex, nofollow").send(buildGoneHtml());
   try {
-    const persons = (await loadIndexablePersons()).filter((person) =>
-      getPublicRegionForAddress(person.address)?.slug === region.slug).slice(0, 100);
+    const indexablePersons = await loadIndexablePersons();
+    const allPersons = indexablePersons.filter((person) =>
+      getPublicRegionForAddress(person.address)?.slug === region.slug);
+    const subRegionLinks = buildPublicSubRegionCandidates(indexablePersons)
+      .filter((candidate) => candidate.regionSlug === region.slug)
+      .map((candidate) => ({href: publicSubRegionPath(candidate), label: `${candidate.name} 실종자 정보 ${candidate.persons.length}건`}));
+    const persons = allPersons.slice(0, SEO_COLLECTION_PAGE_SIZE);
     const html = buildMissingPersonCollectionHtml({
       title: `${region.name} 실종자 현황·검색 - 최신 공개 정보`,
-      description: `${region.name}에서 현재 공개 수색 중인 최근 실종자를 찾고 사진, 인상착의, 실종 날짜와 마지막 확인 지역을 조회하세요.`,
+      description: `${region.name}에서 현재 공개 수색 중인 최근 실종자를 찾고 사진, 인상착의, 실종 날짜와 실종 발생 지역을 조회하세요.`,
       canonicalPath: `/missing/region/${region.slug}`,
       eyebrow: `${region.name} 공개 수색 정보`,
-      supportingCopy: `${region.name} 실종자 지도와 목록을 통해 최근 공개 수색 정보를 확인할 수 있습니다. 공식 출처에서 종결된 사건은 검색 결과에서 제외됩니다.`,
+      supportingCopy: `${region.name}에서 현재 공개 수색 중인 실종 정보는 ${allPersons.length}건입니다. 실종자 지도와 목록을 통해 최근 공개 수색 정보를 확인할 수 있으며, 공식 출처에서 종결된 사건은 검색 결과에서 제외됩니다.`,
       relatedLinks: [
         {href: "/missing", label: "전체 실종자 검색·조회"},
+        {href: "/missing/recent", label: "최근 실종자 현황"},
+        {href: "/missing/statistics", label: "지역·유형별 공개 현황"},
         ...PUBLIC_MISSING_TYPES.filter((missingType) => persons.some((person) => missingType.types.includes(person.type)))
           .map((missingType) => ({href: `/missing/type/${missingType.slug}`, label: missingType.name})),
       ],
+      linkSections: subRegionLinks.length ? [{heading: `${region.name} 시·군·구 공개 수색 정보`, links: subRegionLinks}] : undefined,
+      totalCount: allPersons.length,
       persons,
     });
-    return res.status(persons.length ? 200 : 404).set(collectionResponseHeaders(persons.length > 0)).send(html);
+    return res.status(200).set(collectionResponseHeaders(persons.length > 0)).send(html);
   } catch (error) {
     logger.error("지역 실종자 SEO 페이지 생성 실패", {region: region.slug, error});
     return res.status(503).set({"Retry-After": "300", "X-Robots-Tag": "noindex, nofollow"}).send(buildGoneHtml());
@@ -461,6 +621,11 @@ app.get("/missing/:caseId", async (req: Request, res: Response) => {
           publicStatus: report.status as "approved" | "forwarded" | "confirmed",
         }))
       : [];
+    const person = toPublicMissingPerson(snapshot.id, data);
+    const region = getPublicRegionForAddress(person.address);
+    const relatedPersons = region ? (await loadIndexablePersons())
+      .filter((candidate) => candidate.id !== person.id && getPublicRegionForAddress(candidate.address)?.slug === region.slug)
+      .slice(0, 3) : [];
 
     return res
       .status(200)
@@ -471,7 +636,7 @@ app.get("/missing/:caseId", async (req: Request, res: Response) => {
           : "public, max-age=0, s-maxage=300, must-revalidate",
         "X-Robots-Tag": "index, follow, max-image-preview:large",
       })
-      .send(buildMissingPersonHtml(toPublicMissingPerson(snapshot.id, data), publicReports));
+      .send(buildMissingPersonHtml(person, publicReports, relatedPersons));
   } catch (error) {
     logger.error("실종자 SEO 상세 페이지 생성 실패", {caseId, error});
     return res
@@ -483,11 +648,14 @@ app.get("/missing/:caseId", async (req: Request, res: Response) => {
 
 app.post("/api/seo/events", async (req: Request, res: Response) => {
   const {event, caseId} = req.body || {};
-  if (!isSeoEventName(event) || !isSafeCaseId(caseId)) {
+  const source = normalizeSeoSource(req.body?.source);
+  const pageGroup = normalizeSeoPageGroup(req.body?.pageGroup);
+  const normalizedCaseId = caseId == null || caseId === "" ? null : caseId;
+  if (!isSeoEventName(event) || (normalizedCaseId !== null && !isSafeCaseId(normalizedCaseId))) {
     return res.status(400).json({success: false});
   }
   try {
-    await recordSeoEvent(event, caseId);
+    await recordSeoEvent(event, normalizedCaseId, source, pageGroup);
     return res.status(204).send();
   } catch (error) {
     logger.warn("SEO 전환 이벤트 기록 실패", {event, error});
@@ -497,11 +665,11 @@ app.post("/api/seo/events", async (req: Request, res: Response) => {
 
 app.get("/sitemap-missing-persons.xml", async (_req: Request, res: Response) => {
   try {
-    const countSnapshot = await db.collection("missingPersons").where("seoVisible", "==", true).count().get();
-    const count = countSnapshot.data().count;
+    const count = (await loadIndexablePersons()).length;
     const pageCount = Math.max(1, Math.min(SEO_SITEMAP_MAX_PAGES, Math.ceil(count / SEO_SITEMAP_PAGE_SIZE)));
     const paths = Array.from({length: pageCount}, (_, index) => `/sitemaps/public-cases-${index + 1}.xml`);
     paths.push("/sitemaps/missing-collections.xml");
+    paths.push("/sitemaps/missing-guides.xml");
     return res
       .status(200)
       .set({
@@ -511,6 +679,21 @@ app.get("/sitemap-missing-persons.xml", async (_req: Request, res: Response) => 
       .send(buildSitemapIndex(paths));
   } catch (error) {
     logger.error("실종자 사이트맵 인덱스 생성 실패", error);
+    return res.status(503).set("Retry-After", "300").send("Service Unavailable");
+  }
+});
+
+app.get("/rss.xml", async (_req: Request, res: Response) => {
+  try {
+    const persons = [...(await loadIndexablePersons())].sort((a, b) =>
+      (b.updatedAt?.getTime() || new Date(b.missingDate || 0).getTime()) -
+      (a.updatedAt?.getTime() || new Date(a.missingDate || 0).getTime())).slice(0, 50);
+    return res.status(200).set({
+      "Content-Type": "application/rss+xml; charset=utf-8",
+      "Cache-Control": "public, max-age=0, s-maxage=300, must-revalidate",
+    }).send(buildMissingPersonsRss(persons));
+  } catch (error) {
+    logger.error("실종자 RSS 생성 실패", error);
     return res.status(503).set("Retry-After", "300").send("Service Unavailable");
   }
 });
@@ -547,14 +730,16 @@ app.get("/sitemaps/missing-collections.xml", async (_req: Request, res: Response
   try {
     const persons = await loadIndexablePersons();
     const regionSlugs = new Set(persons.map((person) => getPublicRegionForAddress(person.address)?.slug).filter(Boolean));
-    const today = seoulDateKey(new Date());
+    const recentPersons = persons.filter((person) => isMissingPersonWithinDays(person, 30));
     const paths = PUBLIC_REGIONS.filter((region) => regionSlugs.has(region.slug))
       .map((region) => `/missing/region/${region.slug}`);
     PUBLIC_MISSING_TYPES.filter((missingType) => persons.some((person) => missingType.types.includes(person.type)))
       .reverse()
       .forEach((missingType) => paths.unshift(`/missing/type/${missingType.slug}`));
     if (persons.length) paths.unshift("/missing");
-    if (persons.some((person) => person.missingDate && seoulDateKey(new Date(person.missingDate)) === today)) paths.unshift("/missing/today");
+    if (persons.length) paths.push("/missing/statistics");
+    if (recentPersons.length) paths.push("/missing/recent");
+    buildPublicSubRegionCandidates(persons).forEach((candidate) => paths.push(publicSubRegionPath(candidate)));
     return res.status(200).set({
       "Content-Type": "application/xml; charset=utf-8",
       "Cache-Control": "public, max-age=0, s-maxage=900, must-revalidate",
@@ -563,6 +748,13 @@ app.get("/sitemaps/missing-collections.xml", async (_req: Request, res: Response
     logger.error("실종자 컬렉션 사이트맵 생성 실패", error);
     return res.status(503).set("Retry-After", "300").send("Service Unavailable");
   }
+});
+
+app.get("/sitemaps/missing-guides.xml", (_req: Request, res: Response) => {
+  return res.status(200).set({
+    "Content-Type": "application/xml; charset=utf-8",
+    "Cache-Control": "public, max-age=0, s-maxage=3600, must-revalidate",
+  }).send(buildCollectionSitemap(PUBLIC_GUIDES.map((guide) => `/guide/${guide.slug}`)));
 });
 
 const ANONYMOUS_PREFIX = "익명";
@@ -1045,6 +1237,34 @@ const requireAdmin = [
     next();
   }
 ];
+
+app.get("/api/admin/seo-metrics", requireAdmin, async (req: AuthedRequest, res: Response) => {
+  const requestedRange = Number(req.query.range || 28);
+  const rangeDays = [7, 28, 90].includes(requestedRange) ? requestedRange : 28;
+  const end = new Date();
+  const start = new Date(end.getTime() - (rangeDays - 1) * 24 * 60 * 60 * 1000);
+  const startDate = seoulDateKey(start);
+  const endDate = seoulDateKey(end);
+  try {
+    const snapshot = await db.collection("seoMetrics")
+      .where(admin.firestore.FieldPath.documentId(), ">=", startDate)
+      .where(admin.firestore.FieldPath.documentId(), "<=", endDate)
+      .orderBy(admin.firestore.FieldPath.documentId(), "asc")
+      .get();
+    const rows = snapshot.docs.map((document) => normalizeSeoMetricDay(document.id, document.data()));
+    return res.status(200).set("Cache-Control", "private, no-store").json({
+      success: true,
+      summary: buildSeoMetricsSummary(rows, rangeDays, startDate, endDate),
+      sourceBuckets: SEO_SOURCE_NAMES,
+      pageGroupBuckets: SEO_PAGE_GROUP_NAMES,
+      generatedAt: new Date().toISOString(),
+      measurementNote: "검색 리퍼러와 랜딩 위치는 허용된 채널·페이지 그룹 버킷만 저장합니다. 재방문 판별용 시각은 브라우저에만 남고 서버에는 원문 URL과 방문자 식별정보를 저장하지 않습니다.",
+    });
+  } catch (error) {
+    logger.error("SEO 전환 지표 조회 실패", error);
+    return res.status(500).json({success: false, error: "SEO_METRICS_READ_FAILED"});
+  }
+});
 
 const rateLimit = (keyExtractor: (req: AuthedRequest) => string) => {
   return (req: AuthedRequest, res: Response, next: NextFunction) => {
@@ -2329,40 +2549,45 @@ app.post("/api/comments/:commentId/moderation", requireAdmin, async (req: Authed
   }
 });
 
-// Firestore에서 실종자 데이터 조회
+const PUBLIC_MISSING_PERSON_CACHE_TTL_MS = 5 * 60 * 1000;
+let publicMissingPersonCache: {expiresAt: number; persons: Record<string, unknown>[]} | null = null;
+let publicMissingPersonCachePromise: Promise<Record<string, unknown>[]> | null = null;
+
+// CDN과 함수 인스턴스 캐시를 거쳐 공개 실종자 스냅샷을 제공한다.
 app.get("/api/safe182/missing-persons", async (req: Request, res: Response) => {
   try {
-    logger.info("Firestore에서 실종자 데이터 조회");
+    const requestedLimit = Number(req.query.limit);
+    const limit = Number.isFinite(requestedLimit) ? Math.min(500, Math.max(1, Math.floor(requestedLimit))) : 500;
+    const now = Date.now();
+    let cacheStatus = "HIT";
 
-    const db = admin.firestore();
-    const limit = parseInt(req.query.limit as string) || 100;
-
-    // Firestore에서 최신순으로 데이터 조회
-    const snapshot = await db
-      .collection("missingPersons")
-      .orderBy("updatedAt", "desc")
-      .limit(limit)
-      .get();
-
-    if (snapshot.empty) {
-      logger.info("Firestore에 저장된 데이터 없음");
-      return res.json({
-        result: "00",
-        msg: "조회 성공",
-        list: [],
-        totalCount: 0,
-      });
+    if (!publicMissingPersonCache || publicMissingPersonCache.expiresAt <= now) {
+      cacheStatus = "MISS";
+      if (!publicMissingPersonCachePromise) {
+        publicMissingPersonCachePromise = (async () => {
+          const snapshot = await db.collection("missingPersons")
+            .orderBy("updatedAt", "desc")
+            .limit(500)
+            .get();
+          const persons = snapshot.docs.map((document) => ({id: document.id, ...document.data()}));
+          publicMissingPersonCache = {
+            expiresAt: Date.now() + PUBLIC_MISSING_PERSON_CACHE_TTL_MS,
+            persons,
+          };
+          return persons;
+        })().finally(() => {
+          publicMissingPersonCachePromise = null;
+        });
+      }
+      await publicMissingPersonCachePromise;
     }
 
-    const persons: any[] = [];
-    snapshot.forEach((doc) => {
-      persons.push(doc.data());
+    const persons = publicMissingPersonCache.persons.slice(0, limit);
+    res.set({
+      "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=600",
+      "X-MissingAlert-Data-Cache": cacheStatus,
     });
-
-    logger.info(`Firestore 조회 성공: ${persons.length}건`);
-
-    // 안전드림 API 응답 형식과 동일하게 반환
-    res.json({
+    return res.json({
       result: "00",
       msg: "조회 성공",
       list: persons,
@@ -2370,7 +2595,7 @@ app.get("/api/safe182/missing-persons", async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     logger.error("Firestore 조회 오류", error);
-    res.status(500).json({
+    return res.status(500).set("Cache-Control", "no-store").json({
       error: "데이터 조회 실패",
       message: error.message,
       list: [],
@@ -2953,6 +3178,20 @@ const sendSlackNotification = async (message: string) => {
   }
 };
 
+const shouldRefreshRegionStatistics = async (): Promise<boolean> => {
+  const [summarySnapshot, regionSnapshot] = await Promise.all([
+    db.collection("stats").doc("summary").get(),
+    REGION_DAILY_DOC().get(),
+  ]);
+  if (!summarySnapshot.exists || !regionSnapshot.exists) return true;
+
+  const summaryUpdatedAt = summarySnapshot.data()?.updatedAt;
+  const regionGeneratedAt = regionSnapshot.data()?.generatedAt;
+  const summaryMillis = typeof summaryUpdatedAt?.toMillis === "function" ? summaryUpdatedAt.toMillis() : 0;
+  const regionMillis = typeof regionGeneratedAt?.toMillis === "function" ? regionGeneratedAt.toMillis() : 0;
+  return summaryMillis === 0 || regionMillis === 0 || summaryMillis > regionMillis;
+};
+
 export const aggregateRegionStatistics = onSchedule({
   schedule: "0 * * * *", // 매시 정각
   timeZone: "Asia/Seoul",
@@ -2961,6 +3200,10 @@ export const aggregateRegionStatistics = onSchedule({
   timeoutSeconds: 300,
 }, async () => {
   try {
+    if (!(await shouldRefreshRegionStatistics())) {
+      logger.info("지역 통계 변경 없음: 전체 컬렉션 집계를 생략합니다");
+      return;
+    }
     logger.info("📊 지역별 실종자 통계 집계 시작");
     const {regions, totalCases, activeCases} = await collectRegionStats();
     const generatedAt = Timestamp.now();
@@ -3145,12 +3388,48 @@ export const pollMissingPersonsAPI = onSchedule({
       return transformed;
     });
 
+    const syncStateRef = db.collection("syncMetadata").doc("safe182MissingPersons");
+    const snapshotFingerprint = crypto.createHash("sha256").update(JSON.stringify(
+      transformedItems
+        .map((item) => ({id: item.id, contentFingerprint: item.contentFingerprint}))
+        .sort((left, right) => left.id.localeCompare(right.id))
+    )).digest("hex");
+    const syncStateSnapshot = sourceSnapshotComplete ? await syncStateRef.get() : null;
+    const previousSnapshotFingerprint = syncStateSnapshot?.data()?.snapshotFingerprint;
+
+    if (sourceSnapshotComplete && previousSnapshotFingerprint === snapshotFingerprint) {
+      await syncStateRef.set({
+        lastCheckedAt: FieldValue.serverTimestamp(),
+        lastSnapshotComplete: true,
+        lastCollectedCount: transformedItems.length,
+      }, {merge: true});
+      logger.info(`✅ 폴링 완료: 공식 데이터 변경 없음 (${transformedItems.length}건, 문서 동기화 생략)`);
+      return;
+    }
+
+    let changedDocumentCount = 0;
     for (let offset = 0; offset < transformedItems.length; offset += 400) {
+      const items = transformedItems.slice(offset, offset + 400);
+      const refs = items.map((item) => missingPersonsRef.doc(item.id));
+      const existingSnapshots = refs.length ? await db.getAll(...refs) : [];
       const batch = db.batch();
-      for (const item of transformedItems.slice(offset, offset + 400)) {
-        batch.set(missingPersonsRef.doc(item.id), item, {merge: true});
+      let batchOperationCount = 0;
+      for (let index = 0; index < items.length; index++) {
+        const item = items[index];
+        const previousFingerprint = existingSnapshots[index]?.data()?.contentFingerprint;
+        const meaningfulChange = !existingSnapshots[index]?.exists || previousFingerprint !== item.contentFingerprint;
+        if (!meaningfulChange) continue;
+        batch.set(refs[index], {
+          ...item,
+          sourceLastSeenAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        }, {merge: true});
+        batchOperationCount += 1;
       }
-      await batch.commit();
+      if (batchOperationCount > 0) {
+        await batch.commit();
+        changedDocumentCount += batchOperationCount;
+      }
     }
 
     const previouslyVisible = sourceSnapshotComplete ?
@@ -3180,7 +3459,18 @@ export const pollMissingPersonsAPI = onSchedule({
       await batch.commit();
     }
 
-    logger.info(`✅ 폴링 완료: ${transformedItems.length}건 동기화, ${noLongerPublished.length}건 검색 노출 종료`);
+    await syncStateRef.set({
+      lastCheckedAt: FieldValue.serverTimestamp(),
+      lastSnapshotComplete: sourceSnapshotComplete,
+      lastCollectedCount: transformedItems.length,
+      ...(sourceSnapshotComplete ? {snapshotFingerprint} : {}),
+      ...((changedDocumentCount > 0 || noLongerPublished.length > 0) ? {
+        lastChangedAt: FieldValue.serverTimestamp(),
+      } : {}),
+    }, {merge: true});
+    seoPersonCache = null;
+    publicMissingPersonCache = null;
+    logger.info(`✅ 폴링 완료: ${changedDocumentCount}건 변경 반영, ${noLongerPublished.length}건 검색 노출 종료 (${transformedItems.length}건 확인)`);
   } catch (error: any) {
     logger.error("❌ 안전드림 API 폴링 오류:", error);
     throw error;
@@ -3197,8 +3487,16 @@ function transformAPIData(apiData: any) {
   const gender = apiData.sexdstnDscd === "남자" ? "M" :
     apiData.sexdstnDscd === "여자" ? "F" : "U";
 
-  // 나이
-  const age = parseInt(apiData.ageNow) || parseInt(apiData.age) || 0;
+  const positiveInteger = (value: unknown): number | null => {
+    const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  };
+
+  // 안전Dream의 현재 연령과 실종 당시 연령을 가능한 범위에서 분리한다.
+  const explicitCurrentAge = positiveInteger(apiData.ageNow);
+  const sourceAge = positiveInteger(apiData.age);
+  const currentAge = explicitCurrentAge ?? sourceAge;
+  const ageAtMissing = explicitCurrentAge !== null ? sourceAge : null;
 
   // 타입 결정
   let type = "runaway";
@@ -3224,11 +3522,11 @@ function transformAPIData(apiData: any) {
       type = "unknown";
       break;
     default:
-      type = age < 18 ? "missing_child" : "runaway";
+      type = currentAge !== null && currentAge < 18 ? "missing_child" : "runaway";
   }
 
   // 실종일시 파싱
-  let missingDate: string;
+  let missingDate: string | null;
   try {
     if (apiData.occrde) {
       const dateStr = apiData.occrde.toString();
@@ -3237,10 +3535,10 @@ function transformAPIData(apiData: any) {
       const day = dateStr.substring(6, 8);
       missingDate = new Date(`${year}-${month}-${day}`).toISOString();
     } else {
-      missingDate = new Date().toISOString();
+      missingDate = null;
     }
   } catch (error) {
-    missingDate = new Date().toISOString();
+    missingDate = null;
   }
 
   // 주소에서 좌표 가져오기
@@ -3251,10 +3549,12 @@ function transformAPIData(apiData: any) {
     `https://www.safe182.go.kr/api/lcm/imgView.do?msspsnIdntfccd=${apiData.msspsnIdntfccd}` :
     null;
 
-  return {
+  const stableData = {
     id,
     name: apiData.nm || "미상",
-    age: age,
+    age: currentAge,
+    currentAge,
+    ageAtMissing,
     gender,
     location,
     photo,
@@ -3264,16 +3564,18 @@ function transformAPIData(apiData: any) {
     status: "active",
     source: "api",
     seoVisible: true,
-    sourceLastSeenAt: FieldValue.serverTimestamp(),
-    height: apiData.height || null,
-    weight: apiData.bdwgh || null,
+    height: positiveInteger(apiData.height),
+    weight: positiveInteger(apiData.bdwgh),
     clothes: apiData.alldressingDscd || null,
     bodyType: apiData.frmDscd || null,
     faceShape: apiData.faceshpeDscd || null,
     hairShape: apiData.hairshpeDscd || null,
     hairColor: apiData.haircolrDscd || null,
     apiTargetCode: apiData.writngTrgetDscd || null,
-    updatedAt: FieldValue.serverTimestamp(),
+  };
+  return {
+    ...stableData,
+    contentFingerprint: crypto.createHash("sha256").update(JSON.stringify(stableData)).digest("hex"),
   };
 }
 

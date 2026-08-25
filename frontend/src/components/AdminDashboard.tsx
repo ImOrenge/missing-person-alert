@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { X, Shield, Users, BarChart3, Bell, AlertTriangle } from 'lucide-react';
+import { X, Shield, Users, BarChart3, Bell, AlertTriangle, Search } from 'lucide-react';
 import UserManagementTab from './AdminDashboard/UserManagementTab';
 import StatisticsTab from './AdminDashboard/StatisticsTab';
 import AnnouncementsTab from './AdminDashboard/AnnouncementsTab';
 import CommentReportsTab from './AdminDashboard/CommentReportsTab';
+import SeoMetricsTab from '../features/admin/seo/SeoMetricsTab';
 
 interface Props {
   isOpen: boolean;
@@ -11,7 +12,7 @@ interface Props {
   isPage?: boolean;
 }
 
-type TabType = 'users' | 'statistics' | 'announcements' | 'commentReports';
+type TabType = 'users' | 'statistics' | 'seoMetrics' | 'announcements' | 'commentReports';
 
 export default function AdminDashboard({ isOpen, onClose, isPage = false }: Props) {
   const [activeTab, setActiveTab] = useState<TabType>('users');
@@ -72,6 +73,8 @@ export default function AdminDashboard({ isOpen, onClose, isPage = false }: Prop
             </div>
           </div>
           <button
+            type="button"
+            aria-label="관리자 대시보드 닫기"
             onClick={onClose}
             style={{
               background: 'none',
@@ -91,32 +94,44 @@ export default function AdminDashboard({ isOpen, onClose, isPage = false }: Prop
         </div>
 
         {/* 탭 네비게이션 */}
-        <div style={{
+        <div role="tablist" aria-label="관리자 대시보드 메뉴" style={{
           display: 'flex',
           gap: '4px',
           padding: '20px 30px 0 30px',
           backgroundColor: '#ffffff',
-          borderBottom: '1px solid #e0e0e0'
+          borderBottom: '1px solid #e0e0e0',
+          overflowX: 'auto'
         }}>
           <TabButton
+            tabId="users"
             active={activeTab === 'users'}
             onClick={() => setActiveTab('users')}
             icon={<Users size={18} />}
             label="유저 관리"
           />
           <TabButton
+            tabId="statistics"
             active={activeTab === 'statistics'}
             onClick={() => setActiveTab('statistics')}
             icon={<BarChart3 size={18} />}
             label="통계"
           />
           <TabButton
+            tabId="seoMetrics"
+            active={activeTab === 'seoMetrics'}
+            onClick={() => setActiveTab('seoMetrics')}
+            icon={<Search size={18} />}
+            label="검색 전환"
+          />
+          <TabButton
+            tabId="announcements"
             active={activeTab === 'announcements'}
             onClick={() => setActiveTab('announcements')}
             icon={<Bell size={18} />}
             label="공지사항"
           />
           <TabButton
+            tabId="commentReports"
             active={activeTab === 'commentReports'}
             onClick={() => setActiveTab('commentReports')}
             icon={<AlertTriangle size={18} />}
@@ -125,14 +140,20 @@ export default function AdminDashboard({ isOpen, onClose, isPage = false }: Prop
         </div>
 
         {/* 탭 콘텐츠 */}
-        <div style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: '20px 30px 30px 30px',
-          backgroundColor: '#fafafa'
-        }}>
+        <div
+          id={`admin-panel-${activeTab}`}
+          role="tabpanel"
+          aria-labelledby={`admin-tab-${activeTab}`}
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: '20px 30px 30px 30px',
+            backgroundColor: '#fafafa'
+          }}
+        >
           {activeTab === 'users' && <UserManagementTab />}
           {activeTab === 'statistics' && <StatisticsTab />}
+          {activeTab === 'seoMetrics' && <SeoMetricsTab />}
           {activeTab === 'announcements' && <AnnouncementsTab />}
           {activeTab === 'commentReports' && <CommentReportsTab />}
         </div>
@@ -146,11 +167,17 @@ interface TabButtonProps {
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
+  tabId: TabType;
 }
 
-function TabButton({ active, onClick, icon, label }: TabButtonProps) {
+function TabButton({ active, onClick, icon, label, tabId }: TabButtonProps) {
   return (
     <button
+      id={`admin-tab-${tabId}`}
+      type="button"
+      role="tab"
+      aria-selected={active}
+      aria-controls={`admin-panel-${tabId}`}
       onClick={onClick}
       style={{
         display: 'flex',
@@ -165,7 +192,8 @@ function TabButton({ active, onClick, icon, label }: TabButtonProps) {
         fontSize: '14px',
         fontWeight: active ? 'bold' : 'normal',
         transition: 'all 0.2s',
-        borderBottom: active ? 'none' : '1px solid transparent'
+        borderBottom: active ? 'none' : '1px solid transparent',
+        flexShrink: 0
       }}
       onMouseEnter={(e) => {
         if (!active) {

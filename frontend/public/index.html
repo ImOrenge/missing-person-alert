@@ -26,11 +26,58 @@
     <link rel="mask-icon" href="%PUBLIC_URL%/icons/icon-mono-light.svg" color="#ffffff" />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
     <link rel="canonical" href="https://missingalert.kr/" />
+    <link rel="alternate" type="application/rss+xml" title="MissingAlert 최근 공개 수색 정보" href="https://missingalert.kr/rss.xml" />
+    <style>
+      .static-home-shell{max-width:760px;margin:0 auto;padding:32px 18px;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif;color:#172033}
+      .static-home-shell h1{font-size:clamp(1.7rem,6vw,2.5rem);line-height:1.25;margin:0 0 12px}.static-home-shell p{line-height:1.7;color:#425168}
+      .static-home-links{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}.static-home-links a{padding:11px 14px;border:1px solid #dfe5ec;border-radius:999px;color:#173554;font-weight:800;text-decoration:none}
+    </style>
 
-    <title>실종자 현황·검색·지도 | 실종자알림</title>
+    <title>MissingAlert | 실종자 공식정보·지도·제보</title>
   </head>
   <body>
     <noscript>JavaScript 없이도 <a href="/missing">공식 실종자 검색·조회 페이지</a>에서 최신 공개 수색 정보를 확인할 수 있습니다.</noscript>
-    <div id="root"></div>
+    <div id="root">
+      <main class="static-home-shell">
+        <h1>전국 실종자 공개정보·지도·제보</h1>
+        <p>경찰청 안전Dream에서 현재 공개 중인 수색 정보를 이름·지역·인상착의로 확인하고, 최근 실종자·지역별 현황·공식 신고 및 제보 방법을 찾아보세요.</p>
+        <nav class="static-home-links" aria-label="실종자 정보 바로가기">
+          <a href="/missing">전국 실종자 조회</a>
+          <a href="/missing/recent">최근 실종자</a>
+          <a href="/missing/statistics">지역별 공개 현황</a>
+          <a href="/map">지도에서 확인</a>
+          <a href="/guide/missing-report">실종 신고 방법</a>
+          <a href="/guide/report-sighting">실종자 목격 제보</a>
+        </nav>
+      </main>
+    </div>
+    <script>
+      (() => {
+        if (location.pathname !== '/') return;
+        const source = (() => {
+          try {
+            const host = new URL(document.referrer).hostname.toLowerCase();
+            if (host.includes('google.')) return 'google';
+            if (host.includes('naver.')) return 'naver';
+            if (host.includes('bing.')) return 'bing';
+            if (host.includes('daum.') || host.includes('kakao.')) return 'daum';
+          } catch (_) {}
+          return null;
+        })();
+        const human = !navigator.webdriver && !/bot|crawler|spider|slurp|bingpreview/i.test(navigator.userAgent);
+        if (!source || !human || document.hidden) return;
+        setTimeout(() => {
+          if (document.hidden) return;
+          const key = 'seo_search_entry:/';
+          try {
+            if (sessionStorage.getItem(key) === '1') return;
+            sessionStorage.setItem(key, '1');
+          } catch (_) {}
+          navigator.sendBeacon('/api/seo/events', new Blob([JSON.stringify({
+            event: 'seo_search_entry', source, pageGroup: 'home'
+          })], { type: 'application/json' }));
+        }, 1200);
+      })();
+    </script>
   </body>
 </html>
