@@ -84,7 +84,6 @@ import {registerPublicStatisticsRoutes} from "./statistics/routes";
 import {registerPublicImpactRoutes} from "./impact/routes";
 import {registerPublicDataAdminRoutes} from "./publicDataAdminRoutes";
 export {importPoliceStatistics} from "./statistics/importStatistics";
-export {aggregateImpactDaily} from "./impact/aggregate";
 export {publishImpactMonth, rejectImpactMonth, updateDataQualityIssue} from "./impact/callables";
 export {renderSharePage} from "./share/renderSharePage";
 export {processReportMediaUpload} from "./reports/media-pipeline";
