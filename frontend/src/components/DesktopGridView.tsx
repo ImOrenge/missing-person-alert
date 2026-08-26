@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Calendar, Clock, MapPin, X, Eye, Search, RefreshCw } from 'lucide-react';
 import type { MissingPerson } from '../types';
 import { useEmergencyStore } from '../stores/emergencyStore';
+import CaseImpressionTracker from './analytics/CaseImpressionTracker';
 
 interface DesktopGridViewProps {
   persons: MissingPerson[];
@@ -312,17 +313,26 @@ export const DesktopGridView: React.FC<DesktopGridViewProps> = ({ persons, isOpe
                   : person.updatedAt ?? person.missingDate;
 
                 return (
-                  <button
+                  <CaseImpressionTracker
                     key={person.id}
-                    type="button"
-                    onClick={() => handleCardClick(person.id)}
-                    className={`group flex h-full flex-col rounded-2xl border px-4 py-5 text-left shadow-sm transition ${
-                      isSelected
-                        ? 'border-red-300 bg-red-50/60 shadow'
-                        : 'border-slate-200 bg-white hover:-translate-y-1 hover:border-red-200 hover:shadow-md'
-                    }`}
-                    aria-pressed={isSelected}
+                    caseKey={person.id}
+                    caseCategory={person.type}
+                    address={person.location.address}
+                    surface="map"
+                    sourceAgency={person.source === 'api' ? 'police' : 'other_public'}
+                    enabled={person.status === 'active'}
                   >
+                  {(impressionRef) => <button
+                      ref={impressionRef}
+                      type="button"
+                      onClick={() => handleCardClick(person.id)}
+                      className={`group flex h-full flex-col rounded-2xl border px-4 py-5 text-left shadow-sm transition ${
+                        isSelected
+                          ? 'border-red-300 bg-red-50/60 shadow'
+                          : 'border-slate-200 bg-white hover:-translate-y-1 hover:border-red-200 hover:shadow-md'
+                      }`}
+                      aria-pressed={isSelected}
+                    >
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <h3 className="text-lg font-semibold text-slate-900">{person.name}</h3>
@@ -369,7 +379,8 @@ export const DesktopGridView: React.FC<DesktopGridViewProps> = ({ persons, isOpe
                         <span>마지막 업데이트 {formatRelativeLabel(relativeValue)}</span>
                       </div>
                     </div>
-                  </button>
+                    </button>}
+                  </CaseImpressionTracker>
                 );
               })}
             </div>

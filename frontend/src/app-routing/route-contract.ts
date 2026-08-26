@@ -6,6 +6,8 @@ export type AppView =
   | 'community'
   | 'news'
   | 'statistics'
+  | 'impact'
+  | 'about-data'
   | 'public-reports'
   | 'profile'
   | 'reports'
@@ -36,6 +38,8 @@ export const getViewFromAppLocation = ({ pathname, search }: AppLocation): AppVi
   if (normalizedPathname === '/search' || legacyView === 'search') return 'search';
   if (normalizedPathname === '/alerts' || legacyView === 'alerts') return 'alerts';
   if (normalizedPathname === '/statistics' || legacyView === 'statistics') return 'statistics';
+  if (normalizedPathname === '/impact' || legacyView === 'impact') return 'impact';
+  if (normalizedPathname === '/about/data' || legacyView === 'about-data') return 'about-data';
   if (normalizedPathname === '/reports/public' || legacyView === 'public-reports') return 'public-reports';
   if (normalizedPathname === '/profile' || legacyView === 'profile') return 'profile';
   if (normalizedPathname === '/reports' || legacyView === 'reports') return 'reports';
@@ -54,7 +58,7 @@ export const getViewFromLocation = (): AppView => {
 };
 
 export const getPathForView = (view: AppView, personId?: string) => {
-  const path = view === 'dashboard' ? '/' : view === 'report' ? '/reports/new' : view === 'public-reports' ? '/reports/public' : `/${view}`;
+  const path = view === 'dashboard' ? '/' : view === 'report' ? '/reports/new' : view === 'public-reports' ? '/reports/public' : view === 'about-data' ? '/about/data' : `/${view}`;
 
   if (personId && (view === 'map' || view === 'community' || view === 'report')) {
     return `${path}?personId=${encodeURIComponent(personId)}`;

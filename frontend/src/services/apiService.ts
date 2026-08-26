@@ -59,6 +59,23 @@ const mapPublicPerson = (value: unknown, index: number): MissingPerson => {
     clothes: typeof item.clothes === 'string' ? item.clothes : undefined,
     updatedAt: timestampOrUndefined(item.updatedAt),
     source: item.source,
+    schemaVersion: numberOrUndefined(item.schemaVersion),
+    sourceTrace: item.sourceTrace && typeof item.sourceTrace === 'object' ? {
+      agency: typeof item.sourceTrace.agency === 'string' ? item.sourceTrace.agency : '출처 확인 중',
+      sourceId: typeof item.sourceTrace.sourceId === 'string' ? item.sourceTrace.sourceId : 'legacy',
+      officialUrl: typeof item.sourceTrace.officialUrl === 'string' ? item.sourceTrace.officialUrl : undefined,
+      sourcePublishedAt: timestampOrUndefined(item.sourceTrace.sourcePublishedAt),
+      sourceUpdatedAt: timestampOrUndefined(item.sourceTrace.sourceUpdatedAt),
+      lastCheckedAt: timestampOrUndefined(item.sourceTrace.lastCheckedAt),
+    } : undefined,
+    visibility: item.visibility && typeof item.visibility === 'object' ? {
+      public: item.visibility.public === true,
+      searchable: item.visibility.searchable === true,
+      shareable: item.visibility.shareable === true,
+    } : undefined,
+    sync: item.sync && typeof item.sync === 'object' ? {
+      normalizerVersion: numberOrUndefined(item.sync.normalizerVersion),
+    } : undefined,
     bodyType: item.bodyType,
     faceShape: item.faceShape,
     hairShape: item.hairShape,

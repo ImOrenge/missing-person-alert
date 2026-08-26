@@ -24,7 +24,7 @@ import { usePushNotifications, PUSH_PROMPT_STORAGE_KEY } from './hooks/usePushNo
 import { useApiData } from './hooks/useApiData';
 import { getRegionStatsUpdateInfo } from './services/regionStatsService';
 import { useGuestId } from './hooks/useGuestId';
-import { setAnalyticsGuestId, setAnalyticsAuthenticatedUser, logCustomEvent, logLoginEvent, logLogoutEvent, logMissingPersonView } from './services/analyticsService';
+import { setAnalyticsGuestId, setAnalyticsAuthenticatedUser, logCustomEvent, logLoginEvent, logLogoutEvent } from './services/analyticsService';
 import { logger } from './utils/logger';
 import { cacheMissingPersons, hydrateMissingPersonsFromCache, cacheAnnouncements } from './utils/offlineCache';
 import { hasUndismissedPopupForToday } from './utils/announcementPopupStorage';
@@ -54,6 +54,11 @@ import ProfileHubPage from './features/profile/ProfileHubPage';
 import PrivacyPolicyPage from './features/privacy/PrivacyPolicyPage';
 import GlobalHeader from './components/layout/GlobalHeader';
 import PublicReportsPage from './features/reports/PublicReportsPage';
+import PublicStatisticsPage from './features/statistics/PublicStatisticsPage';
+import type {StatisticsCategoryKey} from './features/statistics/types';
+import PublicImpactPage from './features/impact/PublicImpactPage';
+import PublicDataAboutPage from './features/about/PublicDataAboutPage';
+import PublicDataOperations from './features/admin/public-data/PublicDataOperations';
 
 const GRID_VIEW_PREF_KEY = 'missing_person_desktop_grid_view';
 const INSTALL_PROMPT_DISMISSED_KEY = 'missing_person_install_prompt_snooze_until';
@@ -84,6 +89,10 @@ function App() {
   const [communityPersonId, setCommunityPersonId] = useState<string | null>(null);
   const dashboardNews = useNewsFeed({ limit: 5, enabled: activeView === 'dashboard' });
   const { flags: uiFlags } = useUiFeatureFlags();
+  const caseSourceTraceEnabled = uiFlags.case_source_trace_enabled || process.env.REACT_APP_CASE_SOURCE_TRACE_ENABLED === 'true';
+  const publicStatisticsEnabled = uiFlags.public_statistics_enabled || process.env.REACT_APP_PUBLIC_STATISTICS_ENABLED === 'true';
+  const publicImpactEnabled = uiFlags.public_impact_enabled || process.env.REACT_APP_PUBLIC_IMPACT_ENABLED === 'true';
+  const publicDataAdminEnabled = uiFlags.public_data_admin_enabled || process.env.REACT_APP_PUBLIC_DATA_ADMIN_ENABLED === 'true';
   const siteBanners = useSiteBanners(uiFlags.emergency_banner_v2_enabled);
 
   const { hasLoadedPersons } = useApiData();
@@ -176,7 +185,6 @@ function App() {
     const sessionKey = `seo_landing:${personId || window.location.pathname}`;
     if (window.sessionStorage.getItem(sessionKey)) return;
     logCustomEvent('seo_app_landing', {
-      missing_person_id: personId,
       campaign: params.get('utm_campaign') || 'missing_detail',
       content: params.get('utm_content') || 'unknown',
       landing_path: window.location.pathname
@@ -195,7 +203,10 @@ function App() {
   useEffect(() => {
     if (typeof document === 'undefined') return;
     const hasFunctionalState = typeof window !== 'undefined' && window.location.search.length > 0;
-    const indexable = (activeView === 'dashboard' || activeView === 'map') && !hasFunctionalState;
+    const indexableView = activeView === 'dashboard' || activeView === 'map' || activeView === 'about-data'
+      || (activeView === 'statistics' && publicStatisticsEnabled)
+      || (activeView === 'impact' && publicImpactEnabled);
+    const indexable = indexableView && !hasFunctionalState;
     const canonicalPath = getPathForView(activeView).split('?')[0];
     const titles: Partial<Record<AppView, string>> = {
       dashboard: 'MissingAlert | 실종자 공식정보·지도·제보',
@@ -207,13 +218,32 @@ function App() {
       admin: '운영자 검토 | MissingAlert',
       profile: '내 정보 | MissingAlert',
       privacy: '개인정보 처리방침 | MissingAlert',
+      statistics: '경찰청 연도별 실종 통계 | MissingAlert',
+      impact: '공익성과와 측정 방법론 | MissingAlert',
+      'about-data': '공공데이터 출처·처리 방법 | MissingAlert',
+    };
+    const descriptions: Partial<Record<AppView, string>> = {
+      dashboard: '전국 실종자 현황을 지도와 목록에서 확인하고 경찰청 공개정보의 출처와 최근 확인 시각을 살펴보세요.',
+      map: '현재 공개 수색 중인 공식 사건을 전국 지도와 목록에서 확인하세요.',
+      statistics: '경찰청 공공데이터의 연도별 실종 신고·발견·미발견 통계와 산정 기준을 확인하세요.',
+      impact: '공개 실종정보의 노출·상세조회·공유·공식 경로 이동을 승인된 월별 집계와 방법론으로 확인하세요.',
+      'about-data': 'MissingAlert가 경찰청 공개정보를 확인·정규화·공개하고 종결 정보와 개인정보를 보호하는 방법을 설명합니다.',
     };
     document.title = titles[activeView] || 'MissingAlert';
+    const description = descriptions[activeView] || 'MissingAlert에서 경찰청 공개정보 기반 실종자 현황과 안전한 제보 경로를 확인하세요.';
+    const descriptionMeta = document.querySelector<HTMLMetaElement>('meta[name="description"]');
+    descriptionMeta?.setAttribute('content', description);
     const robots = document.querySelector<HTMLMetaElement>('meta[name="robots"]');
     robots?.setAttribute('content', indexable ? 'index,follow,max-image-preview:large' : 'noindex,follow,noarchive');
     const canonical = document.querySelector<HTMLLinkElement>('link[rel="canonical"]');
     canonical?.setAttribute('href', `https://missingalert.kr${canonicalPath}`);
-  }, [activeView]);
+    const ogTitle = document.querySelector<HTMLMetaElement>('meta[property="og:title"]');
+    const ogDescription = document.querySelector<HTMLMetaElement>('meta[property="og:description"]');
+    const ogUrl = document.querySelector<HTMLMetaElement>('meta[property="og:url"]');
+    ogTitle?.setAttribute('content', document.title);
+    ogDescription?.setAttribute('content', description);
+    ogUrl?.setAttribute('content', `https://missingalert.kr${canonicalPath}`);
+  }, [activeView, publicImpactEnabled, publicStatisticsEnabled]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -299,7 +329,6 @@ function App() {
 
     setSelectedPersonId(target.id);
     setHoveredPersonId(target.id);
-    logMissingPersonView(target.id, userType);
 
     if (pendingPersonReasonRef.current === 'notification') {
       toast.info(
@@ -331,7 +360,7 @@ function App() {
 
     pendingPersonReasonRef.current = null;
     setPendingPersonId(null);
-  }, [pendingPersonId, missingPersons, setSelectedPersonId, setHoveredPersonId, userType]);
+  }, [pendingPersonId, missingPersons, setSelectedPersonId, setHoveredPersonId]);
 
   useEffect(() => {
     if (shareTargetHandledRef.current || typeof window === 'undefined') {
@@ -1138,6 +1167,18 @@ function App() {
     navigateTo('statistics');
   };
 
+  const handleOpenStatisticsCases = useCallback((category?: StatisticsCategoryKey) => {
+    const typeByCategory = {
+      children: 'missing_child',
+      disabled: 'disabled',
+      dementia: 'dementia',
+      adult: 'runaway',
+    } as const;
+    updateFilters({types: category ? [typeByCategory[category]] : []});
+    setShowSidebar(true);
+    navigateTo('map');
+  }, [navigateTo, updateFilters]);
+
   const handleOpenMap = useCallback((personId?: string) => {
     if (personId) {
       setSelectedPersonId(personId);
@@ -1254,7 +1295,7 @@ function App() {
           title="실종자 통합 탐색"
           description="지도, 목록, 카드 보기를 전환하며 공식 공개 수색정보를 확인하세요."
         >
-          <ExplorePage persons={filteredPersons} reportMapLayerEnabled={uiFlags.reports_map_layer_enabled} onOpenCommunity={handleOpenCommunity} onOpenCaseNews={handleOpenCaseNews} />
+          <ExplorePage persons={filteredPersons} reportMapLayerEnabled={uiFlags.reports_map_layer_enabled} onOpenCommunity={handleOpenCommunity} onOpenCaseNews={handleOpenCaseNews} sourceTraceEnabled={caseSourceTraceEnabled} />
         </PageShell>
       ) : activeView === 'public-reports' ? (
         <PageShell
@@ -1292,10 +1333,31 @@ function App() {
         </PageShell>
       ) : activeView === 'statistics' ? (
         <PageShell
-          title="지역 통계"
-          description="기간과 지역별 실종자 현황을 지도와 차트로 확인하세요."
+          eyebrow={publicStatisticsEnabled ? 'OFFICIAL DATA / YEARLY STATISTICS' : undefined}
+          title={publicStatisticsEnabled ? '경찰청 연도별 실종 통계' : '지역 통계'}
+          description={publicStatisticsEnabled ? '공식 원자료의 출처와 산식을 확인하고 현재 공개 수색정보로 이어서 살펴보세요.' : '기간과 지역별 실종자 현황을 지도와 차트로 확인하세요.'}
         >
-          <StatisticsModal isOpen onClose={() => navigateTo('dashboard')} isPage />
+          {publicStatisticsEnabled
+            ? <PublicStatisticsPage onOpenCases={handleOpenStatisticsCases} />
+            : <StatisticsModal isOpen onClose={() => navigateTo('dashboard')} isPage />}
+        </PageShell>
+      ) : activeView === 'impact' ? (
+        <PageShell
+          eyebrow="PUBLIC IMPACT / TRANSPARENCY"
+          title="MissingAlert 공익성과"
+          description="승인된 월별 집계만 공개하고, 각 지표의 정의와 한계를 함께 설명합니다."
+        >
+          {publicImpactEnabled
+            ? <PublicImpactPage onOpenMap={() => handleOpenMap()} onOpenStatistics={handleOpenStatistics} />
+            : <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center"><h2 className="text-xl font-black text-slate-950">공익성과 공개 준비 중</h2><p className="mt-2 text-sm text-slate-600">검증과 운영 승인을 마친 월별 집계부터 순차적으로 공개합니다.</p></div>}
+        </PageShell>
+      ) : activeView === 'about-data' ? (
+        <PageShell
+          eyebrow="PUBLIC DATA / METHODOLOGY"
+          title="공공데이터 출처와 처리 방법"
+          description="공식 원문을 어떻게 확인·정규화·공개하고, 종결 정보와 개인정보를 어떻게 보호하는지 설명합니다."
+        >
+          <PublicDataAboutPage onOpenMap={() => handleOpenMap()} onOpenStatistics={handleOpenStatistics} onOpenImpact={() => navigateTo('impact')} />
         </PageShell>
       ) : activeView === 'profile' || activeView === 'reports' || activeView === 'alerts' ? (
         <PageShell
@@ -1330,7 +1392,7 @@ function App() {
           description="제보·사용자·공지·댓글 신고를 관리합니다."
         >
           {isAdmin ? (
-            <>{uiFlags.reporting_flow_v2_enabled && <ReportsModerationV2 roles={adminRoles} adminEnabled={uiFlags.reports_admin_enabled} publicApprovalEnabled={uiFlags.reports_public_timeline_enabled} />}{uiFlags.admin_banner_v2_enabled && <BannerOperationsV2 roles={adminRoles} />}<AdminDashboard isOpen onClose={() => navigateTo('dashboard')} isPage /></>
+            <>{publicDataAdminEnabled && <PublicDataOperations roles={adminRoles} />}{uiFlags.reporting_flow_v2_enabled && <ReportsModerationV2 roles={adminRoles} adminEnabled={uiFlags.reports_admin_enabled} publicApprovalEnabled={uiFlags.reports_public_timeline_enabled} />}{uiFlags.admin_banner_v2_enabled && <BannerOperationsV2 roles={adminRoles} />}<AdminDashboard isOpen onClose={() => navigateTo('dashboard')} isPage /></>
           ) : (
             <div className="rounded-2xl border border-red-100 bg-white p-8 text-center shadow-sm">
               <Shield className="mx-auto text-red-300" size={44} />
@@ -1378,7 +1440,7 @@ function App() {
 
         {/* 지도 */}
         <div className="flex-1 relative">
-          <EmergencyMap onOpenCommunity={handleOpenCommunity} onOpenCaseNews={handleOpenCaseNews} />
+          <EmergencyMap onOpenCommunity={handleOpenCommunity} onOpenCaseNews={handleOpenCaseNews} sourceTraceEnabled={caseSourceTraceEnabled} />
         </div>
 
         {/* 필터 패널 (오버레이 - 모바일은 전체 화면, 데스크톱은 적당한 크기) */}

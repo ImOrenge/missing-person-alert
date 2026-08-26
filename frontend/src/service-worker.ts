@@ -7,7 +7,7 @@ import { precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching';
 import { registerRoute, setCatchHandler } from 'workbox-routing';
 import { StaleWhileRevalidate, NetworkFirst, CacheFirst, NetworkOnly } from 'workbox-strategies';
 import { initializeApp } from 'firebase/app';
-import { getMessaging, onBackgroundMessage } from 'firebase/messaging/sw';
+import { getMessaging } from 'firebase/messaging/sw';
 import { firebaseConfig } from './services/firebaseConfig';
 
 declare const self: (ServiceWorkerGlobalScope & typeof globalThis) & { __WB_MANIFEST: any };
@@ -17,75 +17,6 @@ const PRECACHE_ASSETS = [
   ...(self.__WB_MANIFEST || []),
   { url: OFFLINE_HTML_URL, revision: '1.0.0' }
 ];
-const DEFAULT_ICON = '/icons/pwa-icon-maskable-192.png';
-const DEFAULT_BADGE = '/icons/pwa-icon-128.png';
-const DEFAULT_VIBRATE = [200, 100, 200];
-
-const buildNotificationConfig = (payload: any): { title: string; options: NotificationOptions } => {
-  const rawData = typeof payload?.data === 'object' && payload.data !== null ? payload.data : {};
-  const normalizedData: Record<string, string> = {};
-
-  Object.entries(rawData).forEach(([key, value]) => {
-    if (typeof value === 'string') {
-      normalizedData[key] = value;
-    } else if (value != null) {
-      normalizedData[key] = String(value);
-    }
-  });
-
-  const fallbackUrl =
-    typeof payload?.url === 'string' && payload.url.trim().length > 0 ? payload.url : '/';
-  const candidateUrl =
-    typeof normalizedData.url === 'string' && normalizedData.url.trim().length > 0
-      ? normalizedData.url
-      : fallbackUrl;
-
-  normalizedData.url = candidateUrl || '/';
-
-  if (typeof rawData.seoUrl === 'string') {
-    normalizedData.seoUrl = rawData.seoUrl;
-  }
-
-  if (typeof rawData.intent === 'string') {
-    normalizedData.intent = rawData.intent;
-  }
-
-  normalizedData.receivedAt = String(Date.now());
-
-  const title =
-    payload?.title ??
-    payload?.notification?.title ??
-    '실시간 실종자 알림';
-  const body =
-    payload?.body ??
-    payload?.notification?.body ??
-    '새로운 실종자 소식이 도착했습니다.';
-  const icon =
-    payload?.icon ??
-    payload?.notification?.icon ??
-    DEFAULT_ICON;
-  const badge =
-    payload?.badge ??
-    payload?.notification?.badge ??
-    DEFAULT_BADGE;
-  const vibrate =
-    Array.isArray(payload?.vibrate)
-      ? payload.vibrate
-      : Array.isArray(payload?.notification?.vibrate)
-      ? payload.notification.vibrate
-      : DEFAULT_VIBRATE;
-
-  return {
-    title,
-    options: {
-      body,
-      icon,
-      badge,
-      data: normalizedData,
-      vibrate
-    }
-  };
-};
 
 clientsClaim();
 
@@ -94,15 +25,7 @@ cleanupOutdatedCaches();
 
 try {
   const messagingApp = initializeApp(firebaseConfig);
-  const messaging = getMessaging(messagingApp);
-
-  onBackgroundMessage(messaging, (payload) => {
-    const { title, options } = buildNotificationConfig(payload);
-
-    self.registration.showNotification(title, options).catch((error) => {
-      console.error('백그라운드 알림 표시 실패:', error);
-    });
-  });
+  getMessaging(messagingApp);
 } catch (error) {
   console.warn('Firebase Messaging 초기화 실패:', error);
 }
@@ -139,24 +62,6 @@ registerRoute(
   ({ url }) => url.origin === self.location.origin && url.pathname.startsWith('/api/'),
   new NetworkOnly()
 );
-
-self.addEventListener('push', (event) => {
-  const pushEvent = event as PushEvent;
-  if (!pushEvent.data) {
-    return;
-  }
-
-  let payload: any;
-  try {
-    payload = pushEvent.data?.json();
-  } catch (error) {
-    payload = { title: pushEvent.data?.text() };
-  }
-
-  const { title, options } = buildNotificationConfig(payload);
-
-  pushEvent.waitUntil(self.registration.showNotification(title, options));
-});
 
 self.addEventListener('notificationclick', (event) => {
   const notificationEvent = event as NotificationEvent;

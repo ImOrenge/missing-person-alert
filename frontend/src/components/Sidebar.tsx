@@ -3,6 +3,7 @@ import { Filter, User, Clock, MapPin, X, MessageCircle, Search, Eye } from 'luci
 import { useEmergencyStore } from '../stores/emergencyStore';
 import type { MissingPersonStatus } from '../types';
 import { formatViewCount } from '../hooks/useViewCount';
+import CaseImpressionTracker from './analytics/CaseImpressionTracker';
 
 interface Props {
   onShowFilters: () => void;
@@ -153,8 +154,17 @@ export default function Sidebar({ onShowFilters, showFilters, onClose }: Props) 
               const statusClasses = getStatusStyle(person.status);
 
               return (
-                <div
+                <CaseImpressionTracker
                   key={person.id}
+                  caseKey={person.id}
+                  caseCategory={person.type}
+                  address={person.location.address}
+                  surface="map"
+                  sourceAgency={person.source === 'api' ? 'police' : 'other_public'}
+                  enabled={person.status === 'active'}
+                >
+                {(impressionRef) => <div
+                  ref={impressionRef}
                   className={`p-4 cursor-pointer transition-all ${
                     isHighlighted
                       ? 'bg-red-50 border-l-4 border-red-500 shadow-md'
@@ -247,8 +257,9 @@ export default function Sidebar({ onShowFilters, showFilters, onClose }: Props) 
                     <span>{totalComments.toLocaleString()}</span>
                   </div>
                 </div>
-              </div>
-            );
+                </div>}
+                </CaseImpressionTracker>
+              );
           })}
           </div>
         )}

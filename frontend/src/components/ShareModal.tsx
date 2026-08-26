@@ -5,8 +5,11 @@ import {
   getShareText,
   generateShareUrls,
   generateWebShareData,
+  getMissingPersonShareUrl,
   shareWithImage
 } from '../utils/shareUtils';
+import { logPublicImpactEvent } from '../services/analyticsService';
+import { buildCaseImpactContext, PUBLIC_IMPACT_EVENT_NAMES, type ShareChannel } from '../services/analytics/events';
 
 interface ShareModalProps {
   person: MissingPerson;
@@ -71,13 +74,27 @@ const ShareModal: React.FC<ShareModalProps> = ({ person, isOpen, onClose }) => {
     () => (person.photos && person.photos.length > 0 ? person.photos[0] : person.photo),
     [person.photos, person.photo]
   );
+  const impactContext = useMemo(() => buildCaseImpactContext({
+    caseCategory: person.type,
+    address: person.location.address,
+    surface: 'detail',
+    routeGroup: 'map',
+    sourceAgency: person.source === 'api' ? 'police' : 'other_public',
+  }), [person.location.address, person.source, person.type]);
+
+  const trackShareClick = (shareChannel: ShareChannel) => {
+    logPublicImpactEvent(PUBLIC_IMPACT_EVENT_NAMES.SHARE_CLICK, {
+      ...impactContext,
+      share_channel: shareChannel,
+    });
+  };
 
   if (!isOpen) return null;
 
   // SNS 선택 시 미리보기 텍스트 생성
   const handleSelectSNS = (sns: SNSType) => {
     setSelectedSNS(sns);
-    const text = getShareText(sns, { person });
+    const text = `${getShareText(sns, { person })}\n\n${getMissingPersonShareUrl(person.id)}`;
     setPreviewText(text);
     setCopied(false);
   };
@@ -111,6 +128,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ person, isOpen, onClose }) => {
   // 직접 공유 (URL 기반)
   const handleDirectShare = async (sns: SNSType) => {
     const urls = generateShareUrls({ person });
+    trackShareClick(sns === 'kakao' ? 'kakao' : 'other');
 
     switch (sns) {
       case 'facebook':
@@ -132,6 +150,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ person, isOpen, onClose }) => {
   const handleWebShare = async () => {
     if (typeof navigator !== 'undefined' && 'share' in navigator) {
       try {
+        trackShareClick('native');
         const shareData = generateWebShareData({ person });
         await navigator.share(shareData);
         onClose();

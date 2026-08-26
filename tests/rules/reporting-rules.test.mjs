@@ -46,6 +46,17 @@ before(async () => {
       ownerUid: 'user-a',
       exactLocation: { lat: 37.5, lng: 127 },
     });
+    await setDoc(doc(db, 'statistics_yearly', '2025'), {published: true, totals: {reports: 1}});
+    await setDoc(doc(db, 'statistics_yearly', '2024'), {published: false, totals: {reports: 1}});
+    await setDoc(doc(db, 'public_sources', 'police-statistics'), {published: true, agency: '경찰청'});
+    await setDoc(doc(db, 'public_sources', 'draft-source'), {published: false, agency: '경찰청'});
+    await setDoc(doc(db, 'impact_monthly', '2026-08'), {published: true, review: {state: 'approved'}, events: {caseViews: 1}});
+    await setDoc(doc(db, 'impact_monthly', '2026-07'), {published: false, review: {state: 'draft'}, events: {caseViews: 1}});
+    await setDoc(doc(db, 'impact_monthly_drafts', '2026-08'), {review: {state: 'draft'}});
+    await setDoc(doc(db, 'impact_daily', '2026-08-25'), {events: {caseViews: 1}});
+    await setDoc(doc(db, 'sync_runs', 'run-a'), {type: 'statistics', status: 'success'});
+    await setDoc(doc(db, 'data_quality_issues', 'issue-a'), {status: 'open'});
+    await setDoc(doc(db, 'admin_audit_logs', 'audit-a'), {action: 'statistics.import'});
     await uploadBytes(
       ref(context.storage(), 'report-public/approved-report/image.webp'),
       new Uint8Array([0x52, 0x49, 0x46, 0x46]),
@@ -141,6 +152,47 @@ describe('Firestore reporting security boundary', () => {
       ...validDocument,
       unexpectedField: true,
     }));
+  });
+});
+
+describe('Firestore public-data security boundary', () => {
+  test('anonymous users read only published public statistics, sources, and approved impact', async () => {
+    const db = testEnvironment.unauthenticatedContext().firestore();
+    await assertSucceeds(getDoc(doc(db, 'statistics_yearly', '2025')));
+    await assertFails(getDoc(doc(db, 'statistics_yearly', '2024')));
+    await assertSucceeds(getDoc(doc(db, 'public_sources', 'police-statistics')));
+    await assertFails(getDoc(doc(db, 'public_sources', 'draft-source')));
+    await assertSucceeds(getDoc(doc(db, 'impact_monthly', '2026-08')));
+    await assertFails(getDoc(doc(db, 'impact_monthly', '2026-07')));
+    await assertFails(getDoc(doc(db, 'impact_monthly_drafts', '2026-08')));
+    await assertFails(getDoc(doc(db, 'sync_runs', 'run-a')));
+  });
+
+  test('reporting roles may read internal operations while privacyOfficer alone may not', async () => {
+    const analystDb = testEnvironment.authenticatedContext('analyst-a', {reportModerator: true}).firestore();
+    const privacyDb = testEnvironment.authenticatedContext('privacy-a', {privacyOfficer: true}).firestore();
+    for (const [collectionName, id] of [
+      ['impact_daily', '2026-08-25'],
+      ['impact_monthly_drafts', '2026-08'],
+      ['sync_runs', 'run-a'],
+      ['data_quality_issues', 'issue-a'],
+      ['admin_audit_logs', 'audit-a'],
+    ]) {
+      await assertSucceeds(getDoc(doc(analystDb, collectionName, id)));
+      await assertFails(getDoc(doc(privacyDb, collectionName, id)));
+    }
+  });
+
+  test('even systemAdmin clients cannot write public-data collections', async () => {
+    const db = testEnvironment.authenticatedContext('system-admin-a', {systemAdmin: true}).firestore();
+    for (const [collectionName, id] of [
+      ['statistics_yearly', '2026'],
+      ['impact_monthly', '2026-09'],
+      ['impact_monthly_drafts', '2026-09'],
+      ['data_quality_issues', 'issue-b'],
+      ['admin_audit_logs', 'audit-b'],
+      ['sync_locks', 'lock-a'],
+    ]) await assertFails(setDoc(doc(db, collectionName, id), {published: true}));
   });
 });
 

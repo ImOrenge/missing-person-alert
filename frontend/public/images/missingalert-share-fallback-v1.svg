@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">MissingAlert 공개 수색 정보</title>
+  <desc id="desc">남색 배경 위에 MissingAlert 이름과 공식 공개정보, 지도, 안전한 공유라는 설명이 있는 소셜 공유 이미지</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#10213a"/>
+      <stop offset="1" stop-color="#1e3a5f"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.82" cy="0.18" r="0.72">
+      <stop offset="0" stop-color="#35c6d0" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#35c6d0" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="630" rx="0" fill="url(#background)"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+  <circle cx="1036" cy="114" r="186" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="2"/>
+  <circle cx="1036" cy="114" r="122" fill="none" stroke="#ffffff" stroke-opacity="0.1" stroke-width="2"/>
+  <g transform="translate(82 78)">
+    <rect width="74" height="74" rx="20" fill="#d94841"/>
+    <path d="M37 17c-10.8 0-19.5 8.2-19.5 18.4 0 14.4 19.5 25.1 19.5 25.1s19.5-10.7 19.5-25.1C56.5 25.2 47.8 17 37 17zm0 25.2a7.2 7.2 0 1 1 0-14.4 7.2 7.2 0 0 1 0 14.4z" fill="#fff"/>
+    <text x="98" y="53" fill="#ffffff" font-family="Arial, 'Noto Sans KR', sans-serif" font-size="44" font-weight="800">MissingAlert</text>
+  </g>
+  <g transform="translate(84 218)">
+    <text fill="#71dce2" font-family="Arial, 'Noto Sans KR', sans-serif" font-size="22" font-weight="800" letter-spacing="4">PUBLIC SAFETY INFORMATION</text>
+    <text y="78" fill="#ffffff" font-family="Arial, 'Noto Sans KR', sans-serif" font-size="62" font-weight="900">공개 수색 정보를</text>
+    <text y="150" fill="#ffffff" font-family="Arial, 'Noto Sans KR', sans-serif" font-size="62" font-weight="900">안전하게 확인하세요</text>
+    <text y="212" fill="#cbd5e1" font-family="Arial, 'Noto Sans KR', sans-serif" font-size="27" font-weight="500">경찰청 공개정보 기반 · 출처 표시 · 종결 정보 비공개</text>
+  </g>
+  <g transform="translate(84 532)">
+    <rect width="178" height="48" rx="24" fill="#ffffff" fill-opacity="0.1"/>
+    <text x="89" y="32" text-anchor="middle" fill="#ffffff" font-family="Arial, 'Noto Sans KR', sans-serif" font-size="20" font-weight="700">missingalert.kr</text>
+  </g>
+</svg>

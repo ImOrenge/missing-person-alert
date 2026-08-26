@@ -1,8 +1,11 @@
-import React, { FormEvent, useEffect, useState } from 'react';
+import React, { FormEvent, useEffect, useRef, useState } from 'react';
 import { AlertCircle, ArrowRight, FileSearch, Loader2, MapPin, Newspaper, Search, ShieldCheck } from 'lucide-react';
 import { fetchSearchSuggestions, searchPublicRecords } from '../../services/searchService';
 import type { PublicSearchItem, PublicSearchResponse, PublicSearchTab } from '../../types/search';
 import { useSearchState } from './use-search-state';
+import CaseImpressionTracker from '../../components/analytics/CaseImpressionTracker';
+import { logPublicImpactEvent } from '../../services/analyticsService';
+import { getSidoCode, PUBLIC_IMPACT_EVENT_NAMES } from '../../services/analytics/events';
 
 interface SearchPageProps {
   enabled: boolean;
@@ -30,6 +33,16 @@ export default function SearchPage({ enabled, onOpenMap }: SearchPageProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<Array<{ id: string; label: string; regionLabel?: string; href: string }>>([]);
+  const trackedResult = useRef<PublicSearchResponse | null>(null);
+
+  useEffect(() => {
+    if (!result || result.items.length === 0 || trackedResult.current === result) return;
+    trackedResult.current = result;
+    logPublicImpactEvent(PUBLIC_IMPACT_EVENT_NAMES.SEARCH_RESULT_VIEW, {
+      surface: 'search',
+      ...(getSidoCode(state.region) ? { sido_code: getSidoCode(state.region) } : {}),
+    });
+  }, [result, state.region]);
 
   useEffect(() => {
     const query = draftQuery.trim();
@@ -76,6 +89,13 @@ export default function SearchPage({ enabled, onOpenMap }: SearchPageProps) {
     if (draftQuery.trim().length < 2) {
       setError('검색어는 2자 이상 입력해 주세요.');
       return;
+    }
+    const sidoCode = getSidoCode(draftRegion);
+    if (draftRegion.trim() && sidoCode) {
+      logPublicImpactEvent(PUBLIC_IMPACT_EVENT_NAMES.REGION_FILTER, {
+        sido_code: sidoCode,
+        surface: 'search',
+      });
     }
     commit({ ...state, q: draftQuery, region: draftRegion });
   };
@@ -126,20 +146,24 @@ export default function SearchPage({ enabled, onOpenMap }: SearchPageProps) {
       ) : result && result.items.length > 0 ? (
         <ul className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           {result.items.map((item) => (
-            <li key={`${item.kind}:${item.id}`}>
-              <a href={item.href} target={item.kind === 'news' ? '_blank' : undefined} rel={item.kind === 'news' ? 'noopener noreferrer' : undefined} className="group flex gap-4 p-4 hover:bg-slate-50 sm:p-5">
-                <div className="flex h-16 w-16 flex-none items-center justify-center overflow-hidden rounded-xl bg-slate-100 text-slate-400">
-                  {item.thumbnailUrl ? <img src={item.thumbnailUrl} alt="" className="h-full w-full object-cover" loading="lazy" /> : item.kind === 'news' ? <Newspaper size={25} /> : <FileSearch size={25} />}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2"><span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-black text-[#1e3a5f]">{kindLabel[item.kind]}</span>{item.statusLabel && <span className="text-xs font-bold text-slate-500">{item.statusLabel}</span>}</div>
-                  <h2 className="mt-1.5 truncate font-black text-slate-950 group-hover:text-[#1e3a5f]">{item.title}</h2>
-                  <p className={`mt-1 whitespace-pre-wrap text-sm leading-5 text-slate-600 ${item.kind === 'report' ? '' : 'line-clamp-2'}`}>{item.summary}</p>
-                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">{item.regionLabel && <span className="flex items-center gap-1"><MapPin size={13} />{item.regionLabel}</span>}<span>{item.sourceLabel}</span></div>
-                </div>
-                <ArrowRight className="mt-6 flex-none text-slate-300 group-hover:text-[#1e3a5f]" size={18} aria-hidden="true" />
-              </a>
-            </li>
+            <CaseImpressionTracker key={`${item.kind}:${item.id}`} caseKey={item.id} caseCategory="unknown" address={item.regionLabel} surface="search" enabled={item.kind === 'case'}>
+              {(impressionRef) => (
+                <li ref={impressionRef}>
+                  <a href={item.href} target={item.kind === 'news' ? '_blank' : undefined} rel={item.kind === 'news' ? 'noopener noreferrer' : undefined} className="group flex gap-4 p-4 hover:bg-slate-50 sm:p-5">
+                    <div className="flex h-16 w-16 flex-none items-center justify-center overflow-hidden rounded-xl bg-slate-100 text-slate-400">
+                      {item.thumbnailUrl ? <img src={item.thumbnailUrl} alt="" className="h-full w-full object-cover" loading="lazy" /> : item.kind === 'news' ? <Newspaper size={25} /> : <FileSearch size={25} />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2"><span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-black text-[#1e3a5f]">{kindLabel[item.kind]}</span>{item.statusLabel && <span className="text-xs font-bold text-slate-500">{item.statusLabel}</span>}</div>
+                      <h2 className="mt-1.5 truncate font-black text-slate-950 group-hover:text-[#1e3a5f]">{item.title}</h2>
+                      <p className={`mt-1 whitespace-pre-wrap text-sm leading-5 text-slate-600 ${item.kind === 'report' ? '' : 'line-clamp-2'}`}>{item.summary}</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">{item.regionLabel && <span className="flex items-center gap-1"><MapPin size={13} />{item.regionLabel}</span>}<span>{item.sourceLabel}</span></div>
+                    </div>
+                    <ArrowRight className="mt-6 flex-none text-slate-300 group-hover:text-[#1e3a5f]" size={18} aria-hidden="true" />
+                  </a>
+                </li>
+              )}
+            </CaseImpressionTracker>
           ))}
         </ul>
       ) : state.q ? (

@@ -16,9 +16,10 @@ interface EmergencyMapProps {
   selectedPublicReportId?: string | null;
   onSelectPublicReport?: (reportId: string | null) => void;
   onViewportChange?: (bounds: { west: number; south: number; east: number; north: number; zoom: number }) => void;
+  sourceTraceEnabled?: boolean;
 }
 
-function MapContent({ onOpenCommunity, onOpenCaseNews, publicReports = [], selectedPublicReportId, onSelectPublicReport }: EmergencyMapProps) {
+function MapContent({ onOpenCommunity, onOpenCaseNews, publicReports = [], selectedPublicReportId, onSelectPublicReport, sourceTraceEnabled = false }: EmergencyMapProps) {
   const map = useMap();
   const getFilteredPersons = useEmergencyStore((state) => state.getFilteredPersons);
   const selectedPersonId = useEmergencyStore((state) => state.selectedPersonId);
@@ -77,6 +78,7 @@ function MapContent({ onOpenCommunity, onOpenCaseNews, publicReports = [], selec
             onClose={() => setSelectedPersonId(null)}
             onOpenCommunity={onOpenCommunity}
             onOpenCaseNews={onOpenCaseNews}
+            sourceTraceEnabled={sourceTraceEnabled}
           />
         );
       })}
@@ -96,7 +98,7 @@ function MapContent({ onOpenCommunity, onOpenCaseNews, publicReports = [], selec
   );
 }
 
-export default function EmergencyMap({ onOpenCommunity, onOpenCaseNews, publicReports, selectedPublicReportId, onSelectPublicReport, onViewportChange }: EmergencyMapProps) {
+export default function EmergencyMap({ onOpenCommunity, onOpenCaseNews, publicReports, selectedPublicReportId, onSelectPublicReport, onViewportChange, sourceTraceEnabled = false }: EmergencyMapProps) {
   // 앱 포커스 시 데이터 새로고침
   // React.useEffect(() => {
   //   const handleVisibilityChange = () => {
@@ -158,7 +160,7 @@ export default function EmergencyMap({ onOpenCommunity, onOpenCaseNews, publicRe
             });
           }}
         >
-          <MapContent onOpenCommunity={onOpenCommunity} onOpenCaseNews={onOpenCaseNews} publicReports={publicReports} selectedPublicReportId={selectedPublicReportId} onSelectPublicReport={onSelectPublicReport} />
+        <MapContent onOpenCommunity={onOpenCommunity} onOpenCaseNews={onOpenCaseNews} publicReports={publicReports} selectedPublicReportId={selectedPublicReportId} onSelectPublicReport={onSelectPublicReport} sourceTraceEnabled={sourceTraceEnabled} />
         </Map>
       </APIProvider>
 

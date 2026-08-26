@@ -18,10 +18,28 @@ import {
   deleteUser
 } from 'firebase/auth';
 import { firebaseConfig } from './firebaseConfig';
+import { initializeAppCheck, ReCaptchaEnterpriseProvider, type AppCheck } from 'firebase/app-check';
 
 // Firebase 초기화
 const app = initializeApp(firebaseConfig);
 export const firebaseApp = app;
+let appCheck: AppCheck | null = null;
+const appCheckSiteKey = process.env.REACT_APP_FIREBASE_APP_CHECK_SITE_KEY?.trim();
+const appCheckEnabled = process.env.REACT_APP_FIREBASE_APP_CHECK_ENABLED === 'true';
+if (typeof window !== 'undefined' && appCheckEnabled && appCheckSiteKey) {
+  try {
+    if (process.env.NODE_ENV !== 'production' && process.env.REACT_APP_FIREBASE_APP_CHECK_DEBUG === 'true') {
+      (globalThis as any).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+    }
+    appCheck = initializeAppCheck(app, {
+      provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
+      isTokenAutoRefreshEnabled: true,
+    });
+  } catch (error) {
+    console.warn('Firebase App Check 초기화 실패:', error instanceof Error ? error.name : 'unknown');
+  }
+}
+export const firebaseAppCheck = appCheck;
 const firestore = getFirestore(app);
 const auth = getAuth(app);
 

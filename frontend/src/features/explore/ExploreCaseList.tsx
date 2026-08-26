@@ -2,6 +2,7 @@ import React, { useDeferredValue, useMemo, useState } from 'react';
 import { ArrowRight, MapPin, Search, UserCircle } from 'lucide-react';
 import type { MissingPerson } from '../../types';
 import type { ExploreViewMode } from './use-explore-state';
+import CaseImpressionTracker from '../../components/analytics/CaseImpressionTracker';
 
 interface ExploreCaseListProps {
   persons: MissingPerson[];
@@ -49,15 +50,27 @@ export default function ExploreCaseList({ persons, view, selectedPersonId, onSel
           {visiblePersons.map((person) => {
             const selected = selectedPersonId === person.id;
             return (
-              <button key={person.id} type="button" onClick={() => onSelect(person.id)} aria-pressed={selected} className={`group flex w-full gap-3 rounded-xl border bg-white p-3 text-left transition hover:border-[#1e3a5f] hover:shadow-sm ${selected ? 'border-[#1e3a5f] ring-2 ring-blue-100' : 'border-slate-200'}`}>
-                <span className="flex h-16 w-16 flex-none items-center justify-center overflow-hidden rounded-lg bg-slate-100"><CasePhoto person={person} /></span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center justify-between gap-2"><strong className="truncate text-sm text-slate-950">{person.name}</strong><span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-black text-red-700">수색 중</span></span>
-                  <span className="mt-1 flex items-center gap-1 truncate text-xs text-slate-500"><MapPin size={12} className="flex-none" aria-hidden="true" />{person.location.address || '지역 미상'}</span>
-                  <span className="mt-1 block text-xs text-slate-400">{formatDate(person.missingDate)}</span>
-                </span>
-                <ArrowRight className="mt-5 flex-none text-slate-300 group-hover:text-[#1e3a5f]" size={16} aria-hidden="true" />
-              </button>
+              <CaseImpressionTracker
+                key={person.id}
+                caseKey={person.id}
+                caseCategory={person.type}
+                address={person.location.address}
+                surface="map"
+                sourceAgency={person.source === 'api' ? 'police' : 'other_public'}
+                enabled={person.status === 'active'}
+              >
+                {(impressionRef) => (
+                  <button ref={impressionRef} type="button" onClick={() => onSelect(person.id)} aria-pressed={selected} className={`group flex w-full gap-3 rounded-xl border bg-white p-3 text-left transition hover:border-[#1e3a5f] hover:shadow-sm ${selected ? 'border-[#1e3a5f] ring-2 ring-blue-100' : 'border-slate-200'}`}>
+                    <span className="flex h-16 w-16 flex-none items-center justify-center overflow-hidden rounded-lg bg-slate-100"><CasePhoto person={person} /></span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center justify-between gap-2"><strong className="truncate text-sm text-slate-950">{person.name}</strong><span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-black text-red-700">수색 중</span></span>
+                      <span className="mt-1 flex items-center gap-1 truncate text-xs text-slate-500"><MapPin size={12} className="flex-none" aria-hidden="true" />{person.location.address || '지역 미상'}</span>
+                      <span className="mt-1 block text-xs text-slate-400">{formatDate(person.missingDate)}</span>
+                    </span>
+                    <ArrowRight className="mt-5 flex-none text-slate-300 group-hover:text-[#1e3a5f]" size={16} aria-hidden="true" />
+                  </button>
+                )}
+              </CaseImpressionTracker>
             );
           })}
         </div>

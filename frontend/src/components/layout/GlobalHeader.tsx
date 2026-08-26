@@ -2,8 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { User } from 'firebase/auth';
 import {
   BarChart3,
+  Activity,
   Bell,
   ChevronDown,
+  Database,
   FileText,
   LogIn,
   LogOut,
@@ -131,11 +133,11 @@ export default function GlobalHeader({
               aria-expanded={openMenu === 'more'}
               aria-haspopup="menu"
               className="c-app-header__secondary-button"
-              data-active={activeView === 'statistics' ? 'true' : 'false'}
+              data-active={activeView === 'statistics' || activeView === 'impact' || activeView === 'about-data' ? 'true' : 'false'}
             >
               더보기 <ChevronDown size={15} />
             </button>
-            {openMenu === 'more' && <div className="c-app-header__popover" role="menu"><button type="button" role="menuitem" onClick={() => navigate('statistics')} aria-current={activeView === 'statistics' ? 'page' : undefined}><BarChart3 size={16} />지역 통계</button></div>}
+            {openMenu === 'more' && <div className="c-app-header__popover" role="menu"><button type="button" role="menuitem" onClick={() => navigate('statistics')} aria-current={activeView === 'statistics' ? 'page' : undefined}><BarChart3 size={16} />공식 통계</button><button type="button" role="menuitem" onClick={() => navigate('impact')} aria-current={activeView === 'impact' ? 'page' : undefined}><Activity size={16} />공익성과</button><button type="button" role="menuitem" onClick={() => navigate('about-data')} aria-current={activeView === 'about-data' ? 'page' : undefined}><Database size={16} />데이터·방법론</button></div>}
           </div>
           <button type="button" onClick={onReport} className="c-app-header__report-button" data-active={activeView === 'report' ? 'true' : 'false'}><Plus size={16} />제보하기</button>
           {currentUser ? (
@@ -171,7 +173,9 @@ export default function GlobalHeader({
         <div id="global-mobile-menu" className="c-app-header__mobile-menu">
           <nav aria-label="모바일 전체 메뉴">
             {PRIMARY_ITEMS.map((item) => <button key={item.id} type="button" onClick={() => navigate(item.id)} aria-current={activeView === item.id ? 'page' : undefined} data-active={activeView === item.id ? 'true' : 'false'}>{item.icon}{item.label}</button>)}
-            <button type="button" onClick={() => navigate('statistics')} aria-current={activeView === 'statistics' ? 'page' : undefined} data-active={activeView === 'statistics' ? 'true' : 'false'}><BarChart3 size={17} />지역 통계</button>
+            <button type="button" onClick={() => navigate('statistics')} aria-current={activeView === 'statistics' ? 'page' : undefined} data-active={activeView === 'statistics' ? 'true' : 'false'}><BarChart3 size={17} />공식 통계</button>
+            <button type="button" onClick={() => navigate('impact')} aria-current={activeView === 'impact' ? 'page' : undefined} data-active={activeView === 'impact' ? 'true' : 'false'}><Activity size={17} />공익성과</button>
+            <button type="button" onClick={() => navigate('about-data')} aria-current={activeView === 'about-data' ? 'page' : undefined} data-active={activeView === 'about-data' ? 'true' : 'false'}><Database size={17} />데이터·방법론</button>
             <button type="button" onClick={() => { closeMenu(); onReport(); }} data-accent="true"><Plus size={17} />제보하기</button>
           </nav>
           <div className="c-app-header__mobile-account">{accountItems}</div>

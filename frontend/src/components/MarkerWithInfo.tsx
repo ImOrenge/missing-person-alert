@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AdvancedMarker,
   Pin,
@@ -8,7 +8,10 @@ import {
 import { ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 import { MissingPerson } from '../types';
 import ShareModal from './ShareModal';
+import CaseSourceTraceCard from './cases/CaseSourceTraceCard';
 import { useViewCount, formatViewCount } from '../hooks/useViewCount';
+import { logPublicImpactEvent } from '../services/analyticsService';
+import { buildCaseImpactContext, PUBLIC_IMPACT_EVENT_NAMES } from '../services/analytics/events';
 
 const getInitialViewport = () => {
   if (typeof window === 'undefined') {
@@ -33,6 +36,7 @@ interface Props {
   onClose: () => void;
   onOpenCommunity?: (personId: string) => void;
   onOpenCaseNews?: (personId: string) => void;
+  sourceTraceEnabled?: boolean;
 }
 
 // 유형별 색상
@@ -75,13 +79,14 @@ function getTypeLabel(type: string): string {
   }
 }
 
-const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, onClick, onClose, onOpenCommunity, onOpenCaseNews }: Props) => {
+const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, onClick, onClose, onOpenCommunity, onOpenCaseNews, sourceTraceEnabled = false }: Props) => {
   const [markerRef, marker] = useAdvancedMarkerRef();
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [viewport, setViewport] = useState(() => getInitialViewport());
   const [headerHeight, setHeaderHeight] = useState(() => getHeaderHeight());
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
   const [hiddenPhotoIndexes, setHiddenPhotoIndexes] = useState<number[]>([]);
+  const detailVisibleRef = useRef(false);
 
   // 조회수 추적 (InfoWindow가 열렸을 때만)
   const { viewCount } = useViewCount(isSelected ? person.id : null, true);
@@ -144,6 +149,27 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
   }, [activePhotoIndex, photoEntries.length]);
 
   const currentPhoto = photoEntries[activePhotoIndex];
+
+  const impactContext = useMemo(() => buildCaseImpactContext({
+    caseCategory: person.type,
+    address: person.location.address,
+    surface: 'detail',
+    routeGroup: 'map',
+    sourceAgency: person.source === 'api' ? 'police' : 'other_public',
+  }), [person.location.address, person.source, person.type]);
+
+  useEffect(() => {
+    const detailIsRendered = isSelected && person.status === 'active';
+    if (detailIsRendered && !detailVisibleRef.current) {
+      logPublicImpactEvent(PUBLIC_IMPACT_EVENT_NAMES.CASE_VIEW, impactContext);
+    }
+    detailVisibleRef.current = detailIsRendered;
+  }, [impactContext, isSelected, person.status]);
+
+  const handleOfficialReportClick = () => {
+    logPublicImpactEvent(PUBLIC_IMPACT_EVENT_NAMES.REPORT_CTA_CLICK, impactContext);
+    window.open('tel:112');
+  };
 
   const handlePhotoError = (originalIndex: number) => {
     setHiddenPhotoIndexes(prev => (prev.includes(originalIndex) ? prev : [...prev, originalIndex]));
@@ -489,6 +515,12 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
                   )}
                 </div>
 
+                {sourceTraceEnabled && (
+                  <div style={{ marginTop: isMobile ? '10px' : '14px' }}>
+                    <CaseSourceTraceCard sourceTrace={person.sourceTrace} compact={isMobile} />
+                  </div>
+                )}
+
                 <div
                   style={{
                     marginTop: isMobile ? '10px' : '15px',
@@ -498,7 +530,7 @@ const MarkerWithInfo = React.memo(({ person, isSelected, isHighlighted = false, 
                   }}
                 >
                   <button
-                    onClick={() => window.open('tel:112')}
+                    onClick={handleOfficialReportClick}
                     style={{
                       flex: 1,
                       padding: isMobile ? '8px' : '10px',

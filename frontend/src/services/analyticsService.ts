@@ -3,107 +3,122 @@
  * 사용자 행동 추적 및 분석
  */
 
-import { getAnalytics, setUserId, setUserProperties, logEvent } from 'firebase/analytics';
+import {
+  getAnalytics,
+  isSupported,
+  setUserId,
+  setUserProperties,
+  logEvent,
+  type Analytics,
+} from 'firebase/analytics';
 import { firebaseApp } from './firebase';
+import {
+  serializePublicImpactEvent,
+  type PublicImpactEventInput,
+  type PublicImpactEventName,
+  type SerializedPublicImpactEvent,
+} from './analytics/events';
 
-let analytics: ReturnType<typeof getAnalytics> | null = null;
+let analyticsPromise: Promise<Analytics | null> | null = null;
 
-// Analytics 초기화
-try {
-  if (typeof window !== 'undefined') {
-    analytics = getAnalytics(firebaseApp);
-    console.log('✅ Firebase Analytics 초기화 완료');
-  }
-} catch (error) {
-  console.warn('⚠️ Firebase Analytics 초기화 실패:', error);
-}
+const getAnalyticsInstance = (): Promise<Analytics | null> => {
+  if (analyticsPromise) return analyticsPromise;
+  analyticsPromise = (async () => {
+    const localAnalyticsEnabled = process.env.REACT_APP_ANALYTICS_DEBUG_ENABLED === 'true'
+      || process.env.REACT_APP_PUBLIC_IMPACT_ANALYTICS_ENABLED === 'true';
+    if (process.env.NODE_ENV !== 'production' && !localAnalyticsEnabled) return null;
+    if (typeof window === 'undefined' || !(await isSupported())) return null;
+    try {
+      const instance = getAnalytics(firebaseApp);
+      console.log('✅ Firebase Analytics 초기화 완료');
+      return instance;
+    } catch (error) {
+      console.warn('⚠️ Firebase Analytics 초기화 실패:', error);
+      return null;
+    }
+  })();
+  return analyticsPromise;
+};
+
+const withAnalytics = (callback: (instance: Analytics) => void): void => {
+  void getAnalyticsInstance().then((instance) => {
+    if (!instance) return;
+    try {
+      callback(instance);
+    } catch (error) {
+      console.error('❌ Firebase Analytics 호출 실패:', error);
+    }
+  }).catch((error) => {
+    console.warn('⚠️ Firebase Analytics 지원 여부 확인 실패:', error);
+  });
+};
 
 /**
  * 사용자 ID 설정 (로그인 시)
  */
 export function setAnalyticsUserId(userId: string | null): void {
-  if (!analytics) return;
-
-  try {
-    setUserId(analytics, userId);
-    console.log(`📊 Analytics 사용자 ID 설정: ${userId}`);
-  } catch (error) {
-    console.error('❌ Analytics 사용자 ID 설정 실패:', error);
-  }
+  withAnalytics((instance) => setUserId(instance, userId));
 }
 
 /**
  * Guest ID를 사용자 속성으로 설정
  */
 export function setAnalyticsGuestId(guestId: string): void {
-  if (!analytics) return;
-
-  try {
-    setUserProperties(analytics, {
+  withAnalytics((instance) => {
+    setUserProperties(instance, {
       guest_id: guestId,
       user_type: 'guest'
     });
-    console.log(`📊 Analytics Guest ID 설정: ${guestId}`);
-  } catch (error) {
-    console.error('❌ Analytics Guest ID 설정 실패:', error);
-  }
+  });
 }
 
 /**
  * 인증된 사용자 속성 설정
  */
 export function setAnalyticsAuthenticatedUser(userId: string, email: string | null): void {
-  if (!analytics) return;
-
-  try {
-    setUserId(analytics, userId);
-    setUserProperties(analytics, {
+  withAnalytics((instance) => {
+    setUserId(instance, userId);
+    setUserProperties(instance, {
       user_type: 'authenticated',
       has_email: email ? 'yes' : 'no'
     });
-    console.log(`📊 Analytics 인증 사용자 설정: ${userId}`);
-  } catch (error) {
-    console.error('❌ Analytics 인증 사용자 설정 실패:', error);
-  }
+  });
 }
 
 /**
  * 페이지 조회 이벤트 로깅
  */
 export function logPageView(pageName: string, additionalParams?: Record<string, any>): void {
-  if (!analytics) return;
-
-  try {
-    logEvent(analytics, 'page_view', {
+  withAnalytics((instance) => {
+    logEvent(instance, 'page_view', {
       page_name: pageName,
       ...additionalParams
     });
-  } catch (error) {
-    console.error('❌ Analytics 페이지 조회 로깅 실패:', error);
-  }
+  });
 }
 
 /**
  * 커스텀 이벤트 로깅
  */
 export function logCustomEvent(eventName: string, params?: Record<string, any>): void {
-  if (!analytics) return;
-
-  try {
-    logEvent(analytics, eventName, params);
-  } catch (error) {
-    console.error(`❌ Analytics 이벤트 로깅 실패 (${eventName}):`, error);
-  }
+  withAnalytics((instance) => logEvent(instance, eventName, params));
 }
 
 /**
- * 실종자 조회 이벤트
+ * Public Impact 핵심 이벤트. production에서는 명시적 feature flag로만 활성화한다.
  */
-export function logMissingPersonView(missingPersonId: string, userType: 'guest' | 'authenticated'): void {
-  logCustomEvent('missing_person_view', {
-    missing_person_id: missingPersonId,
-    user_type: userType
-  });
+export function logPublicImpactEvent(
+  eventName: PublicImpactEventName,
+  input: PublicImpactEventInput,
+): SerializedPublicImpactEvent {
+  const event = serializePublicImpactEvent(eventName, input);
+  const enabled = process.env.REACT_APP_PUBLIC_IMPACT_ANALYTICS_ENABLED === 'true';
+
+  if (process.env.NODE_ENV !== 'production') {
+    console.debug(`[PublicImpact Analytics] ${event.name} ${JSON.stringify(event.params)}`);
+  }
+  if (enabled) logCustomEvent(event.name, event.params);
+  return event;
 }
 
 /**

@@ -23,8 +23,13 @@ const { projectLegacyReport, legacyDestinationId } = require('../functions/lib/r
 const { subscriptionMatchesEvent, buildNotificationContent, deriveRegionCode } = require('../functions/lib/notifications/dispatcher.js');
 
 const functionsSource = readFileSync(new URL('../functions/src/index.ts', import.meta.url), 'utf8');
+const serviceWorkerSource = readFileSync(new URL('../frontend/src/service-worker.ts', import.meta.url), 'utf8');
 assert.match(functionsSource, /LEGACY_REPORTING_RETIRED/, 'legacy report routes must retain a fail-closed tombstone');
 assert.equal(/app\.post\(\s*["']\/api\/reports["']/.test(functionsSource), false, 'unsafe legacy report submission body must be removed');
+assert.match(serviceWorkerSource, /getMessaging\(messagingApp\)/, 'Firebase Messaging must own background FCM display');
+assert.equal(serviceWorkerSource.includes('onBackgroundMessage'), false, 'service worker must not manually redisplay an FCM notification');
+assert.equal(/addEventListener\(\s*["']push["']/.test(serviceWorkerSource), false, 'service worker must not register a second generic FCM push display path');
+assert.equal(serviceWorkerSource.includes('registration.showNotification'), false, 'service worker must keep a single Firebase-owned notification display path');
 
 assert.deepEqual(REPORTING_FEATURE_FLAG_NAMES, [
   'reports_submission_enabled',

@@ -1,0 +1,18 @@
+import type {PoliceStatisticsYear} from "./types";
+
+export const POLICE_STATISTICS_SOURCE_URL = "https://www.data.go.kr/tcs/dss/selectDataSetList.do?conditionType=search&org=%EA%B2%BD%EC%B0%B0%EC%B2%AD&orgFilter=%EA%B2%BD%EC%B0%B0%EC%B2%AD&orgFullName=%EA%B2%BD%EC%B0%B0%EC%B2%AD";
+export const POLICE_STATISTICS_SOURCE_HASH = "ba68d834ca0bf0f751faa15c5798df85ac626fd0e5c092e382ff8c6394ebe347";
+
+const base = (year: number, categories: PoliceStatisticsYear["categories"], totals: PoliceStatisticsYear["totals"], derived: PoliceStatisticsYear["derived"]): PoliceStatisticsYear => ({
+  year, categories, totals, derived,
+  source: {sourceId: "police_missing_statistics", datasetTitle: "경찰청 연도별 실종아동등 가출인 접수 및 해제현황", datasetCutoff: "2025-12-31", sourceHash: POLICE_STATISTICS_SOURCE_HASH, encoding: "cp949", officialPageUrl: POLICE_STATISTICS_SOURCE_URL},
+  schemaVersion: 1, published: true,
+});
+
+export const POLICE_STATISTICS_SEED: PoliceStatisticsYear[] = [
+  base(2021, {children:{received:21379,released:21257,unresolved:1},disabled:{received:7166,released:7168,unresolved:4},dementia:{received:12577,released:12562,unresolved:9},adult:{received:66259,released:66536,unresolved:261}}, {received:107381,released:107523,unresolved:275,vulnerableReceived:41122}, {daysInYear:365,dailyAverageReceived:294.195,dailyAverageVulnerableReceived:112.663,yearOverYearPercent:{}}),
+  base(2022, {children:{received:26416,released:26357,unresolved:8},disabled:{received:8344,released:8337,unresolved:5},dementia:{received:14527,released:14525,unresolved:8},adult:{received:74936,released:75755,unresolved:250}}, {received:124223,released:124974,unresolved:271,vulnerableReceived:49287}, {daysInYear:365,dailyAverageReceived:340.337,dailyAverageVulnerableReceived:135.033,yearOverYearPercent:{received:15.684,released:16.23,unresolved:-1.455,vulnerableReceived:19.856,childrenReceived:23.561,disabledReceived:16.439,dementiaReceived:15.504,adultReceived:13.096}}),
+  base(2023, {children:{received:25628,released:25516,unresolved:6},disabled:{received:8440,released:8434,unresolved:9},dementia:{received:14677,released:14654,unresolved:11},adult:{received:74847,released:74827,unresolved:317}}, {received:123592,released:123431,unresolved:343,vulnerableReceived:48745}, {daysInYear:365,dailyAverageReceived:338.608,dailyAverageVulnerableReceived:133.548,yearOverYearPercent:{received:-0.508,released:-1.235,unresolved:26.568,vulnerableReceived:-1.1,childrenReceived:-2.983,disabledReceived:1.151,dementiaReceived:1.033,adultReceived:-0.119}}),
+  base(2024, {children:{received:25692,released:25602,unresolved:3},disabled:{received:8430,released:8404,unresolved:7},dementia:{received:15502,released:15487,unresolved:10},adult:{received:71854,released:71703,unresolved:471}}, {received:121478,released:121196,unresolved:491,vulnerableReceived:49624}, {daysInYear:366,dailyAverageReceived:331.907,dailyAverageVulnerableReceived:135.585,yearOverYearPercent:{received:-1.71,released:-1.811,unresolved:43.149,vulnerableReceived:1.803,childrenReceived:0.25,disabledReceived:-0.118,dementiaReceived:5.621,adultReceived:-3.999}}),
+  base(2025, {children:{received:29563,released:29448,unresolved:67},disabled:{received:8420,released:8406,unresolved:31},dementia:{received:16586,released:16570,unresolved:15},adult:{received:70814,released:70591,unresolved:765}}, {received:125383,released:125015,unresolved:878,vulnerableReceived:54569}, {daysInYear:365,dailyAverageReceived:343.515,dailyAverageVulnerableReceived:149.504,yearOverYearPercent:{received:3.215,released:3.151,unresolved:78.819,vulnerableReceived:9.965,childrenReceived:15.067,disabledReceived:-0.119,dementiaReceived:6.993,adultReceived:-1.447}}),
+];

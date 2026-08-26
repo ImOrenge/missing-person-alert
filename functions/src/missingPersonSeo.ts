@@ -355,7 +355,7 @@ export const buildMissingPersonHtml = (
     isPartOf: {"@type": "WebSite", name: "실종자알림", url: PUBLIC_SITE_ORIGIN},
     about: {"@type": "Person", name: person.name, gender: genderLabel(person.gender), image: person.photo || undefined, description: person.description},
   }).replace(/</g, "\\u003c");
-  const sharePayload = JSON.stringify({title, text: summary, url: canonicalUrl}).replace(/</g, "\\u003c");
+  const sharePayload = JSON.stringify({title, text: summary, url: `${PUBLIC_SITE_ORIGIN}/share/${encodeURIComponent(person.id)}`}).replace(/</g, "\\u003c");
   const region = getPublicRegionForAddress(person.address);
   const missingType = getPublicMissingTypeForType(person.type);
   const relatedLinks = [

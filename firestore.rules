@@ -17,6 +17,15 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isPublicDataStaff() {
+      return request.auth != null && (
+        request.auth.token.reportModerator == true ||
+        request.auth.token.seniorModerator == true ||
+        request.auth.token.agencyOperator == true ||
+        request.auth.token.systemAdmin == true
+      );
+    }
+
     // 제보 원본과 비공개 하위 컬렉션은 Admin SDK 전용이다.
     match /sightingReports/{reportId} {
       allow read, write: if false;
@@ -268,6 +277,62 @@ service cloud.firestore {
 
       // 공식 수색 데이터 수집·변경은 Admin SDK 파이프라인만 수행한다.
       allow create, update, delete: if false;
+
+      match /history/{historyId} {
+        allow read: if isPublicDataStaff();
+        allow write: if false;
+      }
+    }
+
+    // 승인된 공공 통계와 출처 메타데이터만 익명 공개한다.
+    match /statistics_yearly/{year} {
+      allow read: if resource.data.published == true || isPublicDataStaff();
+      allow write: if false;
+    }
+
+    match /public_sources/{sourceId} {
+      allow read: if resource.data.published == true || isPublicDataStaff();
+      allow write: if false;
+    }
+
+    // 수집 설정, 원본 hash, 실행 이력은 Admin SDK 전용이다.
+    match /data_sources/{sourceId} {
+      allow read: if isPublicDataStaff();
+      allow write: if false;
+    }
+
+    match /sync_runs/{runId} {
+      allow read: if isPublicDataStaff();
+      allow write: if false;
+    }
+
+    match /impact_daily/{day} {
+      allow read: if isPublicDataStaff();
+      allow write: if false;
+    }
+
+    match /impact_monthly_drafts/{month} {
+      allow read: if isPublicDataStaff();
+      allow write: if false;
+    }
+
+    match /impact_monthly/{month} {
+      allow read: if (resource.data.published == true && resource.data.review.state == 'approved') || isPublicDataStaff();
+      allow write: if false;
+    }
+
+    match /data_quality_issues/{issueId} {
+      allow read: if isPublicDataStaff();
+      allow write: if false;
+    }
+
+    match /admin_audit_logs/{logId} {
+      allow read: if isPublicDataStaff();
+      allow write: if false;
+    }
+
+    match /sync_locks/{lockId} {
+      allow read, write: if false;
     }
 
     // 실종자 댓글 컬렉션

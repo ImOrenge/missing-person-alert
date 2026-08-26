@@ -10,12 +10,15 @@ import { fetchPublicMapReports } from '../../services/exploreService';
 import type { PublicMapBounds } from '../../services/exploreService';
 import type { PublicMapReportDto } from '../../types/publicReport';
 import PublicReportList from './PublicReportList';
+import { logPublicImpactEvent } from '../../services/analyticsService';
+import { PUBLIC_IMPACT_EVENT_NAMES } from '../../services/analytics/events';
 
 interface ExplorePageProps {
   persons: MissingPerson[];
   reportMapLayerEnabled: boolean;
   onOpenCommunity: (personId?: string) => void;
   onOpenCaseNews: (personId: string) => void;
+  sourceTraceEnabled?: boolean;
 }
 
 const VIEW_ITEMS: Array<{ id: ExploreViewMode; label: string; icon: React.ReactNode }> = [
@@ -25,7 +28,7 @@ const VIEW_ITEMS: Array<{ id: ExploreViewMode; label: string; icon: React.ReactN
   { id: 'cards', label: '카드', icon: <Grid3X3 size={16} /> },
 ];
 
-export default function ExplorePage({ persons, reportMapLayerEnabled, onOpenCommunity, onOpenCaseNews }: ExplorePageProps) {
+export default function ExplorePage({ persons, reportMapLayerEnabled, onOpenCommunity, onOpenCaseNews, sourceTraceEnabled = false }: ExplorePageProps) {
   const { view, setView } = useExploreState();
   const selectedPersonId = useEmergencyStore((state) => state.selectedPersonId);
   const setSelectedPersonId = useEmergencyStore((state) => state.setSelectedPersonId);
@@ -37,6 +40,12 @@ export default function ExplorePage({ persons, reportMapLayerEnabled, onOpenComm
   const [pendingBounds, setPendingBounds] = useState<PublicMapBounds | null>(null);
   const showMap = view === 'split' || view === 'map';
   const showList = view === 'split' || view === 'list' || view === 'cards';
+
+  useEffect(() => {
+    if (showMap) {
+      logPublicImpactEvent(PUBLIC_IMPACT_EVENT_NAMES.MAP_VIEW, { route_group: 'map' });
+    }
+  }, [showMap]);
 
   useEffect(() => {
     setReportLayerEnabled(reportMapLayerEnabled);
@@ -78,7 +87,7 @@ export default function ExplorePage({ persons, reportMapLayerEnabled, onOpenComm
         </div></div>
       </div>
       <div className={`f-explore-stage grid min-h-0 flex-1 ${view === 'split' ? 'md:grid-cols-[minmax(0,3fr)_minmax(320px,2fr)]' : 'grid-cols-1'}`}>
-        {showMap && <div className={`${view === 'split' ? 'hidden md:block' : ''} relative min-h-0`}><EmergencyMap onOpenCommunity={(id) => onOpenCommunity(id)} onOpenCaseNews={onOpenCaseNews} publicReports={reportLayerEnabled ? publicReports : []} selectedPublicReportId={selectedPublicReportId} onSelectPublicReport={selectPublicReport} onViewportChange={(bounds) => { const changed = Math.abs(bounds.west - appliedBounds.west) > 0.02 || Math.abs(bounds.east - appliedBounds.east) > 0.02 || Math.abs(bounds.south - appliedBounds.south) > 0.02 || Math.abs(bounds.north - appliedBounds.north) > 0.02 || Math.abs(bounds.zoom - appliedBounds.zoom) >= 1; setPendingBounds(changed ? bounds : null); }} /></div>}
+        {showMap && <div className={`${view === 'split' ? 'hidden md:block' : ''} relative min-h-0`}><EmergencyMap onOpenCommunity={(id) => onOpenCommunity(id)} onOpenCaseNews={onOpenCaseNews} publicReports={reportLayerEnabled ? publicReports : []} selectedPublicReportId={selectedPublicReportId} onSelectPublicReport={selectPublicReport} onViewportChange={(bounds) => { const changed = Math.abs(bounds.west - appliedBounds.west) > 0.02 || Math.abs(bounds.east - appliedBounds.east) > 0.02 || Math.abs(bounds.south - appliedBounds.south) > 0.02 || Math.abs(bounds.north - appliedBounds.north) > 0.02 || Math.abs(bounds.zoom - appliedBounds.zoom) >= 1; setPendingBounds(changed ? bounds : null); }} sourceTraceEnabled={sourceTraceEnabled} /></div>}
         {showList && <div className="flex min-h-0 flex-col border-l border-slate-200">{reportLayerEnabled && <PublicReportList items={publicReports} selectedId={selectedPublicReportId} onSelect={selectPublicReport} />}<div className="min-h-0 flex-1"><ExploreCaseList persons={persons} view={view} selectedPersonId={selectedPersonId} onSelect={selectPerson} /></div></div>}
       </div>
     </div>

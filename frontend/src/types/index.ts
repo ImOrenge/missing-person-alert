@@ -7,6 +7,27 @@ export type MissingPersonStatus = 'active' | 'found' | 'investigating';
 // 시간 범위
 export type TimeRange = '24h' | '7d' | '30d' | '90d' | '180d' | '1y' | '3y' | '5y' | 'all';
 
+export interface MissingPersonSourceTrace {
+  agency: string;
+  sourceId: string;
+  officialUrl?: string | null;
+  sourcePublishedAt?: number;
+  sourceUpdatedAt?: number;
+  lastCheckedAt?: number;
+}
+
+export interface MissingPersonVisibility {
+  public: boolean;
+  searchable: boolean;
+  shareable: boolean;
+}
+
+export interface MissingPersonSyncTrace {
+  sourceHash?: string;
+  lastRunId?: string;
+  normalizerVersion?: number;
+}
+
 // 실종자 정보
 export interface MissingPerson {
   id: string;
@@ -43,6 +64,10 @@ export interface MissingPerson {
     reportedAt: string;
   };
   source?: 'user_report' | 'api';
+  schemaVersion?: number;
+  sourceTrace?: MissingPersonSourceTrace;
+  visibility?: MissingPersonVisibility;
+  sync?: MissingPersonSyncTrace;
   updatedAt?: number;
   // API에서 마지막으로 확인된 시간 (자동 발견 처리용)
   lastSeenInAPI?: number;

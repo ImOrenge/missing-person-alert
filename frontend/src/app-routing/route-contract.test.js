@@ -9,6 +9,8 @@ describe('app route contract', () => {
     ['/community', '', 'community'],
     ['/news', '', 'news'],
     ['/statistics', '', 'statistics'],
+    ['/impact', '', 'impact'],
+    ['/about/data', '', 'about-data'],
     ['/reports/public', '', 'public-reports'],
     ['/profile', '', 'profile'],
     ['/reports', '', 'reports'],
@@ -32,6 +34,8 @@ describe('app route contract', () => {
     expect(getPathForView('report')).toBe('/reports/new');
     expect(getPathForView('public-reports')).toBe('/reports/public');
     expect(getPathForView('privacy')).toBe('/privacy');
+    expect(getPathForView('impact')).toBe('/impact');
+    expect(getPathForView('about-data')).toBe('/about/data');
   });
 
   it('removes internal UTM parameters while preserving functional deep-link state', () => {

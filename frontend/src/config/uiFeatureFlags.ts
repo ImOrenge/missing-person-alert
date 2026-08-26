@@ -13,6 +13,10 @@ export const UI_FEATURE_FLAG_NAMES = [
   'reports_public_timeline_enabled',
   'dashboard_personalization_enabled',
   'admin_banner_v2_enabled',
+  'case_source_trace_enabled',
+  'public_statistics_enabled',
+  'public_impact_enabled',
+  'public_data_admin_enabled',
 ] as const;
 
 export type UiFeatureFlagName = typeof UI_FEATURE_FLAG_NAMES[number];

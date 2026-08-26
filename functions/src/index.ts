@@ -79,6 +79,14 @@ import {
   SeoPageGroupName,
   SeoSourceName,
 } from "./seoMetrics";
+import {projectPublicMissingPerson} from "./publicMissingPersons";
+import {registerPublicStatisticsRoutes} from "./statistics/routes";
+import {registerPublicImpactRoutes} from "./impact/routes";
+import {registerPublicDataAdminRoutes} from "./publicDataAdminRoutes";
+export {importPoliceStatistics} from "./statistics/importStatistics";
+export {aggregateImpactDaily} from "./impact/aggregate";
+export {publishImpactMonth, rejectImpactMonth, updateDataQualityIssue} from "./impact/callables";
+export {renderSharePage} from "./share/renderSharePage";
 export {processReportMediaUpload} from "./reports/media-pipeline";
 export {enforceReportRetention} from "./reports/retention";
 export {enforceClosedCasePolicy} from "./reports/case-lifecycle";
@@ -283,6 +291,8 @@ app.use(express.json());
 registerPublicRuntimeConfigRoute(app, db);
 registerPublicSearchRoutes(app, db, {getAlgoliaConfig: getAlgoliaSearchConfig});
 registerPublicExploreRoutes(app, db);
+registerPublicStatisticsRoutes(app, db);
+registerPublicImpactRoutes(app, db);
 
 const SEO_SITEMAP_PAGE_SIZE = 1000;
 const SEO_SITEMAP_MAX_PAGES = 50;
@@ -1363,6 +1373,7 @@ registerAdminReportRoutes(app, {db, authenticate});
 registerNotificationSubscriptionRoutes(app, {db, authenticate});
 registerDashboardPreferenceRoutes(app, {db, authenticate});
 registerBannerRoutes(app, {db, authenticate});
+registerPublicDataAdminRoutes(app, {db, authenticate});
 
 const buildAnonymousName = () => {
   const random = Math.floor(Math.random() * 900) + 100;
@@ -2565,11 +2576,14 @@ app.get("/api/safe182/missing-persons", async (req: Request, res: Response) => {
       cacheStatus = "MISS";
       if (!publicMissingPersonCachePromise) {
         publicMissingPersonCachePromise = (async () => {
-          const snapshot = await db.collection("missingPersons")
-            .orderBy("updatedAt", "desc")
-            .limit(500)
-            .get();
-          const persons = snapshot.docs.map((document) => ({id: document.id, ...document.data()}));
+          const [snapshot, syncState] = await Promise.all([
+            db.collection("missingPersons").orderBy("updatedAt", "desc").limit(500).get(),
+            db.collection("syncMetadata").doc("safe182MissingPersons").get(),
+          ]);
+          const datasetLastCheckedAt = syncState.data()?.lastCheckedAt;
+          const persons = snapshot.docs
+            .map((document) => projectPublicMissingPerson(document.id, document.data(), datasetLastCheckedAt))
+            .filter((person): person is Record<string, unknown> => person !== null);
           publicMissingPersonCache = {
             expiresAt: Date.now() + PUBLIC_MISSING_PERSON_CACHE_TTL_MS,
             persons,
@@ -3289,8 +3303,18 @@ export const pollMissingPersonsAPI = onSchedule({
   timeoutSeconds: 540, // 9분
   secrets: [safe182EsntlId, safe182AuthKey],
 }, async () => {
+  const runId = `safe182_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+  const runRef = db.collection("sync_runs").doc(runId);
   try {
     logger.info("🔍 안전드림 182 API 정기 폴링 시작...");
+    await runRef.set({
+      type: "safe182_missing_persons",
+      trigger: "scheduled",
+      status: "running",
+      startedAt: FieldValue.serverTimestamp(),
+      completedAt: null,
+      counts: null,
+    });
 
     const esntlId = safe182EsntlId.value();
     const authKey = safe182AuthKey.value();
@@ -3372,6 +3396,11 @@ export const pollMissingPersonsAPI = onSchedule({
 
     if (allItems.length === 0) {
       logger.info("수집된 데이터 없음");
+      await runRef.set({
+        status: "success",
+        completedAt: FieldValue.serverTimestamp(),
+        counts: {receivedRows: 0, created: 0, updated: 0, unchanged: 0, closed: 0, failed: 0},
+      }, {merge: true});
       return;
     }
 
@@ -3398,16 +3427,41 @@ export const pollMissingPersonsAPI = onSchedule({
     const previousSnapshotFingerprint = syncStateSnapshot?.data()?.snapshotFingerprint;
 
     if (sourceSnapshotComplete && previousSnapshotFingerprint === snapshotFingerprint) {
-      await syncStateRef.set({
+      const unchangedBatch = db.batch();
+      unchangedBatch.set(syncStateRef, {
         lastCheckedAt: FieldValue.serverTimestamp(),
         lastSnapshotComplete: true,
         lastCollectedCount: transformedItems.length,
+        lastRunId: runId,
       }, {merge: true});
+      unchangedBatch.set(runRef, {
+        status: "unchanged",
+        sourceHash: snapshotFingerprint,
+        completedAt: FieldValue.serverTimestamp(),
+        counts: {receivedRows: transformedItems.length, created: 0, updated: 0, unchanged: transformedItems.length, closed: 0, failed: 0},
+      }, {merge: true});
+      await unchangedBatch.commit();
       logger.info(`✅ 폴링 완료: 공식 데이터 변경 없음 (${transformedItems.length}건, 문서 동기화 생략)`);
       return;
     }
 
+    let rawStoragePath: string | null = null;
+    if (sourceSnapshotComplete) {
+      const checkedAt = new Date();
+      const yyyy = String(checkedAt.getUTCFullYear());
+      const mm = String(checkedAt.getUTCMonth() + 1).padStart(2, "0");
+      const timestamp = checkedAt.toISOString().replace(/[:.]/g, "-");
+      rawStoragePath = `raw/safe182/cases/${yyyy}/${mm}/${timestamp}-${snapshotFingerprint.slice(0, 12)}.json`;
+      await admin.storage().bucket().file(rawStoragePath).save(Buffer.from(JSON.stringify(allItems)), {
+        metadata: {
+          contentType: "application/json; charset=utf-8",
+          metadata: {sourceId: "safe182_missing_persons", sourceHash: snapshotFingerprint, runId},
+        },
+      });
+    }
+
     let changedDocumentCount = 0;
+    let createdDocumentCount = 0;
     for (let offset = 0; offset < transformedItems.length; offset += 400) {
       const items = transformedItems.slice(offset, offset + 400);
       const refs = items.map((item) => missingPersonsRef.doc(item.id));
@@ -3419,8 +3473,17 @@ export const pollMissingPersonsAPI = onSchedule({
         const previousFingerprint = existingSnapshots[index]?.data()?.contentFingerprint;
         const meaningfulChange = !existingSnapshots[index]?.exists || previousFingerprint !== item.contentFingerprint;
         if (!meaningfulChange) continue;
+        if (!existingSnapshots[index]?.exists) createdDocumentCount += 1;
+        const previousSourceTrace = existingSnapshots[index]?.data()?.sourceTrace;
         batch.set(refs[index], {
           ...item,
+          sourceTrace: {
+            ...item.sourceTrace,
+            firstIngestedAt: previousSourceTrace?.firstIngestedAt || FieldValue.serverTimestamp(),
+            lastCheckedAt: FieldValue.serverTimestamp(),
+            sourceUpdatedAt: FieldValue.serverTimestamp(),
+          },
+          sync: {...item.sync, lastRunId: runId},
           sourceLastSeenAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),
         }, {merge: true});
@@ -3445,15 +3508,24 @@ export const pollMissingPersonsAPI = onSchedule({
       });
     }
 
-    for (let offset = 0; offset < noLongerPublished.length; offset += 400) {
+    for (let offset = 0; offset < noLongerPublished.length; offset += 200) {
       const batch = db.batch();
-      for (const doc of noLongerPublished.slice(offset, offset + 400)) {
+      for (const doc of noLongerPublished.slice(offset, offset + 200)) {
         batch.update(doc.ref, {
           seoVisible: false,
           status: "found",
           foundReason: "official_source_removed",
           removedFromSourceAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),
+        });
+        batch.set(doc.ref.collection("history").doc(runId), {
+          type: "status_change",
+          from: doc.data().status || "active",
+          to: "found",
+          reason: "official_source_removed",
+          sourceId: "safe182_missing_persons",
+          runId,
+          createdAt: FieldValue.serverTimestamp(),
         });
       }
       await batch.commit();
@@ -3463,16 +3535,38 @@ export const pollMissingPersonsAPI = onSchedule({
       lastCheckedAt: FieldValue.serverTimestamp(),
       lastSnapshotComplete: sourceSnapshotComplete,
       lastCollectedCount: transformedItems.length,
+      lastRunId: runId,
+      ...(sourceSnapshotComplete ? {sourceHash: snapshotFingerprint, rawStoragePath} : {}),
       ...(sourceSnapshotComplete ? {snapshotFingerprint} : {}),
       ...((changedDocumentCount > 0 || noLongerPublished.length > 0) ? {
         lastChangedAt: FieldValue.serverTimestamp(),
       } : {}),
+    }, {merge: true});
+    await runRef.set({
+      status: "success",
+      sourceHash: snapshotFingerprint,
+      storagePath: rawStoragePath,
+      completedAt: FieldValue.serverTimestamp(),
+      counts: {
+        receivedRows: transformedItems.length,
+        created: createdDocumentCount,
+        updated: Math.max(0, changedDocumentCount - createdDocumentCount),
+        unchanged: Math.max(0, transformedItems.length - changedDocumentCount),
+        closed: noLongerPublished.length,
+        failed: 0,
+      },
+      warnings: sourceSnapshotComplete ? [] : ["source_snapshot_incomplete"],
     }, {merge: true});
     seoPersonCache = null;
     publicMissingPersonCache = null;
     logger.info(`✅ 폴링 완료: ${changedDocumentCount}건 변경 반영, ${noLongerPublished.length}건 검색 노출 종료 (${transformedItems.length}건 확인)`);
   } catch (error: any) {
     logger.error("❌ 안전드림 API 폴링 오류:", error);
+    await runRef.set({
+      status: "failed",
+      completedAt: FieldValue.serverTimestamp(),
+      error: {code: error?.name || "unknown", message: String(error?.message || "unknown").slice(0, 500)},
+    }, {merge: true}).catch(() => undefined);
     throw error;
   }
 });
@@ -3573,9 +3667,26 @@ function transformAPIData(apiData: any) {
     hairColor: apiData.haircolrDscd || null,
     apiTargetCode: apiData.writngTrgetDscd || null,
   };
+  const contentFingerprint = crypto.createHash("sha256").update(JSON.stringify(stableData)).digest("hex");
   return {
     ...stableData,
-    contentFingerprint: crypto.createHash("sha256").update(JSON.stringify(stableData)).digest("hex"),
+    schemaVersion: 2,
+    sourceTrace: {
+      agency: "경찰청",
+      sourceId: "safe182_missing_persons",
+      sourceRecordKey: crypto.createHash("sha256").update(id).digest("hex"),
+      officialUrl: "https://www.safe182.go.kr/",
+    },
+    visibility: {
+      public: true,
+      searchable: true,
+      shareable: true,
+    },
+    sync: {
+      sourceHash: contentFingerprint,
+      normalizerVersion: 1,
+    },
+    contentFingerprint,
   };
 }
 
