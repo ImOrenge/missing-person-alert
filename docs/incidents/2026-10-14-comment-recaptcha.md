@@ -31,7 +31,12 @@ all four submission cases rejected with the CAPTCHA failure. After the fix,
 all four pass; token-generation failure still prevents any submission. No live
 comments, reports, media uploads, notifications or database records are created.
 Hosting CI now runs the regression test and rejects missing CAPTCHA site keys
-before building, without printing secret values.
+before building, without printing secret values. The first PR run passed all
+five regression tests but found REACT_APP_RECAPTCHA_SITE_KEY empty. The workflows
+now resolve secret override, repository variable, then the existing public
+production site key (verified from the live bundle). This is a public identifier,
+not RECAPTCHA_SECRET_KEY; it is safe to keep in source. The job-level value is
+shared by validation and build so an empty step-level override cannot erase it.
 
 ## Production observations before release
 
