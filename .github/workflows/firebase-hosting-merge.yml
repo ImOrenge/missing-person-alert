@@ -8,6 +8,8 @@ on:
       - main
 jobs:
   build_and_deploy:
+    # Live source is newer than this repository. Re-enable only after source alignment.
+    if: ${{ vars.PRODUCTION_SOURCE_ALIGNED == 'true' }}
     runs-on: ubuntu-latest
     env:
       # Public site key already served by missingalert.kr; never put the server secret here.
