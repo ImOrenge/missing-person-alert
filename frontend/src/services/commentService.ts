@@ -1,6 +1,6 @@
 import { getAuth } from 'firebase/auth';
 import { toast } from 'react-toastify';
-import { executeRecaptcha, loadRecaptchaScript } from '../utils/recaptcha';
+import { COMMENT_RECAPTCHA_ACTION, executeRecaptcha, loadRecaptchaScript } from '../utils/recaptcha';
 import type { CommentType } from '../types/comment';
 
 type TimestampObject = {
@@ -181,7 +181,7 @@ export const createComment = async (missingPersonId: string, payload: {
   await loadRecaptchaScript();
   const [token, recaptcha] = await Promise.all([
     getAuthToken(),
-    executeRecaptcha('comment_create')
+    executeRecaptcha(COMMENT_RECAPTCHA_ACTION)
   ]);
 
   const response = await fetch(`${API_BASE}/api/comments`, {
@@ -190,7 +190,7 @@ export const createComment = async (missingPersonId: string, payload: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`,
       'x-recaptcha-token': recaptcha,
-      'x-recaptcha-action': 'comment'
+      'x-recaptcha-action': COMMENT_RECAPTCHA_ACTION
     },
     body: JSON.stringify({
       missingPersonId,
@@ -218,7 +218,7 @@ export const createReply = async (commentId: string, payload: {
   await loadRecaptchaScript();
   const [token, recaptcha] = await Promise.all([
     getAuthToken(),
-    executeRecaptcha('comment_reply')
+    executeRecaptcha(COMMENT_RECAPTCHA_ACTION)
   ]);
 
   const response = await fetch(`${API_BASE}/api/comments/${commentId}/replies`, {
@@ -227,7 +227,7 @@ export const createReply = async (commentId: string, payload: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`,
       'x-recaptcha-token': recaptcha,
-      'x-recaptcha-action': 'comment'
+      'x-recaptcha-action': COMMENT_RECAPTCHA_ACTION
     },
     body: JSON.stringify({
       content: payload.content,
@@ -304,7 +304,7 @@ export const reportComment = async (commentId: string, reason: CommentType | 'sp
   await loadRecaptchaScript();
   const [token, recaptcha] = await Promise.all([
     getAuthToken(),
-    executeRecaptcha('comment_report')
+    executeRecaptcha(COMMENT_RECAPTCHA_ACTION)
   ]);
 
   const response = await fetch(`${API_BASE}/api/comments/${commentId}/report`, {
@@ -313,7 +313,7 @@ export const reportComment = async (commentId: string, reason: CommentType | 'sp
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token}`,
       'x-recaptcha-token': recaptcha,
-      'x-recaptcha-action': 'comment'
+      'x-recaptcha-action': COMMENT_RECAPTCHA_ACTION
     },
     body: JSON.stringify({
       reason,

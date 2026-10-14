@@ -9,15 +9,23 @@ on:
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
+    env:
+      # Public site key already served by missingalert.kr; never put the server secret here.
+      REACT_APP_RECAPTCHA_SITE_KEY: ${{ secrets.REACT_APP_RECAPTCHA_SITE_KEY || vars.REACT_APP_RECAPTCHA_SITE_KEY || '6Le1BuQrAAAAANWJsC0nfapV6okXrhCYRvTNw74F' }}
     steps:
       - uses: actions/checkout@v4
       - name: Install frontend dependencies
         run: npm ci --prefix frontend
+      - name: Test comment reCAPTCHA contract
+        env:
+          CI: true
+        run: npm test --prefix frontend -- --watchAll=false --runInBand --runTestsByPath src/services/commentService.test.ts
       - name: Verify frontend runtime secrets
         env:
           REACT_APP_GOOGLE_MAPS_API_KEY: ${{ secrets.REACT_APP_GOOGLE_MAPS_API_KEY }}
           REACT_APP_MAP_ID: ${{ secrets.REACT_APP_MAP_ID }}
         run: |
+          test -n "$REACT_APP_RECAPTCHA_SITE_KEY" || { echo "Missing REACT_APP_RECAPTCHA_SITE_KEY repository secret"; exit 1; }
           test -n "$REACT_APP_GOOGLE_MAPS_API_KEY" || { echo "Missing REACT_APP_GOOGLE_MAPS_API_KEY repository secret"; exit 1; }
           test -n "$REACT_APP_MAP_ID" || { echo "Missing REACT_APP_MAP_ID repository secret"; exit 1; }
       - name: Build frontend
@@ -25,7 +33,6 @@ jobs:
           REACT_APP_API_URL: ${{ secrets.REACT_APP_API_URL }}
           REACT_APP_GOOGLE_MAPS_API_KEY: ${{ secrets.REACT_APP_GOOGLE_MAPS_API_KEY }}
           REACT_APP_MAP_ID: ${{ secrets.REACT_APP_MAP_ID }}
-          REACT_APP_RECAPTCHA_SITE_KEY: ${{ secrets.REACT_APP_RECAPTCHA_SITE_KEY }}
           REACT_APP_FIREBASE_VAPID_KEY: ${{ secrets.REACT_APP_FIREBASE_VAPID_KEY }}
         run: npm run build --prefix frontend
       - uses: FirebaseExtended/action-hosting-deploy@v0
