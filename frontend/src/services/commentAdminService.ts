@@ -1,5 +1,5 @@
 import { getAuth } from 'firebase/auth';
-import { executeRecaptcha, loadRecaptchaScript } from '../utils/recaptcha';
+import { COMMENT_RECAPTCHA_ACTION, executeRecaptcha, loadRecaptchaScript } from '../utils/recaptcha';
 
 interface RawTimestamp {
   seconds?: number;
@@ -114,7 +114,7 @@ export const reportCommentAsAdmin = async (commentId: string, reason: 'spam' | '
   await loadRecaptchaScript();
   const [token, recaptchaToken] = await Promise.all([
     requireAdminToken(),
-    executeRecaptcha('comment_report_admin')
+    executeRecaptcha(COMMENT_RECAPTCHA_ACTION)
   ]);
 
   const response = await fetch(`${API_BASE}/api/comments/${commentId}/report`, {
@@ -123,7 +123,7 @@ export const reportCommentAsAdmin = async (commentId: string, reason: 'spam' | '
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
       'x-recaptcha-token': recaptchaToken,
-      'x-recaptcha-action': 'comment'
+      'x-recaptcha-action': COMMENT_RECAPTCHA_ACTION
     },
     body: JSON.stringify({ reason, description })
   });

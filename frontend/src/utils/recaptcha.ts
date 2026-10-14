@@ -3,6 +3,9 @@
  * 자동입력 방지 및 봇 공격 차단
  */
 
+// Keep token generation and the deployed comment verifier on the same action.
+export const COMMENT_RECAPTCHA_ACTION = 'comment';
+
 const RECAPTCHA_SITE_KEY = process.env.REACT_APP_RECAPTCHA_SITE_KEY ?? '';
 const RECAPTCHA_SCRIPT_URL = 'https://www.google.com/recaptcha/enterprise.js';
 const RECAPTCHA_SCRIPT_ID = 'recaptcha-enterprise-script';
