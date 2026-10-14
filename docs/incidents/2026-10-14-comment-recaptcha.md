@@ -1,5 +1,26 @@
 # Comment submission reCAPTCHA failure (2026-10-14)
 
+## Current status: fix merged, production rollout reverted
+
+PR #1 merged as 65d559c. Tests, preview and live Hosting deployment succeeded.
+However, the live frontend before this work was newer than repository main:
+after deployment the privacy-first community UI reverted to an older composer.
+The deployment comparison should have been made before publishing.
+
+At 2026-10-14 12:17 UTC the pre-incident Hosting version
+sites/missing-person-alram/versions/ac803c6ff19eaecc was restored, using the
+original observed main.4ea8c6ea.js as a required recovery check. The privacy-first
+community screen was verified after restoration. Consequently the original
+CAPTCHA defect is still present in production; the source fix is NOT currently
+live and no resolution email was sent.
+
+Automatic main Hosting deployment is paused unless repository variable
+PRODUCTION_SOURCE_ALIGNED is explicitly true. Align the actual production
+frontend source with this repository before re-enabling. The recovery workflow
+and script are narrowly guarded to this incident's original bundle and release
+window. No Functions deployment or live report/comment write was performed.
+Firebase plugin installation was declined; do not request it again.
+
 ## Confirmed defect and fix
 
 The community composer (`CommunityFeed.handleCreatePost`) and case comments
